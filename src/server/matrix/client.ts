@@ -127,7 +127,10 @@ export async function verifyOpenIdToken(token: string): Promise<string | null> {
   }
 }
 
-/** A user's display name on the homeserver, such as "Dr. Lena Hofer". Null if there is none or Matrix is not reachable. */
+/**
+ * A user's display name on the homeserver, such as "Dr. Lena Hofer". Null if there is none or Matrix is not reachable.
+ * Users set it themselves, so it comes back as one line of at most 100 characters: it ends up in emails and SMS.
+ */
 export async function displayName(userId: string): Promise<string | null> {
   try {
     const res = await raw<{ displayname?: string }>(
@@ -138,7 +141,13 @@ export async function displayName(userId: string): Promise<string | null> {
       undefined,
       5_000,
     );
-    return res.displayname?.trim() || null;
+    return (
+      res.displayname
+        ?.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 100) || null
+    );
   } catch {
     return null;
   }
