@@ -101,7 +101,7 @@ The link token and the 7 days start when the request goes out. **Send anyway** (
 
 Dr. Hofer sends requests and makes every decision about them in the ordy widget. `pnpm matrix:bootstrap` pins it in her room. There are no chat commands for requests.
 
-The widget gets a Matrix OpenID token from Element through the widget API and sends it as `Authorization: Bearer` with every tRPC call. The request service checks the token with Synapse (`verifyOpenIdToken` in `src/server/matrix/client.ts`). It accepts only users on its own homeserver, `MATRIX_SERVER_NAME`, which is `klinikum.example` in the demo. The checked Matrix ID is the actor in the audit log.
+The widget uses `matrix-widget-api` to get a Matrix OpenID token from Element after the user approves identity sharing, and sends it as `Authorization: Bearer` with every clinic tRPC call. Patient and audit data come only from `clinic.patients` and `clinic.audit`, both protected by `clinicProcedure`; neither page embeds that data in its initial HTML or React server payload. Tokens and the clinic query cache stay in memory and are discarded on expiry or unmount. The widget includes an **Audit log** tab. The request service checks the token with Synapse (`verifyOpenIdToken` in `src/server/matrix/client.ts`). It accepts only users on its own homeserver, `MATRIX_SERVER_NAME`, which is `klinikum.example` in the demo. The checked Matrix ID is the actor in the audit log.
 
 | Part of the widget | Effect |
 |---|---|
@@ -173,7 +173,7 @@ Before sending, the request service compares the words of the message with the p
 | `GET /r/{token}/answer` | Shows the patient, the requested document, the upload field, and fields for the patient's name and birth date. Only while the request is `verified`, and only for the person whose person number the request stores. |
 | `POST /r/{token}/answer` | Writes `answer_sent`, parses the document, runs the patient check, files the resources, and writes `answer_filed`. |
 | `GET /sms` | Shows every SMS the request service would have sent, like a phone screen. |
-| `GET /audit` | Shows the audit log for the demo. Bound to localhost. |
+| `GET /audit` | Audit UI; data requires a verified Matrix clinic identity. Use the widget's **Audit log** tab in Element. |
 
 The pages are Next.js routes. `/auth/login` and `/auth/callback` are route handlers, because they need real redirects and cookies. The answer page loads its data and sends the upload through tRPC (`eidProcedure`, the upload as `FormData`).
 
@@ -192,7 +192,7 @@ The parser reads headings and tables from markdown-it tokens and splits `Key: va
 
 The document kind picks the mapper. `lab report` goes to the lab mapper and `discharge report` goes to the rehab mapper. Any other kind becomes a DocumentReference with the text attached, held for Dr. Hofer.
 
-The parser lives in `src/server/documents/`. `parseDocument()` returns a typed `LabResult`, `RehabReport`, or generic document (`types.ts`), or a list of reasons the uploader can act on; it never throws on content. It converts the unit `10^9/L` to UCUM `10*9/L`, computes `N`, `H`, or `L` from the reference range, and reads a stay that names the month once, twice, or crosses a year. `checkAnswerPatient()` in `patient-check.ts` runs `samePatient()` on the document and on the form, and `uploadHash()` gives the SHA-256 that stays in the audit log when an upload is discarded.
+The parser lives in `src/server/documents/`. `parseDocument()` returns a typed `LabResult`, `RehabReport`, or generic document (`types.ts`), or a list of reasons the uploader can act on; it never throws on content and never returns a half-read document. It refuses a document without a heading or a readable `Patient` line, a known key on more than one line with different values (a second `Patient` line could slip past the patient check), a lab report without exactly one result table, a result that is not a number (also `1,245`, which could mean 1245 or 1.245), a LOINC code with a wrong format or check digit, and a missing or unreadable date or stay line that the kind needs. Inside a `##` section only known keys such as `Written by` count, so a sentence with a colon stays text. Outside the sections a line with an unknown key such as `Note:` is a field and free text, so it still reaches the conclusion. A byte order mark at the start is ignored. Person lines split off titles such as `Dr.`, `Dr.in`, or `Prim.` with the same rule as `nameWords`. It converts the unit `10^9/L` to UCUM `10*9/L`, computes `N`, `H`, or `L` from the reference range, and reads a stay that names the month once, twice, or crosses a year. `checkAnswerPatient()` in `patient-check.ts` runs `samePatient()` on the document and on the form. A patient record without a family name or birth date never matches. `uploadHash()` gives the SHA-256 that stays in the audit log when an upload is discarded.
 
 ### AI fallback (optional, cut first)
 
@@ -212,7 +212,7 @@ In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `
 
 `bindings` remembers which ID Austria person number answered as a given person at a given organisation. Its key is `given`, `family`, and `org`, so each person at an organisation has one person number. The audit log never holds document text.
 
-`src/server/requests/service.ts` is the only code that writes `requests`: `createRequest`, `sendAnyway`, `applyEvent`, `bindPerson`, and `expireDueRequests`. The tRPC router `request` (`create`, `get`, `list`, `cancel`, all `clinicProcedure`) and the portal pages use it. A network member sees and changes only the requests they sent; for anyone else, `get` and `cancel` answer "not found", and `list` leaves the request out. The audit entries of a request name the outside person and their person number, so they stay with the requester.
+`src/server/requests/service.ts` is the only code that writes `requests`: `createRequest`, `sendAnyway`, `applyEvent`, `bindPerson`, and `expireDueRequests`. The tRPC router `request` (`create`, `get`, `list`, `cancel`, all `clinicProcedure`) and the portal pages use it. A network member sees and changes only the requests they sent; for anyone else, `get` and `cancel` answer "not found", and `list` leaves the request out. `get` returns the request's audit entries, which name the outside person and their person number. The widget's **Audit log** tab (`clinic.audit`) still shows the whole log to every network member, for the demo.
 
 ## Audit log
 
@@ -229,17 +229,17 @@ Every entry has a UTC timestamp in `at`. The widget and `GET /audit` show the en
 
 `recordAudit()` in `src/server/audit/record.ts` writes every entry. Its types fix the outcome and the detail fields for each event and each misdelivery reason, and they hold ids, hashes, and check results only, never document text or the data of a wrong patient. An entry that belongs to a state change goes into the same transaction.
 
-The IP hash is an HMAC-SHA256 with a key derived from `ORDY_SECRET`, cut to 16 hex characters, because a plain hash of an IPv4 address can be reversed by trying all of them. Next.js fills `X-Forwarded-For` from the connection only when the client sent none. Without a proxy in front, the client can set it, so the hash is a hint, not proof.
+The IP hash is an HMAC-SHA256 with a key derived from `ORDY_SECRET`, cut to 16 hex characters, because a plain hash of an IPv4 address can be reversed by trying all of them. Without a private `ORDY_SECRET`, the entry says `ip unknown` instead. Next.js fills `X-Forwarded-For` from the connection only when the client sent none. Without a proxy in front, the client can set it, so the hash is a hint, not proof.
 
 ## Configuration
 
-All variables are read and validated in `src/env.ts`. Each one has a demo default, so `.env` is optional. `.env.example` lists them.
+Configuration is read in `src/env.ts`. Service addresses and demo accounts have defaults. Outside-person sessions require a private `ORDY_SECRET`; an empty, short, or known placeholder key cannot sign or authenticate sessions. Setup generates a random key and preserves it across reruns. `.env.example` lists the variables.
 
 | Variable | Default |
 |---|---|
 | `PUBLIC_URL` | `http://localhost:3010` |
 | `CLINIC_NAME` | `Klinikum Beispielstadt`, named in the portal and in every email and SMS |
-| `ORDY_SECRET` | a random value that `setup.sh` writes to `.env`. The fallback without `.env` is public, so use it only to try things. |
+| `ORDY_SECRET` | empty (outside-person sessions disabled); setup writes a private 32-byte random key to `.env` |
 | `DATABASE_URL` | `postgres://ordy:ordy@localhost:5433/ordy` |
 | `FHIR_BASE_URL` | `http://localhost:8090/fhir` |
 | `MATRIX_HOMESERVER_URL`, `MATRIX_SERVER_NAME` | `http://localhost:8008`, `klinikum.example` |
@@ -277,7 +277,7 @@ src/
     r/[token]/                outside portal: landing page and answer form. Login and answer planned, T07, T09
     auth/                     ID Austria login, planned, T07
     sms/page.tsx              SMS screen. Reading the SMS log planned, T06
-    audit/page.tsx            audit log for the demo, localhost only
+    audit/page.tsx            audit UI; authenticated data via clinic.audit
   components/ui/              shadcn/ui components, added with `pnpm dlx shadcn@4.22.1 add <name>`
   components/                 shared UI such as the portal frame
   lib/                        code shared by server and browser: document types, request input, `cn`

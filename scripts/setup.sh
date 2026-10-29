@@ -3,12 +3,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-[ -f .env ] || cp .env.example .env
-# ORDY_SECRET signs the outside person's session cookie. The placeholder from .env.example is public, so every setup gets its own.
-if grep -q '^ORDY_SECRET=change-me-to-a-long-random-string$' .env; then
-  secret=$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9')
-  sed -i.bak "s|^ORDY_SECRET=change-me-to-a-long-random-string\$|ORDY_SECRET=$secret|" .env && rm .env.bak
-fi
+pnpm install --frozen-lockfile
+pnpm exec tsx scripts/init-env.ts
 [ -f .env ] && set -a && . ./.env && set +a
 
 if [ ! -f docker/synapse/homeserver.yaml ]; then
@@ -57,7 +53,6 @@ register() {
 register "${MATRIX_HOFER_USER:-lena.hofer}" "${MATRIX_HOFER_PASSWORD:-hofer-demo-2026}"
 register "${MATRIX_BOT_USER:-ordy}" "${MATRIX_BOT_PASSWORD:-ordy-demo-2026}"
 
-pnpm install --frozen-lockfile
 pnpm db:migrate
 pnpm fhir:seed
 pnpm matrix:bootstrap

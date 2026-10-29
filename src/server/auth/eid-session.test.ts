@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { randomBytes } from "node:crypto";
+import { beforeEach, test } from "node:test";
+import { SignJWT } from "jose";
+
+import { env } from "@/env";
 
 import { type EidSession, gdaOidFromClaim, readEidSession, signEidSession } from "./eid-session";
+
+beforeEach(() => { env.ORDY_SECRET = randomBytes(32).toString("hex"); });
 
 const base64 = (text: string | Buffer) => Buffer.from(text).toString("base64");
 const gdaWithId = (id: string) => base64(JSON.stringify({ gda: { id: { oidIssuingAuthority: "1.2.40.0.34", id } } }));
@@ -64,4 +70,30 @@ test("a tampered or missing cookie reads as null", async () => {
   assert.equal((await readEidSession(cookie))?.requestId, 1);
   assert.equal(await readEidSession(tampered), null);
   assert.equal(await readEidSession(undefined), null);
+});
+
+test("public demo keys cannot forge a session, even if configured by an old installation", async () => {
+  for (const secret of ["ordy-dev-secret-change-me", "change-me-to-a-long-random-string"]) {
+    const forged = await new SignJWT(session).setProtectedHeader({ alg: "HS256" }).setIssuedAt().setExpirationTime("30m")
+      .sign(new TextEncoder().encode(secret));
+    assert.equal(await readEidSession(forged), null);
+    env.ORDY_SECRET = secret;
+    assert.equal(await readEidSession(forged), null);
+    assert.throws(() => signEidSession(session), /private ORDY_SECRET/);
+  }
+});
+
+test("missing and short secrets disable sessions", () => {
+  for (const secret of ["", "too-short", " ".repeat(40)]) {
+    env.ORDY_SECRET = secret;
+    assert.throws(() => signEidSession(session), /private ORDY_SECRET/);
+  }
+});
+
+test("expired sessions and tokens without expiry are rejected", async () => {
+  const key = new TextEncoder().encode(env.ORDY_SECRET);
+  const expired = await new SignJWT(session).setProtectedHeader({ alg: "HS256" }).setIssuedAt().setExpirationTime("-1s").sign(key);
+  const noExpiry = await new SignJWT(session).setProtectedHeader({ alg: "HS256" }).setIssuedAt().sign(key);
+  assert.equal(await readEidSession(expired), null);
+  assert.equal(await readEidSession(noExpiry), null);
 });

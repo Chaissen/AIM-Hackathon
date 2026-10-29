@@ -63,9 +63,9 @@ export const requestRouter = createTRPCRouter({
         ? { channel: "sms" as const, address: input.phone }
         : null;
     if (!contact) throw new TRPCError({ code: "BAD_REQUEST", message: "Enter an email address or a mobile number" });
-    // An empty set of name words passes every subset test of the name match (docs/IDENTITY.md), so "Dr." alone is no name.
+    // An empty set of name words passes every subset test of the name match (docs/IDENTITY.md), so "-" alone is no name.
     if (!nameWords(input.given).size || !nameWords(input.family).size) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: "Enter the person's given name and family name, not only a title" });
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Enter the person's given name and family name" });
     }
 
     const { request, token } = await createRequest(
