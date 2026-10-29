@@ -52,6 +52,11 @@ test("samePatient follows the rules in docs/IDENTITY.md", () => {
   for (const [name, birthDate, expected] of cases) assert.equal(samePatient(name, birthDate, maria), expected, `${name} ${birthDate}`);
 });
 
+test("a patient record without a family name or birth date never passes", () => {
+  assert.equal(samePatient("Maria", "1961-03-12", { family: "", given: ["Maria"], birthDate: "1961-03-12" }), false);
+  assert.equal(samePatient("Maria Beispiel", "", { ...maria, birthDate: "" }), false);
+});
+
 test("umlauts and titles do not break the match", () => {
   const mueller = { family: "Müller", given: ["Jürgen"], birthDate: "1950-05-05" };
   assert.equal(samePatient("Juergen Mueller", "1950-05-05", mueller), true);

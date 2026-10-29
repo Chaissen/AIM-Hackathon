@@ -10,6 +10,8 @@ export type ExpectedPatient = { family: string; given: string[]; birthDate: IsoD
 /** The name and birth date belong to the patient: same birth date, the family name present, and no foreign name words. */
 export function samePatient(docName: string, docBirthDate: string, patient: ExpectedPatient): boolean {
   const family = nameWords(patient.family);
+  // An empty family name passes every subset test, so a patient record without one never matches.
+  if (!family.size || !patient.birthDate) return false;
   const allNames = new Set([...family, ...nameWords(patient.given.join(" "))]);
   const docWords = nameWords(docName);
   return docBirthDate === patient.birthDate && isSubset(family, docWords) && isSubset(docWords, allNames);
