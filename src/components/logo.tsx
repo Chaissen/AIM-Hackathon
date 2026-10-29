@@ -1,0 +1,12 @@
+export function Logo() {
+  return (
+    <span className="flex items-center gap-2">
+      <svg width="22" height="22" viewBox="0 0 26 26" aria-hidden className="text-primary">
+        <rect x="2" y="3" width="15" height="6" rx="2" fill="currentColor" />
+        <rect x="9" y="10" width="15" height="6" rx="2" fill="currentColor" opacity=".55" />
+        <rect x="2" y="17" width="15" height="6" rx="2" fill="currentColor" opacity=".3" />
+      </svg>
+      <span className="text-lg font-bold tracking-tight">ordy</span>
+    </span>
+  );
+}
