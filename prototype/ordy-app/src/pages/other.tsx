@@ -168,24 +168,24 @@ export function OutboxPage() {
     return <>{a}<a className="font-medium text-primary underline underline-offset-2" href={`#portal-${msg.token}`} onClick={() => open(msg.id)}>{url.slice(0, 48)}…</a>{b}</>
   }
   return (
-    <AppShell wide crumbs={<span className="font-medium">Recipient's inbox</span>}>
+    <AppShell crumbs={<span className="font-medium">Recipient's inbox</span>}>
       <PageHeader title="Recipient's inbox" description="Demo only. This is what the lab or rehab clinic receives. Open a link to answer as them." />
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
         <Card className="gap-0 overflow-hidden py-0">
-          <div className="grid h-full min-h-[560px] md:grid-cols-[300px_minmax(0,1fr)]">
+          <div className="grid md:grid-cols-[240px_minmax(0,1fr)]">
             <div className="border-b md:border-r md:border-b-0">
               {emails.map((x: any) => (
-                <button key={x.id} onClick={() => open(x.id)} className={cn("grid w-full gap-1 border-b px-5 py-4 text-left hover:bg-muted/60", sel === x.id && "bg-muted")}>
+                <button key={x.id} onClick={() => open(x.id)} className={cn("grid w-full gap-0.5 border-b px-4 py-3 text-left text-sm hover:bg-muted/60", sel === x.id && "bg-muted")}>
                   <span className={cn("truncate", !x.read && "font-semibold")}>{x.to}</span>
-                  <span className="truncate text-sm text-muted-foreground">{x.subject} · {fmtDT(x.at)}</span>
+                  <span className="truncate text-xs text-muted-foreground">{x.subject} · {fmtDT(x.at)}</span>
                 </button>
               ))}
               {!emails.length && <p className="p-4 text-sm text-muted-foreground">No email yet.</p>}
             </div>
-            <div className="grid content-start gap-5 p-6 md:p-8">
+            <div className="grid content-start gap-4 p-5 text-sm">
               {m && m.kind === "email" ? (
                 <>
-                  <div className="grid gap-1"><span className="text-lg font-semibold">{m.subject}</span><span className="text-muted-foreground">To {m.to} · {fmtDT(m.at)}</span></div>
+                  <div className="grid gap-0.5"><span className="font-semibold">{m.subject}</span><span className="text-muted-foreground">To {m.to} · {fmtDT(m.at)}</span></div>
                   <p className="leading-relaxed whitespace-pre-wrap break-words">{linkify(m)}</p>
                   <div className="flex flex-wrap gap-2">
                     <Button asChild><a href={`#portal-${m.token}`}>Open the request</a></Button>
@@ -200,10 +200,10 @@ export function OutboxPage() {
             </div>
           </div>
         </Card>
-        <Card className="mx-auto w-full max-w-[360px] self-start rounded-[2.5rem] border-[6px]">
+        <Card className="mx-auto w-full max-w-[300px] rounded-[2rem] border-4">
           <CardHeader className="text-center"><CardTitle className="text-sm">Text messages</CardTitle><CardDescription>+43 660 000 0101</CardDescription></CardHeader>
-          <CardContent className="grid min-h-[480px] content-start gap-3">
-            {sms.map((x: any) => <div key={x.id} className="min-w-0 rounded-2xl rounded-bl-sm bg-muted p-4 leading-snug [overflow-wrap:anywhere]">{linkify(x)}<div className="mt-1 text-xs text-muted-foreground">{fmtDT(x.at)}</div></div>)}
+          <CardContent className="grid gap-3">
+            {sms.map((x: any) => <div key={x.id} className="min-w-0 rounded-2xl rounded-bl-sm bg-muted p-3 text-sm leading-snug [overflow-wrap:anywhere]">{linkify(x)}<div className="mt-1 text-xs text-muted-foreground">{fmtDT(x.at)}</div></div>)}
             {!sms.length && <p className="text-center text-sm text-muted-foreground">No messages.</p>}
           </CardContent>
         </Card>
