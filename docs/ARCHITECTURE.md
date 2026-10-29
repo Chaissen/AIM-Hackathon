@@ -189,6 +189,21 @@ The parser lives in `src/server/documents/`. `parseDocument()` returns a typed `
 
 If the parser cannot read a document, a language model may extract the same fields as JSON against a fixed schema. Every value and every LOINC code it returns must appear word for word in the document. The patient check stays deterministic. An answer read by the model always waits until Dr. Hofer accepts it in the widget.
 
+`parseWithFallback()` in `src/server/documents/fallback.ts` runs `parseDocument()` first and calls the model only when that fails and a reader is configured. The reader in `anthropic-reader.ts` calls the Anthropic Messages API with structured outputs (`AI_FALLBACK_MODEL`, default `claude-opus-5-5`, with the API's default fallback model on a policy decline). Without `ANTHROPIC_API_KEY` the fallback is off. Tests inject a stub reader and never call the network.
+
+1. The model fills `modelReadingSchema`: the fields of the parser types, each as the text written in the document, `""` when absent. It never computes anything.
+2. `unverifiedValues()` checks every returned text against the document. A value counts only if it appears with the same characters and case, white space aside, and not inside a longer word or number, so `301-6` does not match `6301-6`. Every lab row needs a LOINC code such as `6301-6` that appears this way.
+3. Code, not the model, derives the typed fields: numbers, UCUM units, ranges (`0.8 to 1.2` or `0.8 - 1.2`), `N`, `H`, or `L`, and dates. For this it also reads `12.03.1961`, `1961-03-12`, and `22.10.2026 08:10`, which the parser does not.
+
+| Outcome | Result | What happens |
+|---|---|---|
+| The parser reads the file | `{ ok: true, document }` | Normal flow, the model is not called |
+| No key, the model call fails, or its answer does not fit the schema | The parser's `{ ok: false, errors }` | As without the fallback |
+| Every value verified and the typed fields derived | `{ ok: true, document, held }` | Held for Dr. Hofer with the typed record |
+| A value is not in the document, or a field cannot be derived | `{ ok: false, errors, held }` | Held for Dr. Hofer with the file only. `held.unverified` lists the failing values |
+
+`held.reason` goes into the held notice and names no document content. `held.unverified` quotes document text, so it may appear in the widget but never in Matrix or the audit log. Accepting or rejecting a held answer is the widget's job (T05). Wiring the fallback into the upload is part of the answer flow, which calls `parseWithFallback(markdown, anthropicReader())` in place of `parseDocument(markdown)`. The test fixture `src/server/documents/fixtures/lab-result-maria-beispiel-other-format.md` is Maria's lab result with another heading, other key names, dotted dates, and ranges written with `-`.
+
 ## Storage
 
 The request service keeps three Postgres tables, defined with Drizzle in `src/server/db/schema.ts`. Migrations live in `drizzle/`. `audit_log` exists already. `requests` and `bindings` come with T04.
@@ -233,7 +248,8 @@ All variables are read and validated in `src/env.ts`. Each one has a demo defaul
 | `KEYCLOAK_ADMIN_USER`, `KEYCLOAK_ADMIN_PASSWORD` | `admin`, demo value (`pnpm citizen` only) |
 | `EHVD_URL` | `http://localhost:8095/` (planned, T15) |
 | `SMTP_HOST`, `SMTP_PORT`, `MAILPIT_API_URL` | `localhost`, `1025`, `http://localhost:8025` |
-| `ANTHROPIC_API_KEY` | unset, only for the optional AI fallback |
+| `ANTHROPIC_API_KEY` | unset, only for the optional AI fallback; unset turns it off |
+| `AI_FALLBACK_MODEL` | `claude-opus-5-5` |
 
 To switch to real ID Austria, change `OIDC_METADATA_URL`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET`. The simulator already sends the real claim names, which [Identity and misdelivery](IDENTITY.md) lists.
 
@@ -270,7 +286,7 @@ src/
     api/routers/              one router per area
     db/                       Drizzle schema and client
     fhir/                     FHIR client, mappers planned (T12 to T14)
-    documents/                parser and patient check (T10, T11), typed records in types.ts
+    documents/                parser and patient check (T10, T11), typed records in types.ts, AI fallback (T22)
     identity/names.ts         name words and subset test from Identity, shared by the patient check and T08
     ehvd/oid.ts               OID check shared by the login and pnpm citizen
     ehvd/                     eHVD SOAP client, planned (T15)

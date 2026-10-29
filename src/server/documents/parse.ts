@@ -85,7 +85,7 @@ export function parsePersonLine(raw: string): PersonLine | null {
   return { raw, titles, given: words.join(" "), family, details: details.filter(Boolean) };
 }
 
-const toNumber = (text: string) => (/^-?\d+(?:[.,]\d+)?$/.test(text.trim()) ? Number(text.trim().replace(",", ".")) : null);
+export const toNumber = (text: string) => (/^-?\d+(?:[.,]\d+)?$/.test(text.trim()) ? Number(text.trim().replace(",", ".")) : null);
 
 function labRows(table: NonNullable<Raw["table"]>, errors: string[]): LabRow[] {
   const col = Object.fromEntries(LAB_COLUMNS.map((c) => [c, table.header.indexOf(c)])) as Record<(typeof LAB_COLUMNS)[number], number>;
