@@ -66,11 +66,14 @@ export function auditActor(actor: Actor): AuditActor {
   }
 }
 
+// A key of its own, derived from ORDY_SECRET, so an IP hash never equals an HMAC made with the session cookie key.
+const ipKey = createHmac("sha256", env.ORDY_SECRET).update("ordy/ip-hash/v1").digest();
+
 /**
  * An anonymous browser, named by a keyed hash of its IP address. A plain SHA-256 of an IPv4 address
- * can be reversed by trying all of them, so the hash is an HMAC with ORDY_SECRET.
+ * can be reversed by trying all of them, so the hash is an HMAC with a secret key.
  */
 export function anonymousBrowser(ip: string | null): AuditActor {
   if (!ip) return { kind: "anonymous", id: "ip unknown" };
-  return { kind: "anonymous", id: `ip ${createHmac("sha256", env.ORDY_SECRET).update(ip).digest("hex").slice(0, 16)}` };
+  return { kind: "anonymous", id: `ip ${createHmac("sha256", ipKey).update(ip).digest("hex").slice(0, 16)}` };
 }

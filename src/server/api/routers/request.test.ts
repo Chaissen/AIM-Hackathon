@@ -13,7 +13,7 @@ import { capabilities } from "@/server/fhir/client";
 import { findAnswerContext, findPublicRequest } from "@/server/portal/data";
 import { TransitionError } from "@/server/requests/lifecycle";
 import { LINK_TTL_MS } from "@/server/requests/link-token";
-import { applyEvent, createRequest, findRequestByToken, type NewRequest, sendAnyway } from "@/server/requests/service";
+import { applyEvent, bindPerson, createRequest, findRequestByToken, type NewRequest, sendAnyway } from "@/server/requests/service";
 
 // Runs against the Postgres from DATABASE_URL and deletes its rows afterwards. Skipped when Postgres is not running.
 // Request ids still move on, so run `pnpm reset` before a demo.
@@ -168,7 +168,7 @@ test("the link shows only the requester and the clinic and writes link_opened", 
   assert.equal(opened.outcome, "shown");
   assert.match(opened.actor, /^ip [0-9a-f]{16}$/);
 
-  assert.equal(await findAnswerContext(token, request.id), null, "no patient before the identity check");
+  assert.equal(await findAnswerContext(token, { requestId: request.id, personNumber: "GH:eva" }), null, "no patient before the identity check");
   assert.equal(await findPublicRequest("not-a-token", { ip: null }), null);
   assert.equal(await findPublicRequest("A".repeat(43), { ip: null }), null);
 });
@@ -233,10 +233,11 @@ test("the third failed identity check locks the link", { skip: noDb }, async () 
   assert.equal(await findPublicRequest(token, { ip: null }), null);
 });
 
-test("after the identity check the answer page gets the patient from FHIR", { skip: noFhir }, async () => {
+test("after the identity check only the bound person gets the patient from FHIR", { skip: noFhir }, async () => {
   const { request, token } = await seed();
-  await applyEvent(db, request.id, "identity_pass");
-  const ctx = await findAnswerContext(token, request.id);
+  const eva = { requestId: request.id, personNumber: "GH:eva" };
+  await applyEvent(db, request.id, "identity_pass", (tx) => bindPerson(tx, request.id, eva.personNumber));
+  const ctx = await findAnswerContext(token, eva);
   assert.deepEqual(ctx, {
     requester: "Dr. Lena Hofer",
     clinic: env.CLINIC_NAME,
@@ -244,5 +245,12 @@ test("after the identity check the answer page gets the patient from FHIR", { sk
     docType: "lab-result",
     patient: { name: "Maria Beispiel", birthDate: "1961-03-12" },
   });
-  assert.equal(await findAnswerContext(token, request.id + 1), null, "the session is bound to one request");
+  assert.equal(await findAnswerContext(token, { ...eva, requestId: request.id + 1 }), null, "the session is bound to one request");
+  assert.equal(await findAnswerContext(token, { ...eva, personNumber: "GH:thomas" }), null, "a session of someone else");
+});
+
+test("a verified request bound to nobody shows no patient", { skip: noDb }, async () => {
+  const { request, token } = await seed();
+  await applyEvent(db, request.id, "identity_pass");
+  assert.equal(await findAnswerContext(token, { requestId: request.id, personNumber: "GH:eva" }), null);
 });

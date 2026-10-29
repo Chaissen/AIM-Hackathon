@@ -45,10 +45,17 @@ export async function findPublicRequest(token: string, { ip }: { ip: string | nu
   return live ? publicPart(request) : null;
 }
 
-/** The request bound to the ID Austria session, only while it is `verified`. Reads the patient from the FHIR server. */
-export async function findAnswerContext(token: string, requestId: number): Promise<AnswerContext | null> {
+/**
+ * The request bound to the ID Austria session, only while it is `verified` and only for the person it is bound to.
+ * Reads the patient from the FHIR server.
+ */
+export async function findAnswerContext(
+  token: string,
+  session: { requestId: number; personNumber: string },
+): Promise<AnswerContext | null> {
   const request = await findRequestByToken(db, token);
-  if (request?.id !== requestId || request.state !== "verified") return null;
+  if (request?.id !== session.requestId || request.state !== "verified") return null;
+  if (!request.personNumber || request.personNumber !== session.personNumber) return null;
 
   const patient = await fhirFetch<Patient>(`Patient/${encodeURIComponent(request.patientId)}`);
   if (!patient.birthDate) throw new Error(`Patient ${request.patientId} has no birth date`);

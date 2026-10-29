@@ -51,6 +51,8 @@ export const requests = pgTable("requests", {
   // SHA-256 of the link token, hex. The token itself is never stored.
   linkHash: text("link_hash").notNull().unique(),
   failedChecks: integer("failed_checks").notNull().default(0),
+  // The bPK of the person who passed the identity check, or who was held and then accepted. Only this person may answer.
+  personNumber: text("person_number"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   // Dr. Hofer's room and the event that starts the request's thread there (T05).
