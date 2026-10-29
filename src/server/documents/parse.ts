@@ -14,17 +14,21 @@ const KEY_LINE = /^([A-Z][A-Za-z ]{0,40}): (.+)$/;
 const LAB_COLUMNS = ["Test", "Result", "Unit", "Reference range", "LOINC code"] as const;
 const TITLE_WORD = /^(dr|mag|prof|univ|med|di|ing|dipl)\.?(-\w+\.?)*$/i;
 
+type Table = { header: string[]; rows: string[][] };
+
 type Raw = {
   title: string | null;
   fields: Record<string, string>;
-  table: { header: string[]; rows: string[][] } | null;
+  /** Keys that appear on more than one line. */
+  duplicates: Set<string>;
+  tables: Table[];
   free: string[];
   sections: { heading: string; lines: string[] }[];
 };
 
-/** One pass over the markdown-it tokens: heading, key lines, the first table, free text, and `##` sections. */
+/** One pass over the markdown-it tokens: heading, key lines, tables, free text, and `##` sections. */
 function collect(markdown: string): Raw {
-  const raw: Raw = { title: null, fields: {}, table: null, free: [], sections: [] };
+  const raw: Raw = { title: null, fields: {}, duplicates: new Set(), tables: [], free: [], sections: [] };
   const tokens = md.parse(markdown, {});
   let section: Raw["sections"][number] | null = null;
 
@@ -39,22 +43,25 @@ function collect(markdown: string): Raw {
       i += 2;
     } else if (t.type === "table_open") {
       const { table, end } = readTable(tokens, i);
-      raw.table ??= table;
+      raw.tables.push(table);
       i = end;
     } else if (t.type === "inline" && tokens[i - 1]?.type === "paragraph_open") {
       const inList = tokens[i - 2]?.type === "list_item_open";
       for (const line of t.content.split("\n").map((l) => l.trim()).filter(Boolean)) {
         const m = line.match(KEY_LINE);
         // Split at the first ": " (docs). In a section only the known keys count.
-        if (!inList && m && (!section || KNOWN_KEYS.has(m[1]))) raw.fields[m[1]] = m[2].trim();
-        else addText(inList ? `- ${line}` : line);
+        if (!inList && m && (!section || KNOWN_KEYS.has(m[1]))) {
+          // A second `Patient:` line could carry another patient past the patient check, so no key may repeat.
+          if (Object.hasOwn(raw.fields, m[1])) raw.duplicates.add(m[1]);
+          else raw.fields[m[1]] = m[2].trim();
+        } else addText(inList ? `- ${line}` : line);
       }
     }
   }
   return raw;
 }
 
-function readTable(tokens: Token[], start: number): { table: Raw["table"]; end: number } {
+function readTable(tokens: Token[], start: number): { table: Table; end: number } {
   const header: string[] = [];
   const rows: string[][] = [];
   let row: string[] | null = null;
@@ -87,7 +94,7 @@ export function parsePersonLine(raw: string): PersonLine | null {
 
 const toNumber = (text: string) => (/^-?\d+(?:[.,]\d+)?$/.test(text.trim()) ? Number(text.trim().replace(",", ".")) : null);
 
-function labRows(table: NonNullable<Raw["table"]>, errors: string[]): LabRow[] {
+function labRows(table: Table, errors: string[]): LabRow[] {
   const col = Object.fromEntries(LAB_COLUMNS.map((c) => [c, table.header.indexOf(c)])) as Record<(typeof LAB_COLUMNS)[number], number>;
   const missing = LAB_COLUMNS.filter((c) => col[c] < 0);
   if (missing.length) {
@@ -147,6 +154,7 @@ export function parseDocument(markdown: string): ParseResult {
   const birthDate = born ? parseDate(born) : null;
   if (!patientLine) errors.push('The file has no line such as "Patient: Maria Beispiel, born 12 March 1961".');
   else if (!patientName?.trim() || !birthDate) errors.push(`The patient line "${patientLine}" needs a name and a birth date such as "born 12 March 1961".`);
+  for (const key of raw.duplicates) errors.push(`The file has more than one "${key}:" line.`);
 
   const base = {
     title: raw.title ?? "",
@@ -168,9 +176,12 @@ export function parseDocument(markdown: string): ParseResult {
   if (kind === "lab report") {
     const sampleTaken = dateTime("Sample taken");
     const reported = dateTime("Reported");
-    if (!raw.table) errors.push("The lab report has no result table.");
-    const rows = raw.table ? labRows(raw.table, errors) : [];
-    if (raw.table && !rows.length && !errors.length) errors.push("The result table has no rows.");
+    // A second table would be values the mappers never file, so the results must be in exactly one.
+    const table = raw.tables.length === 1 ? raw.tables[0] : null;
+    if (!raw.tables.length) errors.push("The lab report has no result table.");
+    else if (!table) errors.push("The lab report has more than one table. Put all results in one table.");
+    const rows = table ? labRows(table, errors) : [];
+    if (table && !table.rows.length) errors.push("The result table has no rows.");
     document = {
       ...base,
       type: "lab-result",
