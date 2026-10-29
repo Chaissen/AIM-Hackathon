@@ -42,6 +42,8 @@ echo "Waiting for Postgres ..."
 until docker compose exec -T postgres pg_isready -U ordy -d ordy >/dev/null 2>&1; do sleep 2; done
 echo "Waiting for HAPI FHIR (first start takes ~1 min) ..."
 until curl -fsS http://localhost:8090/fhir/metadata >/dev/null 2>&1; do sleep 3; done
+echo "Waiting for Keycloak and the idaustria-sim realm ..."
+until curl -fsS http://localhost:8080/realms/idaustria-sim/.well-known/openid-configuration >/dev/null 2>&1; do sleep 2; done
 
 register() {
   docker compose exec -T synapse register_new_matrix_user -c /data/homeserver.yaml \
