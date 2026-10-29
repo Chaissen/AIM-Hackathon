@@ -135,7 +135,7 @@ The medication list stays inside the attached text. One MedicationStatement per 
 | `target` | Every clinical resource filed for this answer |
 | `occurredDateTime` | When the outside person pressed send |
 | `recorded` | When the request service filed the answer |
-| `policy` | The identity policy that applied, for example `urn:aim-t2:identity-policy:lab-result:v1` |
+| `policy` | The identity policy that applied, for example `urn:aim-t2:identity-policy:lab-result:v1`. When Dr. Hofer accepted a held answer, also `urn:aim-t2:identity-policy:accepted-by-requester:v1`. |
 | `agent` | `author` for the document author. `informant` for the sender when the sender is someone else. `onBehalfOf` for the organisation. |
 | `signature` | Type `1.2.840.10065.1.12.1.10` (Identity Witness Signature) from `urn:iso-astm:E1762-95:2013`. `when` is the login time, `who` is the Organization "ID Austria (simulation)", `sigFormat` is `application/jose`, and `data` holds the ID token in base64. |
 | `text` | A short narrative for people who open the resource |

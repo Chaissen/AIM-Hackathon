@@ -260,9 +260,9 @@ The client lives in `src/server/ehvd/` and reads `EHVD_URL`, default `http://loc
 |---|---|
 | Organisation | `GdaSearch` with the organisation name as `surname` and `ehvdstatus` `Aktiv`. One hit gives the organisation's OID and its `mail` domain. |
 | Address check before sending | The domain of the email address Dr. Hofer typed must equal the domain of the organisation's `mail`. `labor-kanaI.example` does not. |
-| Person, with the GDA claim from the login | `GetGDA` with the OID from the claim. The entry must be active, have the role the document type needs, and list the organisation in `memberof`. |
-| Person, without the claim | `GdaSearch` with `firstname`, `surname`, and `ehvdstatus` `Aktiv`. Exactly one hit that is a member of the organisation confirms the role. Here the name is the only link. |
-| Lab result | Person: `role` 158 or 159 with `specialisation` `1.2.40.0.34.3.1.10.20:19`, member of the named lab |
-| Rehab report | Organisation: active, `role` 300 or 301. The sender is usually not listed. |
+| Responsible person, when it is the sender and the login carried the GDA claim | `GetGDA` with the OID from the claim. The entry must be active, have the role the document type needs, and list the organisation in `memberof`. |
+| Responsible person, otherwise | `GdaSearch` with `firstname` and `surname` from the document and `ehvdstatus` `Aktiv`. Exactly one hit that is a member of the organisation confirms the role. Here the name is the only link. |
+| Lab result | The physician under `Validated by`: `role` 158 or 159 with `specialisation` `1.2.40.0.34.3.1.10.20:19`, member of the lab |
+| Rehab report | The physician under `Written by`: `elgaRole` 700, member of the rehab clinic. The rehab clinic: active, `role` 300 or 301. The sender is usually not listed. |
 
-If the eHVD cannot be reached or returns 6003, the result is a hold, never a pass. FHIR Practitioner and Organization resources carry the eHVD OID as identifier, see [FHIR model](FHIR.md#practitioner-and-organization).
+These are the release check from [Identity and misdelivery](IDENTITY.md#who-may-release-a-document). If the eHVD cannot be reached or returns 6003, the result is a hold, never a pass. FHIR Practitioner and Organization resources carry the eHVD OID as identifier, see [FHIR model](FHIR.md#practitioner-and-organization).

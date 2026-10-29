@@ -61,13 +61,13 @@ Nobody can ask ID Austria in advance whether a person has an ID Austria. We lear
 
 ### 2. Which identity check do you require for each type of document and why?
 
-Every outside person sees the patient's name once the identity check passes. So every document type needs an ID Austria login at the full function level, which means the person's identity was checked in person once. The other checks depend on who answers and on what the document is used for.
+Every outside person sees the patient's name once the identity check passes. So every document type needs an ID Austria login at the full function level, which means the person's identity was checked in person once. On top of that, only the people professionally responsible for the content may release a document. Under Austrian law, that is a physician whose specialty covers the content (§§ 2, 31 ÄrzteG 1998). So we check the sender and, separately, the person responsible for the content. [Identity and misdelivery](IDENTITY.md#who-may-release-a-document) has the legal basis.
 
 | Document | Who answers | Checks | Why |
 |---|---|---|---|
-| Lab result | The named lab physician | ID Austria full, name match, eHVD lists the person as an active specialist in lab medicine who is a member of the named lab (found through the eHVD entry from the login, or by name), person number if known | Lab values feed straight into a clinical decision, here the clearance for a procedure. A qualified physician must stand behind them. |
-| Rehab discharge report | The named discharge manager | ID Austria full, name match, the link went to the phone number Dr. Hofer gave, eHVD lists the rehab clinic | The sender is administrative staff and is not in a professional register. The report names its medical author, and we file that physician as the author. |
-| Any document from a person the eHVD cannot confirm | The named person | ID Austria full, name match. The answer waits until Dr. Hofer accepts it in Matrix. | We cannot confirm the role, so a human decides. |
+| Lab result | The named lab physician | Sender: ID Austria full, name match, person number if known. Release: the physician under `Validated by` is an active specialist in medical and chemical laboratory diagnostics and a member of the lab, per eHVD (through the eHVD entry from the login, or by name). | A medical lab report is a specialist's document. Lab values feed straight into a clinical decision, here the clearance for a procedure. |
+| Rehab discharge report | The named discharge manager | Sender: ID Austria full, name match, the link went to the phone number Dr. Hofer gave. Release: the physician under `Written by` is an active physician and a member of the rehab clinic, and the clinic is an active hospital, per eHVD. | The discharge letter is the rehab clinic's medical document (§ 24 KAKuG), and the signing physician is responsible for it. The discharge manager only sends it. We file the physician as author and the sender as informant. |
+| Any document whose responsible person the eHVD cannot confirm | The named person | Sender checks as above. The answer is held until Dr. Hofer accepts it in Matrix. | The eHVD can be out of date, and another specialty can be responsible for some tests, so a physician decides. |
 
 ### 3. Which FHIR resources do you create and how do they reference each other and the patient?
 
@@ -125,12 +125,12 @@ Clinical approach and impact. A lab physician answers with the report she alread
 
 Technical quality. Every filed resource passes the HL7 validator. The identity check combines a state ID, a name match, a professional register, and a stored person number, and it costs the outside person about one minute.
 
-Execution. The whole flow runs on both scenario requests. New documents in the same Markdown format go through the same parser. Jury members can create their own outside people on the Keycloak sign-up page.
+Execution. The whole flow runs on both scenario requests. New documents in the same Markdown format go through the same parser. Jury members can add their own outside people with one command, `pnpm citizen`. The simulated ID Austria has no sign-up page, because real identities come from the state and anyone could otherwise sign up as "Eva Brandl".
 
 ## Limitations
 
 - ID Austria is simulated. Real use needs a registered service provider and the phone-app step.
-- For people without an eHVD entry from ID Austria, the name is the only link between the login and the eHVD, because the eHVD has no birth date. It is not documented whether a private service provider like us would receive the eHVD attribute from ID Austria.
+- Without `urn:eidgvat:attributes.gda` in the login, the name is the only link between an ID Austria login and an eHVD entry, because the eHVD has no birth date. It is not documented whether a private service provider like us would receive that attribute from ID Austria.
 - A second person with the same name and the same role who receives the link would pass the first time. The stored person number closes this gap from the second request on.
 - The parser expects the scenario's Markdown format and English dates. Other documents go to Dr. Hofer as held answers.
 
@@ -140,7 +140,7 @@ Execution. The whole flow runs on both scenario requests. New documents in the s
 - [ID Austria predefined test identities](https://www.id-austria.gv.at/de/developer/testen/vordefinierte-testidentit%C3%A4ten)
 - [USP: registering as an ID Austria service provider](https://www.usp.gv.at/hilfe-und-support/verfahrensrechte/registrierung-als-ida-sp.html)
 - [eHVD web service handbook v2.4](https://www.gesundheit.gv.at/dam/gesundheitgvat/professional/it-services/ehvd/eHVD-ServicehandbuchV2.4.pdf)
+- [ID Austria: connecting via OpenID Connect](https://www.id-austria.gv.at/de/developer/anbinden/anbindung-mit-openid-connect)
 - [ID Austria: attribute "Gesundheitsdiensteanbieter"](https://www.id-austria.gv.at/de/developer/registrieren/personenmerkmale/Gesundheitsdiensteanbieter)
-- [Signicat: ID Austria OIDC attributes](https://developer.signicat.com/identity-methods/id-austria/attributes-reference/id-austria-attributes-oidc/)
 
 [Identity and misdelivery](IDENTITY.md) lists all sources on ID Austria, and [eHVD](EHVD.md) all sources on the eHVD.

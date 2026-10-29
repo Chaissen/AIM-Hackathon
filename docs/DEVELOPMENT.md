@@ -18,7 +18,7 @@ How to set up, start, reset, and extend ordy. [Architecture](ARCHITECTURE.md) ex
 | pnpm | 10 (pinned in `package.json`) | `corepack enable`, then `pnpm -v` |
 | Java | 17 or newer, only for the HL7 validator | `java -version` |
 
-These ports must be free: 3010 (ordy), 5433 (Postgres), 8008 (Synapse), 8081 (Element), 8090 (HAPI), 8025 and 1025 (Mailpit). Keycloak will use 8080 (T02) and the eHVD mock 8095 (T23).
+These ports must be free: 3010 (ordy), 5433 (Postgres), 8008 (Synapse), 8081 (Element), 8090 (HAPI), 8025 and 1025 (Mailpit), 8080 (Keycloak). The eHVD mock will use 8095 (T23).
 
 ## First-time setup
 
@@ -32,7 +32,7 @@ cd AIM-Hackathon
 
 1. copies `.env.example` to `.env` if there is no `.env`
 2. generates the Synapse config in `docker/synapse/` once, for the closed server `klinikum.example`
-3. starts the containers from `docker-compose.yml` and waits for Synapse, Postgres, and HAPI (HAPI needs about a minute the first time)
+3. starts the containers from `docker-compose.yml` and waits for Synapse, Postgres, HAPI, and Keycloak with the `idaustria-sim` realm (HAPI needs about a minute the first time)
 4. registers the Matrix users `@lena.hofer` (Dr. Hofer) and `@ordy` (the bot)
 5. runs `pnpm install`, then the database migrations (`pnpm db:migrate`)
 6. loads Maria Beispiel from `track/scenario/patient.json` into HAPI (`pnpm fhir:seed`)
@@ -56,6 +56,7 @@ Check that everything works:
 1. http://localhost:3010 shows three green dots for database, FHIR server, and Matrix.
 2. Open Element at http://localhost:8081, log in as `lena.hofer` / `hofer-demo-2026`, and open "Dr. Hofer · Outside documents".
 3. Send `!status`. The bot answers with the same three checks.
+4. Open http://localhost:8080/realms/idaustria-sim/.well-known/openid-configuration. It shows the issuer `http://localhost:8080/realms/idaustria-sim`. This is the simulated ID Austria. Its test logins, such as `eva.brandl` / `demo-eva`, work once the answer portal (T07) exists. Keycloak's account page does not work in this realm, on purpose.
 
 | Service | URL | Login |
 |---|---|---|
@@ -65,8 +66,10 @@ Check that everything works:
 | HAPI FHIR | http://localhost:8090/fhir | |
 | Synapse | http://localhost:8008 | bot: `ordy` / `ordy-demo-2026` |
 | Postgres | `postgres://ordy:ordy@localhost:5433/ordy` | `ordy` / `ordy` |
-| Keycloak (T02) | http://localhost:8080 | test citizens in [Identity and misdelivery](IDENTITY.md) |
+| Keycloak (simulated ID Austria) | http://localhost:8080 | `admin` / `keycloak-demo-2026` for the admin console |
 | eHVD mock (T23) | http://localhost:8095/ehvd.wsdl | none, IP allowlist as in [eHVD](EHVD.md) |
+
+Test citizens for the ID Austria login: `eva.brandl` / `demo-eva`, `stefan.kern` / `demo-stefan`, `thomas.wagner` / `demo-thomas`, `anna.huber` / `demo-anna`, and `eva.brandl2` / `demo-eva2`. [Identity and misdelivery](IDENTITY.md#test-citizens) says whom each one plays. There is no sign-up page. `pnpm citizen` adds more people.
 
 ## Commands
 
@@ -77,15 +80,17 @@ Check that everything works:
 | `pnpm build`, then `pnpm start` | Production build, then both processes without reload |
 | `pnpm typecheck` | Generates the Next.js route types, then runs `tsc` |
 | `pnpm lint` | ESLint |
+| `pnpm test` | The `*.test.ts` files under `src/`, with Node's test runner through tsx |
 | `pnpm reset` | Empties Postgres, HAPI, and Mailpit, and reloads the patient. Matrix users and the room stay. Run it before every demo. |
 | `pnpm db:generate --name <name>` | Writes a SQL migration to `drizzle/` from the schema |
 | `pnpm db:migrate` | Applies pending migrations |
 | `pnpm db:studio` | Opens Drizzle Studio to browse the database |
 | `pnpm fhir:seed` | Puts `Patient/maria-beispiel` on HAPI |
 | `pnpm matrix:bootstrap` | Creates the room if needed, joins Dr. Hofer and the bot, and pins the widget |
+| `pnpm citizen --given Peter --family Muster --birthdate 1970-01-01` | Adds a test citizen to the simulated ID Austria and prints the username, password, bPK, and eHVD OID. [Identity and misdelivery](IDENTITY.md#add-a-test-citizen) lists the options. |
 | `./scripts/setup.sh` | Full one-time setup, see above |
 
-Before every push: `pnpm typecheck && pnpm lint && pnpm build`.
+Before every push: `pnpm typecheck && pnpm lint && pnpm test && pnpm build`.
 
 ## Change the database
 
@@ -186,5 +191,6 @@ This deletes all local data. Matrix logins in open Element tabs stop working.
 | `UNAUTHORIZED` from a clinic procedure | The request has no valid Matrix OpenID token. The widget must get one from Element first. |
 | No widget in the room | Run `pnpm matrix:bootstrap`, reload Element, and allow the widget when Element asks |
 | Element shows an old room or no room | Log out and in again. The room alias is `#outside-documents:klinikum.example`. |
+| Keycloak ignores a change to the realm file | It imports the realm only when it does not exist yet. Run `docker compose up -d --force-recreate keycloak`. This also removes people added with `pnpm citizen`. |
 | Strange Next.js errors after switching branches | Stop `pnpm dev`, delete `.next/`, start again |
 | `pnpm install` refuses a package | It is younger than 7 days. Pick an older version. |

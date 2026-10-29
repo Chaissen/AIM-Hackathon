@@ -1,0 +1,385 @@
+{
+  "realm": "idaustria-sim",
+  "displayName": "ID Austria (Simulation)",
+  "enabled": true,
+  "accessTokenLifespan": 600,
+  "ssoSessionIdleTimeout": 600,
+  "internationalizationEnabled": false,
+  "bruteForceProtected": true,
+  "components": {
+    "org.keycloak.userprofile.UserProfileProvider": [
+      {
+        "providerId": "declarative-user-profile",
+        "subComponents": {},
+        "config": {
+          "kc.user.profile.config": [
+            "{\"attributes\": [{\"name\": \"username\", \"displayName\": \"${username}\", \"validations\": {\"length\": {\"min\": 3, \"max\": 255}, \"username-prohibited-characters\": {}, \"up-username-not-idn-homograph\": {}}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false}, {\"name\": \"email\", \"displayName\": \"${email}\", \"validations\": {\"email\": {}, \"length\": {\"max\": 255}}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false}, {\"name\": \"firstName\", \"displayName\": \"${firstName}\", \"validations\": {\"length\": {\"max\": 255}, \"person-name-prohibited-characters\": {}}, \"required\": {\"roles\": [\"user\"]}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\"]}, \"multivalued\": false}, {\"name\": \"lastName\", \"displayName\": \"${lastName}\", \"validations\": {\"length\": {\"max\": 255}, \"person-name-prohibited-characters\": {}}, \"required\": {\"roles\": [\"user\"]}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\"]}, \"multivalued\": false}, {\"name\": \"gda\", \"displayName\": \"eHVD healthcare provider entry (urn:eidgvat:attributes.gda)\", \"permissions\": {\"view\": [\"admin\"], \"edit\": [\"admin\"]}, \"multivalued\": false}], \"groups\": [{\"name\": \"user-metadata\", \"displayHeader\": \"User metadata\", \"displayDescription\": \"Attributes, which refer to user metadata\"}], \"unmanagedAttributePolicy\": \"ADMIN_EDIT\"}"
+          ]
+        }
+      }
+    ]
+  },
+  "clientScopes": [
+    {
+      "name": "profile",
+      "description": "OpenID Connect built-in scope: profile",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "consent.screen.text": "${profileScopeConsentText}",
+        "display.on.consent.screen": "true"
+      },
+      "protocolMappers": [
+        {
+          "name": "family name",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "introspection.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "user.attribute": "lastName",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "family_name",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "given name",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "introspection.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "user.attribute": "firstName",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "given_name",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "bpk",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "bpk",
+            "id.token.claim": "true",
+            "access.token.claim": "false",
+            "claim.name": "urn:pvpgvat:oidc\\.bpk",
+            "jsonType.label": "String",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "birthdate",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "introspection.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "user.attribute": "birthdate",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "birthdate",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    },
+    {
+      "name": "basic",
+      "description": "OpenID Connect scope for add all basic claims to the token",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "false",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "auth_time",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usersessionmodel-note-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.session.note": "AUTH_TIME",
+            "id.token.claim": "true",
+            "introspection.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "auth_time",
+            "jsonType.label": "long"
+          }
+        },
+        {
+          "name": "sub",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-sub-mapper",
+          "consentRequired": false,
+          "config": {
+            "introspection.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "defaultDefaultClientScopes": [
+    "basic",
+    "profile"
+  ],
+  "defaultOptionalClientScopes": [],
+  "clients": [
+    {
+      "clientId": "request-service",
+      "name": "ordy request service",
+      "surrogateAuthRequired": false,
+      "enabled": true,
+      "alwaysDisplayInConsole": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "request-service-demo-2026",
+      "redirectUris": [
+        "http://localhost:3010/auth/callback"
+      ],
+      "webOrigins": [],
+      "notBefore": 0,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "publicClient": false,
+      "frontchannelLogout": false,
+      "protocol": "openid-connect",
+      "attributes": {
+        "realm_client": "false",
+        "post.logout.redirect.uris": "+"
+      },
+      "authenticationFlowBindingOverrides": {},
+      "fullScopeAllowed": false,
+      "nodeReRegistrationTimeout": -1,
+      "protocolMappers": [
+        {
+          "name": "pvp version",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "consentRequired": false,
+          "config": {
+            "id.token.claim": "true",
+            "access.token.claim": "false",
+            "claim.name": "urn:pvpgvat:oidc\\.pvp_version",
+            "jsonType.label": "String",
+            "claim.value": "2.2",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "eIDAS level",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "loa",
+            "id.token.claim": "true",
+            "access.token.claim": "false",
+            "claim.name": "urn:pvpgvat:oidc\\.eid_citizen_qaa_eidas_level",
+            "jsonType.label": "String",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "IDA level",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "ida_level",
+            "id.token.claim": "true",
+            "access.token.claim": "false",
+            "claim.name": "urn:pvpgvat:oidc\\.eid_ida_level",
+            "jsonType.label": "String",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "identity status level",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "consentRequired": false,
+          "config": {
+            "id.token.claim": "true",
+            "access.token.claim": "false",
+            "claim.name": "urn:pvpgvat:oidc\\.eid_identity_status_level",
+            "jsonType.label": "String",
+            "claim.value": "http://eid.gv.at/eID/status/testidentity",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "gda",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "gda",
+            "id.token.claim": "true",
+            "access.token.claim": "false",
+            "claim.name": "urn:eidgvat:attributes\\.gda",
+            "jsonType.label": "String",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ],
+      "defaultClientScopes": [
+        "basic",
+        "profile"
+      ],
+      "optionalClientScopes": []
+    }
+  ],
+  "users": [
+    {
+      "username": "eva.brandl",
+      "enabled": true,
+      "firstName": "Eva",
+      "lastName": "Brandl",
+      "attributes": {
+        "birthdate": [
+          "1979-05-14"
+        ],
+        "bpk": [
+          "GH:Njtp64gB10hpR5sYe6HxgmOQJk0="
+        ],
+        "loa": [
+          "http://eidas.europa.eu/LoA/high"
+        ],
+        "ida_level": [
+          "urn:eidgvat:eid.status.full"
+        ],
+        "gda": [
+          "eyJnZGEiOnsiaWQiOnsib2lkSXNzdWluZ0F1dGhvcml0eSI6IjEuMi40MC4wLjM0IiwiaWQiOiIxLjIuNDAuMC4zNC4zLjIuOTkuMS4yIn0sInN0YXR1cyI6eyJlaHZkc3RhdHVzIjoiQWt0aXYiLCJlbGdhc3RhdHVzIjoiQWt0aXYifSwiZmlyc3RuYW1lIjoiRXZhIiwic3VybmFtZSI6IkJyYW5kbCIsInRpdGxlIjoiRHIuIiwiZGVzY3JpcHRpb24iOlsiUmVnaXN0cmllcnVuZ3NzdGVsbGU6w5ZzdGVycmVpY2hpc2NoZSDDhHJ6dGVrYW1tZXIiXSwicm9sZXMiOnsicm9sZSI6WyIxLjIuNDAuMC4zNC41LjI6MTU5Il0sImVsZ2FSb2xlIjpbIjEuMi40MC4wLjM0LjUuMzo3MDAiXSwic3BlY2lhbGlzYXRpb24iOlsiMS4yLjQwLjAuMzQuMy4xLjEwLjIwOjE5Il19LCJ0aW1lc3RhbXBzIjp7ImFkZCI6IjIwMTktMDMtMDEiLCJtb2RpZnkiOiIyMDI2LTAxLTE1In19fQ=="
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "demo-eva",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "stefan.kern",
+      "enabled": true,
+      "firstName": "Stefan",
+      "lastName": "Kern",
+      "attributes": {
+        "birthdate": [
+          "1986-02-03"
+        ],
+        "bpk": [
+          "GH:RF6PDuDy01ECq3HwWVdsGZpNH4A="
+        ],
+        "loa": [
+          "http://eidas.europa.eu/LoA/high"
+        ],
+        "ida_level": [
+          "urn:eidgvat:eid.status.full"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "demo-stefan",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "thomas.wagner",
+      "enabled": true,
+      "firstName": "Thomas",
+      "lastName": "Wagner",
+      "attributes": {
+        "birthdate": [
+          "1982-07-21"
+        ],
+        "bpk": [
+          "GH:QQujzdblDRAvHut5+pFJYO61p04="
+        ],
+        "loa": [
+          "http://eidas.europa.eu/LoA/high"
+        ],
+        "ida_level": [
+          "urn:eidgvat:eid.status.full"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "demo-thomas",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "anna.huber",
+      "enabled": true,
+      "firstName": "Anna",
+      "lastName": "Huber",
+      "attributes": {
+        "birthdate": [
+          "1990-11-30"
+        ],
+        "bpk": [
+          "GH:2pgjERTxixGQaVB2gPMDZjQeI84="
+        ],
+        "loa": [
+          "http://eidas.europa.eu/LoA/high"
+        ],
+        "ida_level": [
+          "urn:eidgvat:eid.status.full"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "demo-anna",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "eva.brandl2",
+      "enabled": true,
+      "firstName": "Eva",
+      "lastName": "Brandl",
+      "attributes": {
+        "birthdate": [
+          "1968-09-09"
+        ],
+        "bpk": [
+          "GH:QqRyJqno/aFVJYjMxkWpDJWj878="
+        ],
+        "loa": [
+          "http://eidas.europa.eu/LoA/high"
+        ],
+        "ida_level": [
+          "urn:eidgvat:eid.status.full"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "demo-eva2",
+          "temporary": false
+        }
+      ]
+    }
+  ],
+  "registrationAllowed": false
+}
