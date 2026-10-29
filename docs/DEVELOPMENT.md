@@ -128,7 +128,7 @@ const trpc = useTRPC();
 const cancel = useMutation(trpc.request.cancel.mutationOptions());
 ```
 
-Call it from the bot or a script:
+Call it from a script:
 
 ```ts
 const caller = createCaller(createContext({ kind: "clinic", mxid: "@lena.hofer:klinikum.example" }));
