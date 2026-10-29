@@ -30,7 +30,7 @@ cd AIM-Hackathon
 
 `setup.sh` is safe to run again. It:
 
-1. copies `.env.example` to `.env` if there is no `.env`
+1. copies `.env.example` to `.env` if there is no `.env`, and replaces the placeholder `ORDY_SECRET` with a random value
 2. generates the Synapse config in `docker/synapse/` once, for the closed server `klinikum.example`
 3. starts the containers from `docker-compose.yml` and waits for Synapse, Postgres, HAPI, and Keycloak with the `idaustria-sim` realm (HAPI needs about a minute the first time)
 4. registers the Matrix users `@lena.hofer` (Dr. Hofer) and `@ordy` (the bot)

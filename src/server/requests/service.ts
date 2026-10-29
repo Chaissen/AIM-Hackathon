@@ -103,6 +103,15 @@ export async function listRequests(db: Db, requester: string, limit = 100): Prom
 }
 
 /**
+ * Stores the bPK of the person the request is bound to, in the `then` of `identity_pass` or `identity_hold`.
+ * The answer page and the upload accept only this person afterwards.
+ */
+export async function bindPerson(tx: Tx, id: number, personNumber: string): Promise<RequestRow> {
+  const [row] = await tx.update(requests).set({ personNumber }).where(eq(requests.id, id)).returning();
+  return row;
+}
+
+/**
  * Applies a lifecycle event and stores the new state. Locks the row, so two events on one request run one after the other.
  * Returns null for an unknown request and throws a TransitionError if the state does not accept the event.
  * `identity_fail` also counts the failed check, and the third one locks the link.

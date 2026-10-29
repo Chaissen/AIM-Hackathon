@@ -12,7 +12,8 @@ import { displayName } from "@/server/matrix/client";
 import { type RequestEvent, taskStatus, TransitionError } from "@/server/requests/lifecycle";
 import { applyEvent, createRequest, getRequest, listRequests, type RequestRow } from "@/server/requests/service";
 
-const byId = z.object({ id: z.number().int().positive() });
+// Postgres `serial` ends at 2^31 - 1; a larger id would reach the database as an error.
+const byId = z.object({ id: z.number().int().positive().max(2_147_483_647) });
 
 // What network members see of a request. An allowlist, so the link hash never leaves the server.
 const summary = (r: RequestRow) => ({

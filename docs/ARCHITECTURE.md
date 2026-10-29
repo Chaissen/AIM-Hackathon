@@ -170,7 +170,7 @@ Before sending, the request service compares the words of the message with the p
 | `GET /r/{token}` | Writes `link_opened`. Shows the requesting doctor and clinic and a **Log in with ID Austria** button. |
 | `GET /auth/login` | Redirects to Keycloak with `state`, `nonce`, PKCE, and `prompt=login`. |
 | `GET /auth/callback` | Swaps the code for tokens, verifies the ID token, runs the identity checks, and writes `identity_checked`. |
-| `GET /r/{token}/answer` | Shows the patient, the requested document, the upload field, and fields for the patient's name and birth date. Only after the identity check passes. |
+| `GET /r/{token}/answer` | Shows the patient, the requested document, the upload field, and fields for the patient's name and birth date. Only while the request is `verified`, and only for the person whose person number the request stores. |
 | `POST /r/{token}/answer` | Writes `answer_sent`, parses the document, runs the patient check, files the resources, and writes `answer_filed`. |
 | `GET /sms` | Shows every SMS the request service would have sent, like a phone screen. |
 | `GET /audit` | Shows the audit log for the demo. Bound to localhost. |
@@ -204,15 +204,15 @@ The request service keeps three Postgres tables, defined with Drizzle in `src/se
 
 | Table | Columns |
 |---|---|
-| `requests` | `id`, `doc_type`, `patient_id`, `given`, `family`, `org`, `channel`, `address`, `requester`, `requester_name`, `state`, `link_hash`, `failed_checks`, `created_at`, `expires_at`, `matrix_room`, `matrix_event` |
+| `requests` | `id`, `doc_type`, `patient_id`, `given`, `family`, `org`, `channel`, `address`, `requester`, `requester_name`, `state`, `link_hash`, `failed_checks`, `person_number`, `created_at`, `expires_at`, `matrix_room`, `matrix_event` |
 | `bindings` | `given`, `family`, `org`, `person_number`, `practitioner_id`, `first_verified_at` |
 | `audit_log` | `id`, `at`, `event`, `request_id`, `actor_kind`, `actor`, `outcome`, `detail` |
 
-In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `org` are the person as Dr. Hofer typed them. `requester` is the Matrix ID of the network member who sent the request, and `requester_name` is their Matrix display name at that time, for example "Dr. Lena Hofer", as one line of at most 100 characters. The portal and the messages use it. Members set their display name themselves, so one member could pose as another in a message; the audit log always keeps the Matrix ID. A production version takes the name from a directory the members cannot edit, or sets `enable_set_displayname: false` in Synapse. `link_hash` is the hex SHA-256 of the link token. `matrix_room` and `matrix_event` hold the room and the first notice of the request's thread (T05).
+In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `org` are the person as Dr. Hofer typed them. `requester` is the Matrix ID of the network member who sent the request, and `requester_name` is their Matrix display name at that time, for example "Dr. Lena Hofer", as one line of at most 100 characters. The portal and the messages use it. Members set their display name themselves, so one member could pose as another in a message; the audit log always keeps the Matrix ID. A production version takes the name from a directory the members cannot edit, or sets `enable_set_displayname: false` in Synapse. `link_hash` is the hex SHA-256 of the link token. `person_number` is the bPK of the person who passed the identity check, or who was held and then accepted; the login stores it with `bindPerson` in the same transaction as the event. Only that person sees the answer page and may answer. `matrix_room` and `matrix_event` hold the room and the first notice of the request's thread (T05).
 
 `bindings` remembers which ID Austria person number answered as a given person at a given organisation. Its key is `given`, `family`, and `org`, so each person at an organisation has one person number. The audit log never holds document text.
 
-`src/server/requests/service.ts` is the only code that writes `requests`: `createRequest`, `sendAnyway`, `applyEvent`, and `expireDueRequests`. The tRPC router `request` (`create`, `get`, `list`, `cancel`, all `clinicProcedure`) and the portal pages use it. A network member sees and changes only the requests they sent; for anyone else, `get` and `cancel` answer "not found", and `list` leaves the request out. The audit entries of a request name the outside person and their person number, so they stay with the requester.
+`src/server/requests/service.ts` is the only code that writes `requests`: `createRequest`, `sendAnyway`, `applyEvent`, `bindPerson`, and `expireDueRequests`. The tRPC router `request` (`create`, `get`, `list`, `cancel`, all `clinicProcedure`) and the portal pages use it. A network member sees and changes only the requests they sent; for anyone else, `get` and `cancel` answer "not found", and `list` leaves the request out. The audit entries of a request name the outside person and their person number, so they stay with the requester.
 
 ## Audit log
 
@@ -229,7 +229,7 @@ Every entry has a UTC timestamp in `at`. The widget and `GET /audit` show the en
 
 `recordAudit()` in `src/server/audit/record.ts` writes every entry. Its types fix the outcome and the detail fields for each event and each misdelivery reason, and they hold ids, hashes, and check results only, never document text or the data of a wrong patient. An entry that belongs to a state change goes into the same transaction.
 
-The IP hash is an HMAC-SHA256 with `ORDY_SECRET`, cut to 16 hex characters, because a plain hash of an IPv4 address can be reversed by trying all of them. Next.js fills `X-Forwarded-For` from the connection only when the client sent none. Without a proxy in front, the client can set it, so the hash is a hint, not proof.
+The IP hash is an HMAC-SHA256 with a key derived from `ORDY_SECRET`, cut to 16 hex characters, because a plain hash of an IPv4 address can be reversed by trying all of them. Next.js fills `X-Forwarded-For` from the connection only when the client sent none. Without a proxy in front, the client can set it, so the hash is a hint, not proof.
 
 ## Configuration
 
@@ -239,7 +239,7 @@ All variables are read and validated in `src/env.ts`. Each one has a demo defaul
 |---|---|
 | `PUBLIC_URL` | `http://localhost:3010` |
 | `CLINIC_NAME` | `Klinikum Beispielstadt`, named in the portal and in every email and SMS |
-| `ORDY_SECRET` | demo value, set your own in `.env` |
+| `ORDY_SECRET` | a random value that `setup.sh` writes to `.env`. The fallback without `.env` is public, so use it only to try things. |
 | `DATABASE_URL` | `postgres://ordy:ordy@localhost:5433/ordy` |
 | `FHIR_BASE_URL` | `http://localhost:8090/fhir` |
 | `MATRIX_HOMESERVER_URL`, `MATRIX_SERVER_NAME` | `http://localhost:8008`, `klinikum.example` |
