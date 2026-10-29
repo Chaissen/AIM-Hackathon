@@ -88,6 +88,9 @@ Test citizens for the ID Austria login: `eva.brandl` / `demo-eva`, `stefan.kern`
 | `pnpm fhir:seed` | Puts `Patient/maria-beispiel` on HAPI |
 | `pnpm matrix:bootstrap` | Creates the room if needed, joins Dr. Hofer and the bot, and pins the widget |
 | `pnpm citizen --given Peter --family Muster --birthdate 1970-01-01` | Adds a test citizen to the simulated ID Austria and prints the username, password, bPK, and eHVD OID. [Identity and misdelivery](IDENTITY.md#add-a-test-citizen) lists the options. |
+| `pnpm validate` | Runs the HL7 validator on every resource named in an `answer_filed` entry and counts the errors. `pnpm validate <file or folder>` checks hand-made resources instead. Needs Java. [FHIR](FHIR.md#validation) has the details. |
+| `pnpm audit:check` | Lists the six audit event types per request, each with who, what, and when. `--request <id>` checks one request. |
+| `pnpm scenario` | Runs request 1, M1 to M3, and request 2 against the running stack and writes the four metric results to `out/metrics/metrics.md`. `--no-validate` skips the validator. [Whitepaper](WHITEPAPER.md#how-we-measure-the-metrics) has the details. |
 | `./scripts/setup.sh` | Full one-time setup, see above |
 
 Before every push: `pnpm typecheck && pnpm lint && pnpm test && pnpm build`.
@@ -159,7 +162,7 @@ To open answer links on a phone in the same network, set `PUBLIC_URL` to your co
 
 ## HL7 validator
 
-The validator is not in git. Download it once:
+The validator is not in git. `pnpm validate` downloads it to `tools/` when it is missing. To download it by hand:
 
 ```bash
 mkdir -p tools
@@ -167,7 +170,7 @@ curl -L -o tools/validator_cli.jar https://github.com/hapifhir/org.hl7.fhir.core
 java -jar tools/validator_cli.jar some-resource.json -version 4.0
 ```
 
-It checks LOINC codes against tx.fhir.org, so it needs internet access. `pnpm validate` (T18) will run it on every filed resource.
+It checks LOINC codes against tx.fhir.org, so it needs internet access. `pnpm validate` runs it on every filed resource, and `pnpm validate <file>` on a hand-made one. The first run takes a few minutes, because the validator downloads the FHIR packages to `~/.fhir`.
 
 ## Clean slate
 

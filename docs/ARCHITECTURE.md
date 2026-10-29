@@ -212,7 +212,7 @@ The request service keeps three Postgres tables, defined with Drizzle in `src/se
 | `answer_filed` | The request service | FHIR resource ids and the Provenance id |
 | `misdelivery_caught` | Whoever triggered it | `address_mismatch`, `wrong_person`, or `patient_mismatch` |
 
-Every entry has a UTC timestamp in `at`. The widget and `GET /audit` show the entries.
+Every entry has a UTC timestamp in `at`. The `outcome` column holds the short result: `pass`, `hold`, or `fail` for `identity_checked`, and the kind for `misdelivery_caught`. `answer_filed` lists the filed resources in `detail.resources` as `Type/id` and the Provenance in `detail.provenance`; `pnpm validate` reads them. The widget and `GET /audit` show the entries.
 
 ## Configuration
 
@@ -276,6 +276,7 @@ src/
     ehvd/                     eHVD SOAP client, planned (T15)
     matrix/client.ts          Matrix client-server API
     matrix/notices.ts         notice texts and notifyRoom for Dr. Hofer's room
+    metrics/                  metrics from audit rows, validator runner, metrics table (T17, T18)
     auth/eid-session.ts       outside person's session cookie
     portal/data.ts            data loaders for the portal and SMS pages, stubs until T04, T06, T07
   bot/                        Matrix bot process and commands
@@ -285,8 +286,9 @@ scripts/
   bootstrap-matrix.ts         room, invites, widget
   seed-fhir.ts                Maria Beispiel into HAPI
   citizen.ts                  add a test citizen to the simulated ID Austria
-  validate.ts                 planned, T18: HL7 validator on every filed resource
-  audit-check.ts              planned, T17: six event types per request
+  validate.ts                 HL7 validator on every filed resource or on given files (T18)
+  audit-check.ts              six event types per request, each with who, what, and when (T17)
+  scenario.ts                 request 1, M1 to M3, request 2, and the four metrics in one run (T17, T18)
 track/                        track brief, scenario, patient.json, and test documents
 ```
 

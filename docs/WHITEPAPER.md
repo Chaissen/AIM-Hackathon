@@ -112,12 +112,14 @@ Keycloak does not simulate the phone-app confirmation that real ID Austria uses.
 
 | Metric | Target | How we measure |
 |---|---|---|
-| FHIR validation | 0 errors | `pnpm validate` (`scripts/validate.ts`) exports every resource filed during a run and runs the HL7 validator with `-version 4.0`. It counts issues with severity `error`. |
-| Effort for the outside person | 0 installs, 0 accounts, under 2 minutes | Someone new answers request 1 with a stopwatch running from opening the email in Mailpit to pressing send. The audit times from `link_opened` to `answer_sent` back up the stopwatch. We count ID Austria as an existing state ID, not as an account with us. |
-| Misdeliveries caught | 3 of 3 | We run M1, M2, and M3 from `track/scenario/misdelivery.md` on request 1. Each must show the outcome that the test names and a `misdelivery_caught` audit entry. |
-| Audit coverage | 6 of 6 | `pnpm audit:check` (`scripts/audit-check.ts`) lists the six event types for a request, each with who, what, and when. |
+| FHIR validation | 0 errors | `pnpm validate` (`scripts/validate.ts`) exports every resource filed during a run and runs the HL7 validator with `-version 4.0`. It counts issues with severity `error` or `fatal`. |
+| Effort for the outside person | 0 installs, 0 accounts, under 2 minutes | Someone new answers request 1 with a stopwatch running from opening the email in Mailpit to pressing send. The audit times back up the stopwatch: from the last `link_opened` before the first `answer_sent` to that `answer_sent`, so an earlier opening by someone else does not count. We count ID Austria as an existing state ID, not as an account with us. |
+| Misdeliveries caught | 3 of 3 | We run M1, M2, and M3 from `track/scenario/misdelivery.md` on request 1. Each must show the outcome that the test names and a `misdelivery_caught` audit entry: `wrong_person` for M1 and M2, `patient_mismatch` for M3. |
+| Audit coverage | 6 of 6 | `pnpm audit:check` (`scripts/audit-check.ts`) lists the six event types for each request. An event type counts when one of its entries has who (`actor` and `actor_kind`), what (`outcome`), and when (`at`). |
 
-The scripts are planned. [Timeline](TIMELINE.md) has the owners.
+`pnpm scenario` (`scripts/scenario.ts`) produces all four in one run against the running stack. It runs request 1, M2 and M3 on request 1, M1 on its own request, and request 2. It checks each step in the audit log, on HAPI, and in Matrix, and then measures. Only audit entries written during the run count. It writes the table for the README to `out/metrics/metrics.md` and the details to `out/metrics/scenario.json`. The stopwatch test with someone new (T19) stays a separate, human measurement.
+
+Each step of the runner drives the flow (`act`) and then checks the result (`verify`). The checks are done. The parts that drive the flow wait for the request core (T04), email and SMS (T06), the login and identity checks (T07, T08), the address check (T15), the answer flow (T09), and the filing (T13). Until they land, the runner reports those steps as blocked and the metrics that depend on them as not measured.
 
 ## How this answers the judging questions
 
