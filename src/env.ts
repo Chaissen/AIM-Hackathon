@@ -17,7 +17,11 @@ const schema = z.object({
   // Simulated ID Austria (Keycloak, task T02). Real ID Austria only changes these three values.
   OIDC_METADATA_URL: z.url().default("http://localhost:8080/realms/idaustria-sim/.well-known/openid-configuration"),
   OIDC_CLIENT_ID: z.string().default("request-service"),
-  OIDC_CLIENT_SECRET: z.string().optional(),
+  // Older .env files carry an empty OIDC_CLIENT_SECRET=, which must fall back to the demo secret too.
+  OIDC_CLIENT_SECRET: z.preprocess((value) => (value === "" ? undefined : value), z.string().default("request-service-demo-2026")),
+  // Keycloak admin login for `pnpm citizen`, the values from docker-compose.yml. The app itself never needs them.
+  KEYCLOAK_ADMIN_USER: z.string().default("admin"),
+  KEYCLOAK_ADMIN_PASSWORD: z.string().default("keycloak-demo-2026"),
   SMTP_HOST: z.string().default("localhost"),
   SMTP_PORT: z.coerce.number().int().default(1025),
   MAIL_FROM: z.string().default("ordy · Klinikum Beispielstadt <ordy@klinikum.example>"),
