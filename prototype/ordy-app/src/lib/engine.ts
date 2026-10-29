@@ -135,8 +135,8 @@ const tick = (sec) => { if (clock != null) clock += sec * 1000; };
 function blankState() {
   return { seq: 1, requests: [], audit: [], bindings: [], outbox: [], matrix: [], citizens: [], sessions: {}, ui: {} };
 }
-function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
-function load() { try { const v = JSON.parse(localStorage.getItem(KEY)); if (v && v.requests) return v; } catch (e) {} return null; }
+function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch {} }
+function load() { try { const v = JSON.parse(localStorage.getItem(KEY)); if (v && v.requests) return v; } catch {} return null; }
 const citizens = () => BASE_CITIZENS.concat(S.citizens);
 
 // ---------- Utilities ----------
@@ -153,7 +153,7 @@ function token() { const b = crypto.getRandomValues(new Uint8Array(32)); return 
 function b64(s) { return btoa(unescape(encodeURIComponent(s))); }
 async function sha256(s) {
   try { const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)); return [...new Uint8Array(d)].map((x) => x.toString(16).padStart(2, '0')).join(''); }
-  catch (e) { let h = 2166136261; for (const c of s) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return 'fnv1a-' + (h >>> 0).toString(16); }
+  catch { let h = 2166136261; for (const c of s) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return 'fnv1a-' + (h >>> 0).toString(16); }
 }
 const patient = (id) => PATIENTS.find((p) => p.id === id);
 const pName = (p) => `${p.given.join(' ')} ${p.family}`;
@@ -181,7 +181,7 @@ function viennaISO(ms) {
 const TITLES = new Set(['dr', 'mag', 'prof', 'med', 'univ', 'di', 'ing']);
 function nameWords(name) {
   let s = String(name).toLowerCase().replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss').replace(/[-.,]/g, ' ');
-  s = s.normalize('NFKD').replace(/[^\x00-\x7f]/g, '');
+  s = s.normalize('NFKD').replace(/[\u0080-\uffff]/g, '');
   return new Set(s.split(/\s+/).filter((w) => w && !TITLES.has(w)));
 }
 const subset = (a, b) => [...a].every((x) => b.has(x));
