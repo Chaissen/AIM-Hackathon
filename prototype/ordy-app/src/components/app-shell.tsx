@@ -11,7 +11,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { toast } from "sonner"
-import { CLINIC, ME, counts, resetEmpty, resetSeed, state } from "@/lib/api"
+import { CLINIC, ME, counts, resetEmpty, resetSeed } from "@/lib/api"
 import { isAdmin, setRole, useRoute } from "@/lib/store"
 
 export function Logo() {
@@ -27,10 +27,9 @@ export function Logo() {
   )
 }
 
-export function toggleTheme() {
+function toggleTheme() {
   const dark = !document.documentElement.classList.contains("dark")
   document.documentElement.classList.toggle("dark", dark)
-  state().ui.theme = dark ? "dark" : "light"
   try { localStorage.setItem("ordy-theme", dark ? "dark" : "light") } catch { /* storage blocked */ }
 }
 
@@ -45,7 +44,7 @@ const MORE = [
   { h: "metrics", label: "Metrics", icon: BarChart3 },
 ]
 
-export function AppShell({ crumbs, actions, children }: { crumbs: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode }) {
+export function AppShell({ crumbs, actions, wide, children }: { crumbs: React.ReactNode; actions?: React.ReactNode; wide?: boolean; children: React.ReactNode }) {
   const route = useRoute()
   const c = counts()
   const [resetOpen, setResetOpen] = useState(false)
@@ -155,7 +154,7 @@ export function AppShell({ crumbs, actions, children }: { crumbs: React.ReactNod
           <div className="min-w-0 flex-1 truncate text-sm">{crumbs}</div>
           {actions}
         </header>
-        <main className="mx-auto grid w-full max-w-6xl content-start gap-6 p-4 md:p-6">{children}</main>
+        <main className={`mx-auto grid w-full content-start gap-6 p-4 md:p-6 ${wide ? "max-w-[1600px]" : "max-w-6xl"}`}>{children}</main>
         <footer className="mx-auto w-full max-w-6xl px-4 pb-6 text-xs text-muted-foreground md:px-6">
           <FileText className="mr-1 inline size-3" /> Prototype with synthetic data. ID Austria is simulated. Not for clinical use.
         </footer>
@@ -166,7 +165,7 @@ export function AppShell({ crumbs, actions, children }: { crumbs: React.ReactNod
   )
 }
 
-export function ResetDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+function ResetDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>

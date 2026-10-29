@@ -1,32 +1,13 @@
-# React + TypeScript + Vite
+# ordy UI prototype
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Clickable design prototype for ordy, built with Vite, React and shadcn/ui. It runs the whole request flow in the browser with synthetic data: request service, simulated ID Austria, mock eHVD, email and SMS, FHIR mapper, and audit log (`src/lib/engine.ts`).
 
-Currently, two official plugins are available:
+It is a design reference only. The real application is the Next.js app in the repository root, and [organisations/](../../organisations/) is the source of truth. Parts of this prototype, such as the dashboard, the admin view, and the metrics page, are not in the docs.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install --before=<date 7 days ago>   # keeps the team's 7-day rule for new packages
+npm run dev                              # http://localhost:5173
+npm run build                            # single file in dist/index.html, opens without a server
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Prototype with synthetic data. ID Austria is simulated. Not for clinical use.
