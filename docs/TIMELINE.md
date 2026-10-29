@@ -36,7 +36,7 @@ The task ids go into branch names and commit messages.
 | Id | Task | Owner | Needs | Milestone |
 |---|---|---|---|---|
 | T01 | Repository, `docker-compose.yml`, `.env.example`, TypeScript stack (Next.js, tRPC, Drizzle, Postgres, bot process). Done. | Dev 1 | none | 2 |
-| T02 | Keycloak realm: client, user profile, mappers, test citizens, sign-up, simulation label | Dev 1 | T01 | 2 |
+| T02 | Keycloak realm: client, user profile, mappers, test citizens, citizen script, simulation label | Dev 1 | T01 | 2 |
 | T03 | Synapse config, Matrix users, Element config, room and widget bootstrap. Done. | Dev 3 | T01 | 2 |
 | T04 | Request service: Postgres tables `requests` and `bindings` (Drizzle), request states, audit log writer | Dev 1 | T01 | 3 |
 | T05 | Matrix bot: `!request`, notices, `!status` | Dev 3 | T03, T04 | 3 |

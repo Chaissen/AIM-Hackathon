@@ -125,12 +125,12 @@ Clinical approach and impact. A lab physician answers with the report she alread
 
 Technical quality. Every filed resource passes the HL7 validator. The identity check combines a state ID, a name match, a professional register, and a stored person number, and it costs the outside person about one minute.
 
-Execution. The whole flow runs on both scenario requests. New documents in the same Markdown format go through the same parser. Jury members can create their own outside people on the Keycloak sign-up page.
+Execution. The whole flow runs on both scenario requests. New documents in the same Markdown format go through the same parser. Jury members can add their own outside people with one command, `pnpm citizen`. The simulated ID Austria has no sign-up page, because real identities come from the state and anyone could otherwise sign up as "Eva Brandl".
 
 ## Limitations
 
 - ID Austria is simulated. Real use needs a registered service provider and the phone-app step.
-- For people without an eHVD entry from ID Austria, the name is the only link between the login and the eHVD, because the eHVD has no birth date. It is not documented whether a private service provider like us would receive the eHVD attribute from ID Austria.
+- Without `urn:eidgvat:attributes.gda` in the login, the name is the only link between an ID Austria login and an eHVD entry, because the eHVD has no birth date. It is not documented whether a private service provider like us would receive that attribute from ID Austria.
 - A second person with the same name and the same role who receives the link would pass the first time. The stored person number closes this gap from the second request on.
 - The parser expects the scenario's Markdown format and English dates. Other documents go to Dr. Hofer as held answers.
 
@@ -140,7 +140,7 @@ Execution. The whole flow runs on both scenario requests. New documents in the s
 - [ID Austria predefined test identities](https://www.id-austria.gv.at/de/developer/testen/vordefinierte-testidentit%C3%A4ten)
 - [USP: registering as an ID Austria service provider](https://www.usp.gv.at/hilfe-und-support/verfahrensrechte/registrierung-als-ida-sp.html)
 - [eHVD web service handbook v2.4](https://www.gesundheit.gv.at/dam/gesundheitgvat/professional/it-services/ehvd/eHVD-ServicehandbuchV2.4.pdf)
+- [ID Austria: connecting via OpenID Connect](https://www.id-austria.gv.at/de/developer/anbinden/anbindung-mit-openid-connect)
 - [ID Austria: attribute "Gesundheitsdiensteanbieter"](https://www.id-austria.gv.at/de/developer/registrieren/personenmerkmale/Gesundheitsdiensteanbieter)
-- [Signicat: ID Austria OIDC attributes](https://developer.signicat.com/identity-methods/id-austria/attributes-reference/id-austria-attributes-oidc/)
 
 [Identity and misdelivery](IDENTITY.md) lists all sources on ID Austria, and [eHVD](EHVD.md) all sources on the eHVD.
