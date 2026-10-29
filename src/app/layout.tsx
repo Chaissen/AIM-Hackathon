@@ -1,18 +1,7 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 
 import { TRPCReactProvider } from "@/trpc/react";
 import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: "ordy",
@@ -21,9 +10,15 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col">
-        <TRPCReactProvider>{children}</TRPCReactProvider>
+    <html lang="en" className="h-full antialiased">
+      <body className="flex min-h-full flex-col font-sans">
+        <TRPCReactProvider>
+          <div className="flex-1">{children}</div>
+        </TRPCReactProvider>
+        {/* Short form required by organisations/COMPLIANCE_AND_SAFETY.md, "Disclaimer". */}
+        <footer className="px-4 py-4 text-center text-xs text-muted-foreground">
+          Prototype with synthetic data. ID Austria is simulated. Not for clinical use.
+        </footer>
       </body>
     </html>
   );
