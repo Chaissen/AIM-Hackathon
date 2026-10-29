@@ -1,0 +1,232 @@
+# FHIR model
+
+This page lists the FHIR R4 resources the request service files, how they reference each other, and how we validate them.
+
+## Resources we file
+
+| Resource | When | Purpose |
+|---|---|---|
+| [Patient](https://hl7.org/fhir/R4/patient.html) | Once, from `track/scenario/patient.json` | Maria Beispiel. Every clinical resource points at her through `subject`. |
+| [Task](https://hl7.org/fhir/R4/task.html) | Each request | Tracks the request from sent to filed and points at the filed results |
+| [Practitioner](https://hl7.org/fhir/R4/practitioner.html) | First contact with a person | Dr. Hofer, the outside people, and the document authors |
+| [Organization](https://hl7.org/fhir/R4/organization.html) | First contact with an organisation | Klinikum Beispielstadt, Labor Kanalstraße, Reha Waldblick, and "ID Austria (simulation)", which signs the identity proof |
+| [Observation](https://hl7.org/fhir/R4/observation.html) | Lab result, one per table row | One test value with its LOINC code, unit, and reference range |
+| [DiagnosticReport](https://hl7.org/fhir/R4/diagnosticreport.html) | Lab result | Groups the Observations and carries the original document |
+| [DocumentReference](https://hl7.org/fhir/R4/documentreference.html) | Rehab report | The report text, attached, with the stay period and the author |
+| [Provenance](https://hl7.org/fhir/R4/provenance.html) | Each filed answer | Who sent it, when, and how the identity was checked |
+
+We file all resources of one answer in one [transaction Bundle](https://hl7.org/fhir/R4/http.html#transaction), so an answer is filed completely or not at all.
+
+## How the resources reference each other
+
+```
+Lab result
+
+  Task --for--> Patient
+   |  requester --> Practitioner (Dr. Hofer)
+   |  owner ------> Practitioner (Dr. Brandl)
+   |  output -----> DiagnosticReport
+   |
+  DiagnosticReport --subject--> Patient
+   |  result -----------> Observation x4 --subject--> Patient
+   |  performer --------> Organization (Labor Kanalstraße)
+   |  resultsInterpreter -> Practitioner (Dr. Brandl)
+   |
+  Provenance
+      target ------> DiagnosticReport and each Observation
+      agent author -> Practitioner (Dr. Brandl), onBehalfOf Organization (Labor Kanalstraße)
+      signature ---> ID token from ID Austria, signed by Organization (ID Austria simulation)
+
+Rehab report
+
+  Task --for--> Patient, output --> DocumentReference
+
+  DocumentReference --subject--> Patient
+      author -> Practitioner (Dr. Leitner), Organization (Reha Waldblick)
+
+  Provenance
+      target -----------> DocumentReference
+      agent author -----> Practitioner (Dr. Leitner), onBehalfOf Organization (Reha Waldblick)
+      agent informant --> Practitioner (Stefan Kern), who sent it
+      signature --------> ID token of Stefan Kern
+```
+
+The report and the people who handle it are different. Dr. Leitner wrote the rehab report, and Stefan Kern sent it. The DocumentReference names the author, and the Provenance names both.
+
+## Lab result mapping
+
+| Document | FHIR |
+|---|---|
+| `Patient: Maria Beispiel, born 12 March 1961` | Patient check only. `subject` is `Patient/maria-beispiel`. |
+| `Sample taken: 22 October 2026, 08:10` | `effectiveDateTime` on each Observation and on the DiagnosticReport: `2026-10-22T08:10:00+02:00` |
+| `Reported: 22 October 2026, 11:40` | `issued` on each Observation and on the DiagnosticReport: `2026-10-22T11:40:00+02:00` |
+| Table column `Test` | `Observation.code.text` |
+| Table column `LOINC code` | `Observation.code.coding`, system `http://loinc.org`, without `display` |
+| Table column `Result` | `Observation.valueQuantity.value` |
+| Table column `Unit` | `Observation.valueQuantity` `unit`, `system` `http://unitsofmeasure.org`, and `code` in UCUM |
+| Table column `Reference range` | `Observation.referenceRange` `low`, `high`, and `text` |
+| Computed from value and range | `Observation.interpretation`: `N`, `H`, or `L` from `http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation` |
+| Free text such as `All values are within the reference range.` | `DiagnosticReport.conclusion` |
+| `Validated by: Dr. Eva Brandl, lab physician` | `DiagnosticReport.resultsInterpreter` and `Observation.performer`, both the Practitioner |
+| Heading `# Labor Kanalstraße: lab report` | `DiagnosticReport.performer`, the Organization |
+| The whole file | `DiagnosticReport.presentedForm`, `contentType` `text/markdown`, data in base64 |
+
+The DiagnosticReport has `status` `final`, `category` `LAB` from `http://terminology.hl7.org/CodeSystem/v2-0074`, and `code` LOINC `11502-2` (Laboratory report) with the document title in `code.text`. Each Observation has `status` `final` and `category` `laboratory` from `http://terminology.hl7.org/CodeSystem/observation-category`.
+
+### The scenario values
+
+| Test | LOINC | LOINC display, checked on tx.fhir.org | Value | UCUM unit | Range |
+|---|---|---|---|---|---|
+| INR (prothrombin time) | 6301-6 | INR in Platelet poor plasma by Coagulation assay | 1.0 | none | 0.8 to 1.2 |
+| aPTT | 14979-9 | aPTT in Platelet poor plasma by Coagulation assay | 31 | `s` | 25 to 37 |
+| Platelets | 777-3 | Platelets [#/volume] in Blood by Automated count | 245 | `10*9/L` | 150 to 400 |
+| Fibrinogen | 3255-7 | Fibrinogen [Mass/volume] in Platelet poor plasma by Coagulation assay | 3.1 | `g/L` | 2.0 to 4.0 |
+
+The document writes the platelet unit as `10^9/L`, which is not valid UCUM. The mapper replaces `^` with `*`. INR has no unit, so its `valueQuantity` and its range carry only values.
+
+For Max Beispiel's result, INR 2.6 and aPTT 44 are above the range and get `H`. That result is never filed for Maria, because the patient check stops it first.
+
+### Example Observation
+
+```json
+{
+	"resourceType": "Observation",
+	"status": "final",
+	"category": [{"coding": [{"system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "laboratory"}]}],
+	"code": {"coding": [{"system": "http://loinc.org", "code": "14979-9"}], "text": "aPTT"},
+	"subject": {"reference": "Patient/maria-beispiel"},
+	"effectiveDateTime": "2026-10-22T08:10:00+02:00",
+	"issued": "2026-10-22T11:40:00+02:00",
+	"performer": [{"reference": "urn:uuid:practitioner-eva-brandl"}],
+	"valueQuantity": {"value": 31, "unit": "s", "system": "http://unitsofmeasure.org", "code": "s"},
+	"interpretation": [{"coding": [{"system": "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation", "code": "N"}]}],
+	"referenceRange": [{
+		"low": {"value": 25, "unit": "s", "system": "http://unitsofmeasure.org", "code": "s"},
+		"high": {"value": 37, "unit": "s", "system": "http://unitsofmeasure.org", "code": "s"},
+		"text": "25 to 37"
+	}]
+}
+```
+
+The `urn:uuid:` references point at other entries of the transaction Bundle, and HAPI replaces them with server ids. The values in the examples are shortened for reading. Real ones are UUIDs.
+
+## Rehab report mapping
+
+| Document | FHIR |
+|---|---|
+| Heading `# Reha Waldblick: discharge report` | `DocumentReference.type`, LOINC `18842-5` (Discharge summary), with `text` "Rehab discharge report" |
+| `Patient: Maria Beispiel, born 12 March 1961` | Patient check only. `subject` is `Patient/maria-beispiel`. |
+| `Stay: 2 to 23 September 2026` | `DocumentReference.context.period`, `start` `2026-09-02`, `end` `2026-09-23` |
+| `Reason: rehabilitation after a total hip replacement...` | `DocumentReference.description` |
+| `Written by: Dr. Johanna Leitner, medical director, Reha Waldblick` | `DocumentReference.author`, the Practitioner and the Organization. Provenance agent `author`. |
+| `Sent by: Stefan Kern, discharge management` | Provenance agent `informant` |
+| The whole file | `DocumentReference.content.attachment`, `contentType` `text/markdown`, data in base64, `title` from the heading |
+
+The DocumentReference has `status` `current`, `docStatus` `final`, and `date` set to the filing time.
+
+The `Stay` line can name the month once ("2 to 23 September 2026") or twice ("28 August to 12 September 2026"). The parser splits at `" to "` and borrows the month and year from the right side when the left side lacks them.
+
+The medication list stays inside the attached text. One MedicationStatement per line is a stretch goal and the first thing to cut.
+
+## Provenance
+
+| Field | Value |
+|---|---|
+| `target` | Every clinical resource filed for this answer |
+| `occurredDateTime` | When the outside person pressed send |
+| `recorded` | When the request service filed the answer |
+| `policy` | The identity policy that applied, for example `urn:aim-t2:identity-policy:lab-result:v1` |
+| `agent` | `author` for the document author. `informant` for the sender when the sender is someone else. `onBehalfOf` for the organisation. |
+| `signature` | Type `1.2.840.10065.1.12.1.10` (Identity Witness Signature) from `urn:iso-astm:E1762-95:2013`. `when` is the login time, `who` is the Organization "ID Austria (simulation)", `sigFormat` is `application/jose`, and `data` holds the ID token in base64. |
+| `text` | A short narrative for people who open the resource |
+
+The ID token is the proof of the identity check. Anyone can verify its signature later with the identity provider's public key. It contains the sender's name, birth date, and person number. [Compliance and safety](COMPLIANCE_AND_SAFETY.md) covers that trade-off.
+
+```json
+{
+	"resourceType": "Provenance",
+	"text": {
+		"status": "generated",
+		"div": "<div xmlns=\"http://www.w3.org/1999/xhtml\">Sent by Dr. Eva Brandl on 29 October 2026 at 14:02. Identity checked with ID Austria (simulation), full function, level high. The name matched the request. eHVD lists her as an active lab physician at Labor Kanalstraße.</div>"
+	},
+	"target": [
+		{"reference": "urn:uuid:diagnostic-report"},
+		{"reference": "urn:uuid:observation-inr"},
+		{"reference": "urn:uuid:observation-aptt"},
+		{"reference": "urn:uuid:observation-platelets"},
+		{"reference": "urn:uuid:observation-fibrinogen"}
+	],
+	"occurredDateTime": "2026-10-29T14:02:10+01:00",
+	"recorded": "2026-10-29T14:02:12+01:00",
+	"policy": ["urn:aim-t2:identity-policy:lab-result:v1"],
+	"agent": [{
+		"type": {"coding": [{"system": "http://terminology.hl7.org/CodeSystem/provenance-participant-type", "code": "author"}]},
+		"who": {"reference": "urn:uuid:practitioner-eva-brandl"},
+		"onBehalfOf": {"reference": "urn:uuid:organization-labor-kanalstrasse"}
+	}],
+	"signature": [{
+		"type": [{"system": "urn:iso-astm:E1762-95:2013", "code": "1.2.840.10065.1.12.1.10"}],
+		"when": "2026-10-29T14:01:40+01:00",
+		"who": {"reference": "urn:uuid:organization-id-austria-simulation"},
+		"sigFormat": "application/jose",
+		"data": "ZXlKaGJHY2lPaUpTVXpJMU5pSXNJblI1Y0NJNklrcFhWQ0o5Li4u"
+	}]
+}
+```
+
+
+## Task
+
+| Field | Value |
+|---|---|
+| `status` | Mirrors the request state. [Architecture](ARCHITECTURE.md) has the table. |
+| `businessStatus.text` | Details such as "waiting for a new upload after a patient mismatch" |
+| `intent` | `order` |
+| `description` | "Request for a lab result" or "Request for a rehab discharge report" |
+| `for` | The Patient |
+| `authoredOn` | When Dr. Hofer sent the request |
+| `requester` | Dr. Hofer's Practitioner |
+| `owner` | The outside person's Practitioner |
+| `restriction.period.end` | The link expiry |
+| `output` | The DiagnosticReport or the DocumentReference, once filed |
+
+The Task stays on the clinic's FHIR server. It is the only place outside the request service database where the request appears with its document type.
+
+## Practitioner and Organization
+
+- A Practitioner holds the name from the request, confirmed by ID Austria. When the eHVD lists the person, the Practitioner gets the eHVD OID as `identifier`, with `system` `urn:ietf:rfc:3986` and `value` `urn:oid:2.999.2.1`.
+- We do not store the outside person's birth date in the Practitioner.
+- An Organization holds the name and the eHVD OID.
+- The transaction uses conditional create with `ifNoneExist` on the identifier, so a second answer from Dr. Brandl reuses her Practitioner. For people without an eHVD entry, the `bindings` table remembers the Practitioner id.
+
+## Patient
+
+The request service puts `track/scenario/patient.json` on the server with `PUT Patient/maria-beispiel`. On the public test server `https://hapi.fhir.org/baseR4`, use an id with a team prefix, such as `aim-t2-<team>-maria-beispiel`, so the data does not mix with other teams' data. We prefer a local HAPI server.
+
+## Validation
+
+1. After a run, `scripts/validate.sh` reads the ids of the filed resources from the `answer_filed` audit entries.
+2. It fetches each resource from HAPI into `out/filed/`.
+3. It runs the validator on each file, as the scenario README says: `java -jar validator_cli.jar <file> -version 4.0`.
+4. It counts the issues with severity error. The target is 0. Warnings do not count.
+
+The validator checks LOINC codes against tx.fhir.org, so it needs internet access.
+
+Traps we know about:
+
+- `10^9/L` is not valid UCUM. Use `10*9/L`.
+- A `dateTime` with a time needs a time zone. `Europe/Vienna` is `+02:00` until 25 October 2026 and `+01:00` after that. The sample times are `+02:00`, and the filing times are `+01:00`.
+- An `instant`, such as `issued` and `recorded`, needs seconds and a time zone.
+- A Quantity with a `code` needs a `system` (invariant `qty-3`).
+- The validator reports a `display` that differs from LOINC's. We leave `display` out and put the document's label into `code.text`, because jury documents may carry codes we have not looked up.
+- A resource without narrative gets a warning (`dom-6`), not an error. Only the Provenance gets a narrative.
+
+## Sources
+
+- [FHIR R4 data types](https://hl7.org/fhir/R4/datatypes.html)
+- [FHIR R4 RESTful API and transactions](https://hl7.org/fhir/R4/http.html)
+- [FHIR R4 signature types](https://hl7.org/fhir/R4/valueset-signature-type.html)
+- [UCUM](https://ucum.org/)
+- [HL7 validator releases](https://github.com/hapifhir/org.hl7.fhir.core/releases)
+- [HAPI FHIR public test server](https://hapi.fhir.org/baseR4/metadata)
+- [Track 2 scenario](https://github.com/AIM-Austria/TRACK-2-interoperability)
