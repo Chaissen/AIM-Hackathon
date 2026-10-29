@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { DOCUMENT_TYPES, documentTypeKeys, type DocumentType } from "@/lib/document-types";
-import { requestInput, toRequestCommand } from "@/lib/request-input";
+import { requestInput } from "@/lib/request-input";
 import { cn } from "@/lib/utils";
 
 export type PatientOption = { id: string; name: string; birthDate: string | null };
@@ -129,13 +129,8 @@ export function RequestForm({ patients }: { patients: PatientOption[] | null }) 
       </p>
 
       <Button type="submit">Send request</Button>
-      {/* TODO(T04, T05): call the request procedure here. Until it exists, show the bot command with the same effect. */}
-      {touched && parsed.success && (
-        <div className="grid gap-2 rounded-md border p-3">
-          <p className="text-sm">Sending from the widget is not connected yet. Send this in the room instead:</p>
-          <code className="block overflow-x-auto rounded bg-muted p-2 text-xs whitespace-pre">{toRequestCommand(parsed.data)}</code>
-        </div>
-      )}
+      {/* TODO(T04, T05): call the request procedure here. */}
+      {touched && parsed.success && <p className="text-sm text-muted-foreground">Sending from the widget is not connected yet.</p>}
     </form>
   );
 }

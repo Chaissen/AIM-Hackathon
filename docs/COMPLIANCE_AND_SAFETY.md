@@ -33,7 +33,7 @@ The check compares whole words. A substring check would block every message, bec
 - The outside person sees nothing about the patient or the document type until the identity check passes. That includes page titles, error messages, and file names.
 - Error pages for a failed check say only that the request is for someone else.
 - If Keycloak or the eHVD cannot be reached, the request service holds the request. It never treats a missing answer as a pass.
-- A held identity or a held answer needs Dr. Hofer's explicit `!accept` in Matrix. The audit log records who accepted and when.
+- A held identity or a held answer needs Dr. Hofer to click **Accept** in the widget. The audit log records who accepted and when.
 - Three failed identity checks lock the link.
 
 ## Data we keep
@@ -60,7 +60,7 @@ AI is optional in this project. If we build the AI fallback parser:
 
 - The model only reads documents. It never decides identity, the patient match, or whether an answer gets filed.
 - Every value and every LOINC code it returns must appear word for word in the document. Otherwise the answer is held.
-- An answer that the model read always waits for Dr. Hofer's `!accept`.
+- An answer that the model read always waits until Dr. Hofer accepts it in the widget.
 - We send only synthetic documents to the model provider and record the provider and model version in the README.
 
 ## Production alignment

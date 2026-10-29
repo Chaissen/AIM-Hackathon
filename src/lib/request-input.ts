@@ -2,8 +2,7 @@ import { z } from "zod";
 
 import { documentTypeKeys } from "@/lib/document-types";
 
-// What Dr. Hofer gives for one request, in the widget or with `!request`.
-// docs/ARCHITECTURE.md, "Matrix bot": a request needs given, family, patient, and either email or phone.
+// What Dr. Hofer gives for one request in the widget. docs/ARCHITECTURE.md, "Widget".
 export const requestInput = z
   .object({
     docType: z.enum(documentTypeKeys),
@@ -21,10 +20,3 @@ export const requestInput = z
   .refine((v) => v.email || v.phone, { message: "Enter an email address or a mobile number", path: ["email"] });
 
 export type RequestInput = z.infer<typeof requestInput>;
-
-/** The same request as a bot command, in the format of docs/ARCHITECTURE.md. */
-export function toRequestCommand(v: RequestInput): string {
-  const q = (s: string) => (/\s/.test(s) ? `"${s}"` : s);
-  const contact = v.email ? `email=${q(v.email)}` : `phone=${q(v.phone ?? "")}`;
-  return `!request ${v.docType} patient=${q(v.patient)} given=${q(v.given)} family=${q(v.family)} ${contact} org=${q(v.org)}`;
-}

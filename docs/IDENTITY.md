@@ -171,7 +171,7 @@ The request service runs three checks after login. They make sure the right pers
 | Name | All requested name words are in the ID Austria name | The family names share a word but do not match fully | No shared family name word |
 | Person number | No binding yet, or the binding matches `urn:pvpgvat:oidc.bpk` | | A binding exists for this person and organisation with a different bPK |
 
-Any fail blocks the person, writes `identity_checked` with `fail` and `misdelivery_caught` with `wrong_person`, and tells Dr. Hofer. A hold on the name sets the request to `identity_held`, and Dr. Hofer decides with `!accept` or `!reject`.
+Any fail blocks the person, writes `identity_checked` with `fail` and `misdelivery_caught` with `wrong_person`, and tells Dr. Hofer. A hold on the name sets the request to `identity_held`, and Dr. Hofer accepts or rejects it in the widget.
 
 If Keycloak or the eHVD cannot be reached, the request service treats it as a hold, never as a pass.
 
@@ -215,7 +215,7 @@ export function matchRequestedPerson(reqGiven: string, reqFamily: string, idGive
 }
 ```
 
-`isSubset(a, b)` means every word in `a` is also in `b`. The bot refuses requests with an empty `given` or `family`, because an empty set passes every subset test.
+`isSubset(a, b)` means every word in `a` is also in `b`. The request procedure refuses requests with an empty given name or family name, because an empty set passes every subset test.
 
 ### Person number binding
 
@@ -272,7 +272,7 @@ The Provenance names the responsible person as `author` and the sender as `infor
 The two kinds of checks fail differently:
 
 - **Block**, when the identity checks fail. The wrong person opened the link, for example in M1 and M2. They see nothing, cannot answer, and nothing is stored. Dr. Hofer gets a message.
-- **Hold**, when the release check does not pass. The right person answered, but the eHVD does not confirm that the responsible person may release this document. Reasons: not listed, not active, another specialty, not a member of the organisation, or several people with that name. The request service keeps the answer but files nothing. Dr. Hofer gets a Matrix message with the reason and decides with `!accept` or `!reject`.
+- **Hold**, when the release check does not pass. The right person answered, but the eHVD does not confirm that the responsible person may release this document. Reasons: not listed, not active, another specialty, not a member of the organisation, or several people with that name. The request service keeps the answer but files nothing. Dr. Hofer gets a Matrix message with the reason and accepts or rejects the answer in the widget.
 
 We hold instead of blocking because the eHVD can be out of date, and a physician of another specialty can be responsible for some tests. Dr. Hofer, a physician, makes that call. If she accepts, the audit log records who accepted and when, and the Provenance carries the policy `urn:aim-t2:identity-policy:accepted-by-requester:v1`.
 
@@ -300,8 +300,8 @@ All three run on request 1, Dr. Brandl by email. A test counts if its condition 
 
 Dr. Hofer types `eva.brandl@labor-kanaI.example`, with a capital I.
 
-1. The address check sees that the domain differs from `labor-kanal.example` in the eHVD. The bot warns Dr. Hofer and writes `misdelivery_caught` with `address_mismatch`.
-2. For the test, Dr. Hofer sends `!send 1` anyway.
+1. The address check sees that the domain differs from `labor-kanal.example` in the eHVD. The widget warns Dr. Hofer, and the request service writes `misdelivery_caught` with `address_mismatch`.
+2. For the test, Dr. Hofer clicks **Send anyway**.
 3. Anna Huber opens the email in Mailpit and clicks the link. The page shows only "Dr. Lena Hofer at Klinikum Beispielstadt sent you a request".
 4. She logs in as `anna.huber`. The name check fails.
 5. She sees "This request is for someone else. Nothing was shared with you." She never sees the patient or the document type, and she cannot answer.
