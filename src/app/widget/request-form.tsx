@@ -13,13 +13,14 @@ import { requestInput } from "@/lib/request-input";
 import { cn } from "@/lib/utils";
 
 export type PatientOption = { id: string; name: string; birthDate: string | null };
+type Channel = "email" | "sms";
 
 const formatDate = (iso: string) =>
   new Date(`${iso}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
 
 export function RequestForm({ patients }: { patients: PatientOption[] | null }) {
   const [docType, setDocType] = useState<DocumentType>("lab-result");
-  const [channel, setChannel] = useState<"email" | "sms">("email");
+  const [channel, setChannel] = useState<Channel>("email");
   const [form, setForm] = useState({ patient: patients?.[0]?.id ?? "", given: "", family: "", org: "", contact: "" });
   const [touched, setTouched] = useState(false);
 
@@ -37,6 +38,7 @@ export function RequestForm({ patients }: { patients: PatientOption[] | null }) 
   });
   const errors = parsed.success ? {} : Object.fromEntries(parsed.error.issues.map((i) => [String(i.path[0]), i.message]));
   const err = (k: string) => (touched ? errors[k] : undefined);
+  const contactError = err("email") ?? err("phone");
 
   return (
     <form
@@ -72,25 +74,7 @@ export function RequestForm({ patients }: { patients: PatientOption[] | null }) 
 
       <div className="grid gap-2">
         <Label htmlFor="patient">Patient</Label>
-        {patients === null ? (
-          <Alert variant="destructive">
-            <AlertDescription>The FHIR server is not reachable, so the patient list is empty.</AlertDescription>
-          </Alert>
-        ) : (
-          <select
-            id="patient"
-            value={form.patient}
-            onChange={set("patient")}
-            className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-          >
-            {patients.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-                {p.birthDate ? `, born ${formatDate(p.birthDate)}` : ""}
-              </option>
-            ))}
-          </select>
-        )}
+        <PatientSelect patients={patients} value={form.patient} onChange={set("patient")} />
       </div>
 
       <fieldset className="grid gap-3">
@@ -101,27 +85,7 @@ export function RequestForm({ patients }: { patients: PatientOption[] | null }) 
           <Field id="family" label="Last name" value={form.family} onChange={set("family")} error={err("family")} />
         </div>
         <Field id="org" label="Organisation" value={form.org} onChange={set("org")} error={err("org")} />
-        <div className="grid gap-2">
-          <span className="text-sm font-medium">Send the link by</span>
-          <div className="flex gap-2">
-            <Button type="button" size="sm" variant={channel === "email" ? "default" : "outline"} onClick={() => setChannel("email")}>
-              <Mail /> Email
-            </Button>
-            <Button type="button" size="sm" variant={channel === "sms" ? "default" : "outline"} onClick={() => setChannel("sms")}>
-              <MessageSquare /> SMS
-            </Button>
-          </div>
-          <Input
-            id="contact"
-            aria-label={channel === "email" ? "Email address" : "Mobile number"}
-            placeholder={channel === "email" ? "name@example.org" : "+43 660 000 0101"}
-            value={form.contact}
-            onChange={set("contact")}
-            aria-invalid={!!(err("email") ?? err("phone"))}
-            autoComplete="off"
-          />
-          {(err("email") ?? err("phone")) && <p className="text-xs text-destructive">{err("email") ?? err("phone")}</p>}
-        </div>
+        <ContactField channel={channel} onChannelChange={setChannel} value={form.contact} onChange={set("contact")} error={contactError} />
       </fieldset>
 
       <p className="text-xs text-muted-foreground">
@@ -132,6 +96,68 @@ export function RequestForm({ patients }: { patients: PatientOption[] | null }) 
       {/* TODO(T04, T05): call the request procedure here. */}
       {touched && parsed.success && <p className="text-sm text-muted-foreground">Sending from the widget is not connected yet.</p>}
     </form>
+  );
+}
+
+function PatientSelect({
+  patients,
+  value,
+  onChange,
+}: {
+  patients: PatientOption[] | null;
+  value: string;
+  onChange: React.ChangeEventHandler<HTMLSelectElement>;
+}) {
+  if (patients === null)
+    return (
+      <Alert variant="destructive">
+        <AlertDescription>The FHIR server is not reachable, so the patient list is empty.</AlertDescription>
+      </Alert>
+    );
+  return (
+    <select
+      id="patient"
+      value={value}
+      onChange={onChange}
+      className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+    >
+      {patients.map((p) => (
+        <option key={p.id} value={p.id}>
+          {p.name}
+          {p.birthDate ? `, born ${formatDate(p.birthDate)}` : ""}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function ContactField({
+  channel,
+  onChannelChange,
+  error,
+  ...input
+}: { channel: Channel; onChannelChange: (channel: Channel) => void; error?: string } & React.ComponentProps<typeof Input>) {
+  return (
+    <div className="grid gap-2">
+      <span className="text-sm font-medium">Send the link by</span>
+      <div className="flex gap-2">
+        <Button type="button" size="sm" variant={channel === "email" ? "default" : "outline"} onClick={() => onChannelChange("email")}>
+          <Mail /> Email
+        </Button>
+        <Button type="button" size="sm" variant={channel === "sms" ? "default" : "outline"} onClick={() => onChannelChange("sms")}>
+          <MessageSquare /> SMS
+        </Button>
+      </div>
+      <Input
+        id="contact"
+        aria-label={channel === "email" ? "Email address" : "Mobile number"}
+        placeholder={channel === "email" ? "name@example.org" : "+43 660 000 0101"}
+        aria-invalid={!!error}
+        autoComplete="off"
+        {...input}
+      />
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </div>
   );
 }
 
