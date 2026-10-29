@@ -128,7 +128,7 @@ const trpc = useTRPC();
 const cancel = useMutation(trpc.request.cancel.mutationOptions());
 ```
 
-Call it from the bot or a script:
+Call it from a script:
 
 ```ts
 const caller = createCaller(createContext({ kind: "clinic", mxid: "@lena.hofer:klinikum.example" }));
@@ -149,7 +149,7 @@ Pin the CLI version, so it fits the 7-day rule. The UI uses the system font and 
 
 ## Add a bot command
 
-Add an entry to `src/bot/commands.ts`. The command gets a caller that acts as the sender and the text after the command name. Keep the logic in a tRPC procedure, so the widget and the bot share it. `!help` lists every command automatically.
+Add an entry to `src/bot/commands.ts`. The command gets a caller that acts as the sender and the text after the command name. Keep the logic in a tRPC procedure. Requests and the decisions about them belong in the widget, not in bot commands. `!help` lists every command automatically.
 
 ## Configuration
 

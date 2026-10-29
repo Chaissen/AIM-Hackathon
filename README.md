@@ -68,7 +68,7 @@ Outside person ──email/SMS link──▶ Next.js pages (React) ──tRPC─
 | Database | `src/server/db/` | Drizzle schema, migrations in `drizzle/` |
 | FHIR | `src/server/fhir/` | typed with `@types/fhir` (R4) |
 | Matrix | `src/server/matrix/client.ts` | small client-server API client, no E2EE (not required by the track) |
-| Bot | `src/bot/` | separate process, commands call the same procedures as the widget |
+| Bot | `src/bot/` | separate process for `!help` and `!status`. Requests go through the widget. |
 | Client | `src/trpc/` | `@trpc/tanstack-react-query`, superjson |
 
 Dependencies must be public for at least 7 days (`minimumReleaseAge` in `pnpm-workspace.yaml`).

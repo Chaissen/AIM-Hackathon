@@ -60,7 +60,7 @@ UC10 (audit) is included by UC3, UC4, UC5, UC6, UC8 and UC11. The diagram leaves
 
 | Use case | Actor | Covers |
 |---|---|---|
-| UC1 Request document | Dr. Hofer | `!request` in Matrix: patient, document type, named recipient, contact |
+| UC1 Request document | Dr. Hofer | Request form in the widget in her Matrix room: patient, document type, named recipient, contact |
 | UC3 Send access link | – | One-time link. No patient name, birth date or document type in the email or SMS |
 | UC5 Verify identity | Sender, ID Austria | eID name must equal the named recipient → catches **M1, M2** |
 | UC7 Check patient match | – | Patient in the document and form must equal the request's patient → catches **M3** |
@@ -191,8 +191,10 @@ classDiagram
 flowchart LR
     subgraph Clinic["Runs at the clinic"]
         element["Element Web"] <--> synapse["Synapse<br/>(Matrix)"]
-        synapse <--> bot["Request bot"]
-        bot <--> core["Core service<br/>(Next.js + tRPC)"]
+        element <--> widget["Request widget<br/>(iframe in Element)"]
+        widget <--> core["Core service<br/>(Next.js + tRPC)"]
+        synapse <--> bot["Matrix bot<br/>(notices, !status)"]
+        bot <--> core
         core <--> fhirsrv[("HAPI FHIR")]
         core --> audit[("Audit log")]
         core <-.-> reg[("Register<br/>(proposed)")]

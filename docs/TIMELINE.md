@@ -22,7 +22,7 @@ Each milestone may slip 30 minutes. A longer slip triggers the cut list.
 |---|---|---|---|
 | Thu 18:00 | 1. Scope lock | The docs in `docs/` describe Track 2 and the team agrees on them | Doc 1 |
 | Thu 21:30 | 2. Infrastructure up | `./scripts/setup.sh` and `pnpm dev` start Synapse, Element, Keycloak with the imported realm, Mailpit, HAPI, Postgres, and ordy. Dr. Hofer logs in to Element. `eva.brandl` logs in to Keycloak. | Dev 1 |
-| Thu 24:00 | 3. Happy path | Request 1 runs end to end. The bot command sends an email, Dr. Brandl logs in and uploads, four Observations, a DiagnosticReport, and a Provenance land in HAPI, and Dr. Hofer gets the Matrix message. | Dev 1, Dev 2, Dev 3 |
+| Thu 24:00 | 3. Happy path | Request 1 runs end to end. The widget sends an email, Dr. Brandl logs in and uploads, four Observations, a DiagnosticReport, and a Provenance land in HAPI, and Dr. Hofer gets the Matrix message. | Dev 1, Dev 2, Dev 3 |
 | Fri 09:30 | 4. Misdelivery and audit | M1, M2, and M3 are caught. A request shows 6 of 6 audit event types. Request 2 runs through the SMS screen. | Doc 1 |
 | Fri 12:30 | 5. Feature freeze | The validator reports 0 errors on every filed resource. Someone new answers request 1 in under 2 minutes. The README has the design answers. | Dev 1 |
 | Fri 13:30 | 6. Video | A video of up to 2 minutes, recorded on the frozen build, says what works and what does not | Doc 2 |
@@ -39,7 +39,7 @@ The task ids go into branch names and commit messages.
 | T02 | Keycloak realm: client, user profile, mappers, test citizens, citizen script, simulation label | Dev 1 | T01 | 2 |
 | T03 | Synapse config, Matrix users, Element config, room and widget bootstrap. Done. | Dev 3 | T01 | 2 |
 | T04 | Request service: Postgres tables `requests` and `bindings` (Drizzle), request states, audit log writer | Dev 1 | T01 | 3 |
-| T05 | Matrix bot: `!request`, notices, `!status` | Dev 3 | T03, T04 | 3 |
+| T05 | Widget actions with the Matrix OpenID token (request form, **Send anyway**, **Accept**, **Reject**, **Cancel**) and the Matrix notices. `!status` is done. | Dev 3 | T03, T04 | 3 |
 | T06 | Email to Mailpit, SMS screen, outgoing message check | Dev 1 | T04 | 3 |
 | T07 | Login with openid-client in Next.js route handlers, ID token check, session cookie | Dev 1 | T02, T04 | 3 |
 | T08 | Identity checks: level, name match, person number binding | Dev 3 | T07 | 3 |
