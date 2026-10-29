@@ -46,9 +46,11 @@ export function PortalPage({ token }: { token: string }) {
   const st = linkStatus(r)
   const S = state()
 
+  // Write link_opened once per session; "open" already implies that the request exists.
+  const opened = !!S.sessions[token]?.openedAt
   useEffect(() => {
-    if (r && st === "open" && !S.sessions[token]?.openedAt) mutate(() => openLink(token))
-  }, [token, st])
+    if (st === "open" && !opened) mutate(() => openLink(token))
+  }, [token, st, opened])
 
   if (st === "invalid") return <Message title="This link does not work" text="Check that you copied the whole link from the message." />
   if (st === "filed") return <Message title="Already answered" text="Thank you. There is nothing more to do." />
