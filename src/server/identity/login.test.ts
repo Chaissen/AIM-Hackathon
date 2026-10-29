@@ -210,7 +210,7 @@ test("a login while the answer is held shows the held page", async () => {
   assert.equal(run.transition, null);
 });
 
-test("a hold that loses the race to another login tells Dr. Hofer nothing", async () => {
+test("a pass that loses the race to a hold shows try again", async () => {
   const s = store();
   const [held, passed] = await Promise.all([s.login(petra), s.login(eva)]);
   // Petra's transition ran first in this store, so Eva's pass finds the request held.
@@ -218,13 +218,36 @@ test("a hold that loses the race to another login tells Dr. Hofer nothing", asyn
   assert.equal(passed.applied, false);
   assert.equal(passed.page, "unavailable");
   assert.equal(s.row.state, "identity_held");
+});
 
-  const t = store();
-  t.ports.transition = async () => false;
-  const lost = await t.login(petra);
-  assert.equal(lost.page, "held");
-  assert.equal(lost.notice, null);
-  assert.equal(t.notices.length, 0);
+test("a hold that loses the race to a pass shows try again and tells Dr. Hofer nothing", async () => {
+  const s = store();
+  const [passed, held] = await Promise.all([s.login(eva), s.login(petra)]);
+  // Eva's pass ran first, so Petra's hold is never applied and nobody will decide on it.
+  assert.equal(passed.applied, true);
+  assert.equal(held.applied, false);
+  assert.equal(held.page, "unavailable");
+  assert.equal(held.notice, null);
+  assert.equal(s.notices.length, 0);
+  assert.deepEqual([s.row.state, s.row.personNumber], ["verified", eva.personNumber]);
+});
+
+test("a bound request without a person number fails closed", async () => {
+  for (const state of ["verified", "answer_held"] as const) {
+    const s = store(state, { personNumber: null });
+    // The second Eva Brandl has the full requested name; she must not get the answer page.
+    const run = await s.login(citizen("eva.brandl2"));
+    assert.equal(run.result?.verdict, "fail", state);
+    assert.equal(run.page, "wrong_person", state);
+    assert.deepEqual(s.audit[1].detail, { checks: [{ check: "request_person", result: "fail", reason: "unbound" }] }, state);
+    assert.deepEqual(
+      s.notices.map(noticeText),
+      [
+        "Request 1 was opened by Eva Brandl, but the identity check failed. The request stores no person number to compare with, so nobody can be confirmed. Nothing was shown or filed.",
+      ],
+      state,
+    );
+  }
 });
 
 test("Keycloak unreachable holds without a state change and shows nothing", async () => {

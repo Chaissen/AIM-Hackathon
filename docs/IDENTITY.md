@@ -171,7 +171,7 @@ The request service runs four checks after login: the level, the name, the perso
 | Name | All requested name words are in the ID Austria name | The family names share a word but do not match fully | No shared family name word |
 | Person number | No binding yet, or the binding matches `urn:pvpgvat:oidc.bpk` | | A binding exists for this person and organisation with a different bPK, or the token has no bPK |
 | eHVD claim | No `urn:eidgvat:attributes.gda`, or one that `gdaOidFromClaim` reads | | The claim is present but malformed |
-| Request person, only for a request that is `verified` or `answer_held` | `urn:pvpgvat:oidc.bpk` equals `requests.person_number` | | Another bPK. Only the person who passed, or whom Dr. Hofer accepted, may answer. |
+| Request person, only for a request that is `verified` or `answer_held` | `urn:pvpgvat:oidc.bpk` equals `requests.person_number` | | Another bPK. Only the person who passed, or whom Dr. Hofer accepted, may answer. Also an empty `requests.person_number`, so broken data fails closed. |
 
 Any fail blocks the person, writes `identity_checked` with `fail` and `misdelivery_caught` with `wrong_person`, adds one to `failed_checks`, and tells Dr. Hofer. When the name failed, she gets the wrong-person notice from [M1](#m1-wrong-address) and [M2](#m2-forwarded-request). When the name matched and another check failed, the person may be the right one with the wrong login, so the notice gives the reason, for example "Request 1 was opened by Eva Brandl, but the identity check failed. The ID Austria login has only basic function, and a request needs full function. Nothing was shown or filed."
 
@@ -183,13 +183,13 @@ A login changes the state only while the request is `sent`, as the lifecycle tab
 |---|---|---|---|
 | `sent` | `verified`, stores the bPK, answer page | `identity_held`, stores the bPK, held notice | unchanged, `locked` on the third fail |
 | `identity_held` | unchanged, held page | unchanged, held page, no notice, the held person stays | unchanged, counted |
-| `verified` | unchanged, answer page | unchanged, held page | unchanged, counted |
-| `answer_held` | unchanged, held page | unchanged, held page | unchanged, counted |
+| `verified` | unchanged, answer page | none: the bound person's hold counts as a pass (answer page), anyone else fails the request person check | unchanged, counted |
+| `answer_held` | unchanged, held page | none: the bound person's hold counts as a pass (held page), anyone else fails the request person check | unchanged, counted |
 | any other | no check runs; the link does not work | | |
 
 A pass or a hold of the person `requests.person_number` names, in `verified` or `answer_held`, counts as a pass: Dr. Hofer accepted them, or they passed before. A fail still fails.
 
-If Keycloak or the eHVD cannot be reached, the request service treats it as a hold, never as a pass. A fail still wins over an outage.
+If Keycloak or the eHVD cannot be reached, the request service treats it as a hold, never as a pass, except for the person the request is bound to, as above. A fail still wins over an outage.
 
 - **Keycloak unreachable.** There is no verified person, so there is nobody for Dr. Hofer to accept. The request service writes `identity_checked` with `hold` and the reason `keycloak_unreachable`, keeps the state, and asks the person to try again later. The attempt does not count toward the lock.
 - **eHVD unreachable.** The person logged in, so the request goes to `identity_held`, and Dr. Hofer gets "Request 1 is on hold. The eHVD could not be reached to confirm Eva Brandl. Accept or reject the person in the widget."
@@ -199,7 +199,7 @@ The checks live in `src/server/identity/checks.ts`. Each returns `pass`, `hold`,
 - `findBinding` reads `bindings` for the requested name and organisation.
 - `recordAudit` writes an audit entry.
 - `incrementFailedChecks` adds one to `failed_checks` in one statement, `UPDATE … SET failed_checks = failed_checks + 1 … RETURNING failed_checks`, and returns the new count. The lock follows from that count. Reading the count and writing it back would let logins at the same time all write 1, and none would lock.
-- `transition` applies a change only while the request is still in its `from` state (`… WHERE state = 'sent'`) and stores the bPK in the same statement. It returns false when the state changed in between. Then a lost pass shows "try again", and a lost hold sends no notice, because Dr. Hofer was told about the person who won.
+- `transition` applies a change only while the request is still in its `from` state (`… WHERE state = 'sent'`) and stores the bPK in the same statement. It returns false when the state changed in between. Then the person sees "try again", and a lost hold sends no notice: nobody would ever decide on a hold that was not applied. The next login is checked against the new state.
 - `notify` posts the notice with `notifyRoom`. A failed notice never changes what the person sees.
 
 ### Name match

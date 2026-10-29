@@ -54,9 +54,13 @@ const fullName = (login: LoginIdentity) => `${login.givenName} ${login.familyNam
 /** Only what the checks found, in the shape of `IdentityCheck` in the audit writer. Never the patient, never document text. */
 const checkDetail = (checks: CheckResult[]) => ({ checks: checks.map(({ check, verdict, reason }) => ({ check, result: verdict, reason })) });
 
-/** The person a verified request is bound to: they passed, or Dr. Hofer accepted them. A held person is not accepted yet. */
-export const acceptedPerson = (request: CheckedRequest) =>
-  request.state === "verified" || request.state === "answer_held" ? request.personNumber : null;
+/**
+ * The person a verified request is bound to: they passed, or Dr. Hofer accepted them. A held person is not accepted yet.
+ * Undefined while the request is not bound. A bound request with a null person number still gives `{ personNumber: null }`,
+ * so the request person check fails closed.
+ */
+export const boundPerson = (request: CheckedRequest) =>
+  request.state === "verified" || request.state === "answer_held" ? { personNumber: request.personNumber } : undefined;
 
 /**
  * Turns a check result into the state change, the audit entries, the page and the notice to Dr. Hofer.
@@ -143,6 +147,7 @@ function failReason(check: CheckResult, recipient: string, org: string): string 
     case "ehvd_claim":
       return "The eHVD entry in the login could not be read.";
     case "request_person":
+      if (check.reason === "unbound") return "The request stores no person number to compare with, so nobody can be confirmed.";
       return `Another person already logged in for this request as ${recipient}.`;
     default:
       return `The ${check.check} check failed.`;
@@ -222,7 +227,7 @@ export async function runIdentityChecks(
   let decision: LoginDecision;
   if (outcome.ok) {
     const binding = await ports.findBinding({ given: request.given, family: request.family, org: request.org });
-    const result = checkIdentity({ requested: request, login: outcome.login, binding, accepted: acceptedPerson(request), unreachable });
+    const result = checkIdentity({ requested: request, login: outcome.login, binding, bound: boundPerson(request), unreachable });
     decision = decideLogin(live, recipient, outcome.login, result);
   } else {
     decision = decideLogin(live, recipient, null, keycloakUnreachable());
@@ -243,8 +248,11 @@ export async function runIdentityChecks(
     if (!applied) {
       // Another login or Dr. Hofer changed the request in between. Show nothing; the next login sees the new state.
       if (transition.to === "verified") page = "unavailable";
-      // Someone else's hold won; Dr. Hofer was told about them, not about this person.
-      if (transition.to === "identity_held") notice = null;
+      // A hold that was not applied is never decided: the request moved on without it. Tell no one; the person tries again.
+      if (transition.to === "identity_held") {
+        page = "unavailable";
+        notice = null;
+      }
     }
   }
 

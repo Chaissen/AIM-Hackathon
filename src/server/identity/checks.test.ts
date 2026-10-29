@@ -107,14 +107,23 @@ test("the request person: only the bound or accepted bPK passes", () => {
   assert.deepEqual(checkRequestPerson("GH:a", "GH:a"), { check: "request_person", verdict: "pass", reason: "same_person" });
   assert.deepEqual(checkRequestPerson("GH:a", "GH:b"), { check: "request_person", verdict: "fail", reason: "other_person" });
   assert.deepEqual(checkRequestPerson("GH:a", null), { check: "request_person", verdict: "fail", reason: "other_person" });
+  assert.deepEqual(checkRequestPerson(null, "GH:a"), { check: "request_person", verdict: "fail", reason: "unbound" });
 });
 
 test("acceptance lifts a hold for the accepted person only, never a fail", () => {
   const petra = { ...evaBrandl, givenName: "Petra", personNumber: "GH:petra", gdaOid: null };
+  const basicPetra = { ...petra, level: BASIC_FUNCTION };
   assert.equal(checkIdentity({ requested: request1, login: petra, binding: null }).verdict, "hold");
-  assert.equal(checkIdentity({ requested: request1, login: petra, binding: null, accepted: "GH:petra" }).verdict, "pass");
-  assert.equal(checkIdentity({ requested: request1, login: petra, binding: null, accepted: "GH:other" }).verdict, "fail");
-  assert.equal(checkIdentity({ requested: request1, login: { ...petra, level: BASIC_FUNCTION }, binding: null, accepted: "GH:petra" }).verdict, "fail");
+  assert.equal(checkIdentity({ requested: request1, login: petra, binding: null, bound: { personNumber: "GH:petra" } }).verdict, "pass");
+  assert.equal(checkIdentity({ requested: request1, login: petra, binding: null, bound: { personNumber: "GH:other" } }).verdict, "fail");
+  assert.equal(checkIdentity({ requested: request1, login: basicPetra, binding: null, bound: { personNumber: "GH:petra" } }).verdict, "fail");
+});
+
+test("a bound request without a person number fails closed", () => {
+  // Even a full name match must not pass when the bound person is unknown.
+  const result = checkIdentity({ requested: request1, login: evaBrandl, binding: null, bound: { personNumber: null } });
+  assert.equal(result.verdict, "fail");
+  assert.deepEqual(result.checks.at(-1), { check: "request_person", verdict: "fail", reason: "unbound" });
 });
 
 test("the second Eva Brandl fails once the first one is bound", () => {
