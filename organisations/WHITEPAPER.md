@@ -1,112 +1,145 @@
-# Whitepaper: Secure document requests from outside the network
+# Whitepaper: requesting documents from outside the PGK network
 
-**Track 2: Health Data Interoperability.** The requirements are in [`track/README.md`](../track/README.md) and the test data is in [`track/scenario/`](../track/scenario/).
-This is a living document. Add comments inline as `> 💬 Name: ...`. Put larger ideas in section 9.
+Track 2, health data interoperability. Hackathon prototype on synthetic data. Not a medical device.
 
-## 1. Problem and goal
+## The problem
 
-Doctors in the closed PGK/Matrix network still get results from outside labs and rehab clinics by fax or unencrypted email, then retype them by hand.
-**We build:** Dr. Hofer requests a document in Matrix. The outside person answers in the browser with no account and no install. Our service files the answer as valid FHIR R4 with Provenance and tells Dr. Hofer in Matrix.
+Austrian doctors are piloting PGK, a closed document network built on Matrix. Members are listed in a directory, and only members can be reached. Labs, rehab clinics, and patients outside the network still send results by fax or unencrypted email. The results come back as scans that someone at the clinic types in by hand.
 
-## 2. Scope
+In the scenario, Dr. Lena Hofer (internal medicine, Klinikum Beispielstadt) needs two documents about her patient Maria Beispiel, born 12 March 1961:
 
-**In:** Matrix bot command, email and SMS link (Mailpit plus a simulated SMS page), simulated ID Austria, an answer page (upload or form), Markdown → FHIR, HAPI FHIR storage, Matrix notification, audit log, misdelivery checks.
-**Out:** our own Matrix app, end-to-end encryption, real email or SMS, a real eID, documents that are not in the scenario Markdown format.
+1. Maria's latest blood clotting tests, from Dr. Eva Brandl at Labor Kanalstraße, before a planned procedure. Dr. Hofer has Dr. Brandl's work email address.
+2. Maria's rehab discharge report, from Stefan Kern, discharge manager at Reha Waldblick. Dr. Hofer has his mobile number.
 
-**We are done when the jury metrics hold:**
+Neither person is in the directory. Dr. Hofer knows only their name, their role, and one contact. The request is always for the named person, and a colleague may not answer for them.
 
-| Metric | Target |
-|---|---|
-| HL7 validator errors on every filed resource | 0 |
-| Effort for the outside person (request 1) | 0 installs, 0 accounts, under 2 min |
-| Misdeliveries caught (M1–M3) | 3/3 |
-| Audit coverage (6 steps, each with who/what/when) | 6/6 |
+## What we build
 
-## 3. Flow
+We build a request service that runs at the clinic, next to its Matrix server and its FHIR server.
 
-```
-Dr. Hofer (Element) ──!request──▶ Bot ──▶ Service: create Task + one-time link ──▶ Email (Mailpit) / SMS page
-                                                                                        │ [audit: request sent]
-Outside person opens link [audit: link opened] ──▶ Simulated ID Austria [audit: identity checked]
-   │  name must match the named recipient. If not: stop, show nothing, notify Dr. Hofer
-   ▼
-Answer page shows the request now ──▶ upload .md or fill the form (patient name + birth date) [audit: answer sent]
-   ▼
-Parse ─▶ patient match? ─no─▶ not filed, Matrix warning [audit: misdelivery caught]
-   │ yes
-   ▼
-FHIR transaction Bundle ─▶ HAPI [audit: answer filed] ─▶ Matrix: "Lab result from Dr. Brandl filed ✓"
-```
+1. Dr. Hofer types a request into her Matrix room. The bot inside the request service picks it up.
+2. The request service sends the outside person a link by email or SMS. The message contains no patient name, no birth date, and no document type.
+3. The outside person opens the link and logs in with ID Austria. In the demo, Keycloak plays ID Austria.
+4. The request service checks that the login belongs to the person Dr. Hofer asked for. Only then does the page show the patient and the requested document.
+5. The outside person uploads the document and confirms the patient's name and birth date in a form.
+6. The request service checks that the document is about the right patient. It turns the document into FHIR resources plus a Provenance resource and stores them on the FHIR server.
+7. The bot tells Dr. Hofer in her Matrix room.
 
-## 4. Architecture
-
-| Component | Tech (proposal) | Replaceable by |
-|---|---|---|
-| Matrix server and client | Synapse + Element Web (Docker) | Conduit, any Matrix client |
-| Request bot | Python, `matrix-nio` | An Element widget |
-| Core service and answer portal | Python, FastAPI + HTML templates | – |
-| Email | SMTP to Mailpit | Any SMTP provider, FTAPI |
-| SMS | Our own "SMS inbox" page behind an `SmsSender` interface | Any SMS gateway |
-| Identity | Simulated ID Austria (OIDC-style login page) behind an `IdentityProvider` interface | Real ID Austria or another eIDAS eID |
-| FHIR server | HAPI FHIR (Docker, local) | Any FHIR R4 server |
-| Audit | FHIR `AuditEvent` plus a local append-only log | SIEM, ATNA repository |
-| Validation | `validator_cli.jar` in the metrics script; HAPI `$validate` before filing | – |
-
-Everything runs with a single `docker compose up`.
-
-## 5. Design answers (draft for the README)
-
-1. **How does an outside person prove who they are without a directory?** Dr. Hofer names the person (for example "Dr. Eva Brandl") along with the contact. The link is possession proof only: single-use, random, expiring after 72 h. The outside person must also log in with an eID. The name the eID returns must match the named recipient. Nothing about the patient or the document is shown before that check passes.
-2. **Which identity check for which document?** *Proposal:* eID for both. The lab result goes by email, which is easy to mistype or forward, so possession of the link proves nothing. The rehab report goes by SMS, a stronger possession factor, but a colleague could still pick up the phone and the scenario forbids colleagues from answering. ➜ *Team decision (D2).*
-3. **Which FHIR resources and how are they linked?** See section 6.
-4. **How do we notice a misdelivery?** See section 7.
-5. **Where does it run?** *Proposal:* at the requesting clinic. The data never leaves the clinic's control, and the clinic already runs Matrix and FHIR. Only the answer portal is reachable from outside, over HTTPS.
-
-## 6. FHIR model
+The request service writes an audit entry at each step.
 
 ```
-Task (the request) ── for ─▶ Patient ◀── subject ── DiagnosticReport ── result ─▶ Observation ×4
-  │ requester: Practitioner Hofer                    DocumentReference (rehab)
-  │ owner: Practitioner Brandl / Kern
-  └ output ─▶ DiagnosticReport | DocumentReference
-Provenance ── target ─▶ all filed resources; agent = sender (onBehalfOf = their Organization);
-              recorded = time; policy + signature = how identity was checked (eID, timestamp)
-AuditEvent ×6 per request
+Dr. Hofer (Element)          Request service              Outside person            ID Austria
+       |                            |                            |                        |
+       |-- !request ...  ---------->|                            |                        |
+       |                            |-- email or SMS, link ----->|                        |
+       |                            |<-- opens link -------------|                        |
+       |                            |                            |-- logs in ------------>|
+       |                            |<-- signed token: name, birth date, person number ---|
+       |                            |   identity checks          |                        |
+       |                            |-- form with patient ------>|                        |
+       |                            |<-- document + patient -----|                        |
+       |                            |   patient check            |                        |
+       |                            |   file FHIR + Provenance   |                        |
+       |<-- "result is filed" ------|                            |                        |
 ```
+
+[Architecture](ARCHITECTURE.md) has the components and the request lifecycle. [Identity and misdelivery](IDENTITY.md) has the checks. [FHIR model](FHIR.md) has the resources.
+
+## Design answers
+
+These answers go into the repository README for the submission.
+
+### 1. How does an outside person prove who they are if they are in no directory?
+
+They log in with ID Austria, the Austrian state electronic ID. ID Austria gives our service their verified name, their birth date, and a person number that stays the same for our service. We compare the name with the name Dr. Hofer typed. The person needs no account with us and does not need to be in any directory beforehand.
+
+Two more facts back up the name. First, the link went only to the address or phone number Dr. Hofer gave, so the person has access to that inbox or phone. Second, healthcare professionals are listed in the Austrian eHealth directory (eHVD) with name, specialty, practice address, and whether they may currently practise. We check the eHVD where the role matters.
+
+After the first verified answer, we store the person number. From then on, only that exact person can answer as "Eva Brandl", even if a second Eva Brandl exists.
+
+Nobody can ask ID Austria in advance whether a person has an ID Austria. We learn it when they log in.
+
+### 2. Which identity check do you require for each type of document and why?
+
+Every outside person sees the patient's name once the identity check passes. So every document type needs an ID Austria login at the full function level, which means the person's identity was checked in person once. The other checks depend on who answers and on what the document is used for.
+
+| Document | Who answers | Checks | Why |
+|---|---|---|---|
+| Lab result | The named lab physician | ID Austria full, name match, eHVD lists the person as an active physician at the named lab, person number if known | Lab values feed straight into a clinical decision, here the clearance for a procedure. A qualified physician must stand behind them. |
+| Rehab discharge report | The named discharge manager | ID Austria full, name match, the link went to the phone number Dr. Hofer gave, eHVD lists the rehab clinic | The sender is administrative staff and is not in a professional register. The report names its medical author, and we file that physician as the author. |
+| Any document from a person the eHVD cannot confirm | The named person | ID Austria full, name match. The answer waits until Dr. Hofer accepts it in Matrix. | We cannot confirm the role, so a human decides. |
+
+### 3. Which FHIR resources do you create and how do they reference each other and the patient?
 
 | Answer | Resources |
 |---|---|
-| Lab result | `DiagnosticReport` (LOINC 11502-2 "Laboratory report", status final), one `Observation` per row: LOINC from the table, `valueQuantity` with UCUM units, `referenceRange`, `effectiveDateTime` = sample taken, `issued` = reported |
-| Rehab report | `DocumentReference` (LOINC 18842-5 "Discharge summary"), Markdown attached as base64 `text/markdown` |
-| Both | `Practitioner` and `Organization` for the sender, `Provenance`, `Task` updated to `completed`, all sent as one transaction `Bundle` |
+| Lab result | One Observation per test, with the LOINC code from the document, UCUM units, reference range, and interpretation. One DiagnosticReport groups the Observations and carries the original document. |
+| Rehab report | One DocumentReference with the report text attached and the stay period. |
+| Every answer | One Provenance that targets everything filed. It records who sent the answer, when, and how their identity was checked, including the signed ID Austria token. |
+| Every request | One Task that tracks the request from sent to completed and points at the filed results. |
+| People and organisations | Practitioner and Organization resources for Dr. Hofer, the outside people, the document authors, and their organisations. |
 
-Gotchas: `10^9/L` → UCUM `10*9/L`. INR has no unit, so it gets a value only. Times use `+02:00` (CEST on 22 Oct). The Patient comes from `patient.json`. On the public HAPI server it gets our own ID.
+Every clinical resource points at the Patient through `subject`. [FHIR model](FHIR.md) has the reference diagram and the field mapping.
 
-## 7. Misdelivery handling
+### 4. How do you notice a misdelivery?
 
-| Test | What happens | Caught by |
+The request service checks at three points.
+
+1. Before sending. If the email domain differs from the domain the eHVD lists for the organisation, Dr. Hofer gets a warning and must confirm. This check flags `labor-kanaI.example` before anything goes out.
+2. At login. The ID Austria name must match the requested person. A stranger at a mistyped address (test M1) and a colleague with a forwarded email (test M2) fail here. They see nothing about the patient and cannot answer. The audit log records the failed check, and Dr. Hofer gets a Matrix message.
+3. On answer. The patient name and birth date in the document and in the form must match the patient record. A result for another patient (test M3) is not filed, and Dr. Hofer gets a Matrix message.
+
+### 5. Where does your service run: at the clinic, at the outside organisation or at a third party?
+
+At the clinic. Klinikum Beispielstadt already runs its Matrix server and its FHIR server, so the request service runs next to them. Patient data leaves the clinic only toward the person who proved their identity. The outside organisation runs nothing. Its staff need a browser and ID Austria.
+
+A third party, such as the PGK network operator, could later run one shared instance for all members. That saves each clinic the setup. The cost is that the operator then holds patient data from every clinic and needs a processing agreement with each one. For a pilot, we would keep the service at the clinic.
+
+## What is real and what is simulated
+
+| Part | In the demo | In production |
 |---|---|---|
-| M1 wrong address (`labor-kanaI`) | The stranger opens the link and the eID name ≠ "Eva Brandl" → blocked, sees no patient or document type | Identity check, audit, Matrix warning |
-| M2 forwarded to a colleague | The colleague's eID name ≠ the recipient → blocked, nothing filed | Identity check, audit, Matrix warning |
-| M3 wrong patient (Max) | The document's patient and the form's patient ≠ the Task patient (name + birth date) → not filed | Patient match, audit, Matrix warning |
-| Bonus | At send time, warn about lookalike domains (`I` vs `l`) and unknown domains | Bot |
+| Matrix | Synapse and Element Web, server name `klinikum.example` | The PGK homeserver |
+| ID Austria | Keycloak over OpenID Connect, with the claim names of a real ID Austria response | The ID Austria reference environment, then production. Both need a registered service provider, which private companies register through Mein USP. |
+| eHVD | A JSON file with the same fields as the real directory | The eHVD web service, after registration with the health ministry |
+| Email | Mailpit catches every message | The clinic's mail server |
+| SMS | A page in the request service shows each SMS | An SMS gateway |
+| FHIR server | Local HAPI FHIR | The clinic's FHIR server |
 
-## 8. Hard rules
+Keycloak does not simulate the phone-app confirmation that real ID Austria uses. We say so in the video.
 
-- Synthetic data only.
-- Emails and SMS contain no patient name, no birth date and no document type, only "Dr. Hofer, Klinikum Beispielstadt, sent you a secure request" plus the link.
-- The portal shows the request details only after a successful identity check.
-- Nothing is filed unless both the identity check and the patient match pass.
-- Each external product sits behind an interface (email, SMS, eID, FHIR server).
+## How we measure the metrics
 
-## 9. Open decisions and team ideas
+| Metric | Target | How we measure |
+|---|---|---|
+| FHIR validation | 0 errors | `scripts/validate.sh` exports every resource filed during a run and runs the HL7 validator with `-version 4.0`. It counts issues with severity `error`. |
+| Effort for the outside person | 0 installs, 0 accounts, under 2 minutes | Someone new answers request 1 with a stopwatch running from opening the email in Mailpit to pressing send. The audit times from `link_opened` to `answer_sent` back up the stopwatch. We count ID Austria as an existing state ID, not as an account with us. |
+| Misdeliveries caught | 3 of 3 | We run M1, M2, and M3 from `track/scenario/misdelivery.md` on request 1. Each must show the outcome that the test names and a `misdelivery_caught` audit entry. |
+| Audit coverage | 6 of 6 | `scripts/audit_check.py` lists the six event types for a request, each with who, what, and when. |
 
-| # | Decision | Proposal | Owner | Decided |
-|---|---|---|---|---|
-| D1 | Answer by upload, form or both | Both: upload the .md and confirm the patient name and birth date in two fields | Doc 1 | |
-| D2 | Identity level per document type | eID for both (see 5.2) | Doc 1 + Dev 3 | |
-| D3 | Use AI? | Optional: extract the rehab medications into `MedicationStatement`, only if they are 100 % correct on the scenario | Dev 3 | |
-| D4 | M2 behaviour: block or file-but-flag | Block, and tell Dr. Hofer who tried | Doc 1 | |
-| D5 | Where it runs | At the clinic (see 5.5) | All | |
+The scripts are planned. [Timeline](TIMELINE.md) has the owners.
 
-> 💬 Add ideas and comments here.
+## How this answers the judging questions
+
+Clinical approach and impact. A lab physician answers with the report she already produces and her own ID Austria. She needs no new account and no app. Dr. Hofer gets the clotting values as structured Observations that she can trend and reuse, not a scan. A clinic runs four containers it mostly runs already.
+
+Technical quality. Every filed resource passes the HL7 validator. The identity check combines a state ID, a name match, a professional register, and a stored person number, and it costs the outside person about one minute.
+
+Execution. The whole flow runs on both scenario requests. New documents in the same Markdown format go through the same parser. Jury members can create their own outside people on the Keycloak sign-up page.
+
+## Limitations
+
+- ID Austria is simulated. Real use needs a registered service provider and the phone-app step.
+- The name is the only link between an ID Austria login and an eHVD entry, because the eHVD has no birth date.
+- A second person with the same name and the same role who receives the link would pass the first time. The stored person number closes this gap from the second request on.
+- The parser expects the scenario's Markdown format and English dates. Other documents go to Dr. Hofer as held answers.
+
+## Sources
+
+- [Track 2 brief and scenario](https://github.com/AIM-Austria/TRACK-2-interoperability), copied to [`track/`](../track/README.md)
+- [ID Austria predefined test identities](https://www.id-austria.gv.at/de/developer/testen/vordefinierte-testidentit%C3%A4ten)
+- [USP: registering as an ID Austria service provider](https://www.usp.gv.at/hilfe-und-support/verfahrensrechte/registrierung-als-ida-sp.html)
+- [eHVD web service handbook v2.4](https://www.gesundheit.gv.at/dam/gesundheitgvat/professional/it-services/ehvd/eHVD-ServicehandbuchV2.4.pdf)
+- [Signicat: ID Austria OIDC attributes](https://developer.signicat.com/identity-methods/id-austria/attributes-reference/id-austria-attributes-oidc/)
+
+[Identity and misdelivery](IDENTITY.md) lists all sources on ID Austria and eHVD.
