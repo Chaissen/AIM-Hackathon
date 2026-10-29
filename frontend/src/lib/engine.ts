@@ -2,7 +2,7 @@
 /* ordy request engine: ported unchanged from prototype/ordy.html.
    Simulates the request service, ID Austria (Keycloak), the eHVD, Mailpit/SMS,
    the FHIR mapper and the audit log, all in the browser. Synthetic data only. */
-// ---------- Reference data (from organisations/*.md and track/scenario) ----------
+// ---------- Reference data (from docs/*.md and track/scenario) ----------
 const CLINIC = { name: 'Klinikum Beispielstadt', oid: '2.999.1.3', domain: 'klinikum.example' };
 const ME = { given: 'Lena', family: 'Hofer', title: 'Dr.', matrix: '@lena.hofer:klinikum.example', role: 'Internal medicine', oid: '2.999.2.3' };
 const BASE_URL = 'https://ordy.klinikum.example/r/';

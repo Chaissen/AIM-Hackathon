@@ -1,6 +1,6 @@
 import { integer, jsonb, pgEnum, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
 
-// The six event types the jury counts (track README, "Audit coverage"). See organisations/ARCHITECTURE.md, "Audit log".
+// The six event types the jury counts (track README, "Audit coverage"). See docs/ARCHITECTURE.md, "Audit log".
 export const auditEvent = pgEnum("audit_event", [
   "request_sent",
   "link_opened",

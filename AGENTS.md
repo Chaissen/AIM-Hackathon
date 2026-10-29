@@ -19,5 +19,5 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - Setup and start: `./scripts/setup.sh` once, then `pnpm dev`. `pnpm reset` empties Postgres, HAPI, and Mailpit. `!status` in the Matrix room checks DB, FHIR, and Matrix.
 - Verify before handing back: `pnpm typecheck && pnpm lint && pnpm build`.
 - New dependencies must be at least 7 days old (`minimumReleaseAge` in `pnpm-workspace.yaml`); do not lower it.
-- Docs live in `organisations/` (start with `DEVELOPMENT.md` and `ARCHITECTURE.md`). Keep them in sync with the code when you change the stack, ports, commands, or env variables.
+- Docs live in `docs/` (start with `DEVELOPMENT.md` and `ARCHITECTURE.md`). Keep them in sync with the code when you change the stack, ports, commands, or env variables.
 - Track data lives in `track/` (copy of the official repo, including `track/scenario/documents/`). Synthetic data only.

@@ -20,7 +20,7 @@ Each milestone may slip 30 minutes. A longer slip triggers the cut list.
 
 | Time | Milestone | Done when | Checked by |
 |---|---|---|---|
-| Thu 18:00 | 1. Scope lock | The docs in `organisations/` describe Track 2 and the team agrees on them | Doc 1 |
+| Thu 18:00 | 1. Scope lock | The docs in `docs/` describe Track 2 and the team agrees on them | Doc 1 |
 | Thu 21:30 | 2. Infrastructure up | `./scripts/setup.sh` and `pnpm dev` start Synapse, Element, Keycloak with the imported realm, Mailpit, HAPI, Postgres, and ordy. Dr. Hofer logs in to Element. `eva.brandl` logs in to Keycloak. | Dev 1 |
 | Thu 24:00 | 3. Happy path | Request 1 runs end to end. The bot command sends an email, Dr. Brandl logs in and uploads, four Observations, a DiagnosticReport, and a Provenance land in HAPI, and Dr. Hofer gets the Matrix message. | Dev 1, Dev 2, Dev 3 |
 | Fri 09:30 | 4. Misdelivery and audit | M1, M2, and M3 are caught. A request shows 6 of 6 audit event types. Request 2 runs through the SMS screen. | Doc 1 |

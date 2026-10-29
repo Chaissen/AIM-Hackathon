@@ -8,20 +8,20 @@ Status: design written; TypeScript stack set up (Next.js, tRPC, Postgres, Matrix
 
 | Document | What it covers |
 |---|---|
-| [Whitepaper](organisations/WHITEPAPER.md) | The problem, the solution, our answers to the five design questions, and how we measure the metrics |
-| [Development](organisations/DEVELOPMENT.md) | Set up, start, reset, and extend the stack; troubleshooting |
-| [Architecture](organisations/ARCHITECTURE.md) | Components, ports, the request lifecycle, the Matrix bot, messages, parsing, and the audit log |
-| [Identity and misdelivery](organisations/IDENTITY.md) | Real ID Austria and eHVD, the Keycloak simulation, the identity checks, and the three misdelivery tests |
-| [FHIR model](organisations/FHIR.md) | The resources we file, how they reference each other, and how we validate them |
-| [Timeline](organisations/TIMELINE.md) | Milestones, tasks, owners, and the cut list |
-| [Roles and workflow](organisations/ROLES_AND_WORKFLOW.md) | Who owns what, git rules, and handoffs |
-| [Compliance and safety](organisations/COMPLIANCE_AND_SAFETY.md) | Synthetic data, message rules, data we keep, AI rules, and the disclaimer |
-| [UML diagrams](organisations/UML.md) | Use cases, domain classes, and component relations |
+| [Whitepaper](docs/WHITEPAPER.md) | The problem, the solution, our answers to the five design questions, and how we measure the metrics |
+| [Development](docs/DEVELOPMENT.md) | Set up, start, reset, and extend the stack; troubleshooting |
+| [Architecture](docs/ARCHITECTURE.md) | Components, ports, the request lifecycle, the Matrix bot, messages, parsing, and the audit log |
+| [Identity and misdelivery](docs/IDENTITY.md) | Real ID Austria and eHVD, the Keycloak simulation, the identity checks, and the three misdelivery tests |
+| [FHIR model](docs/FHIR.md) | The resources we file, how they reference each other, and how we validate them |
+| [Timeline](docs/TIMELINE.md) | Milestones, tasks, owners, and the cut list |
+| [Roles and workflow](docs/ROLES_AND_WORKFLOW.md) | Who owns what, git rules, and handoffs |
+| [Compliance and safety](docs/COMPLIANCE_AND_SAFETY.md) | Synthetic data, message rules, data we keep, AI rules, and the disclaimer |
+| [UML diagrams](docs/UML.md) | Use cases, domain classes, and component relations |
 | [Track brief](track/README.md) and [scenario](track/scenario/README.md) | The task as the organisers wrote it |
 
 ## Quick start
 
-Requirements: Docker with Compose v2, Node.js 22 or newer, pnpm 10 (`corepack enable`), and Java 17 or newer for the HL7 validator. [Development](organisations/DEVELOPMENT.md) has the full guide.
+Requirements: Docker with Compose v2, Node.js 22 or newer, pnpm 10 (`corepack enable`), and Java 17 or newer for the HL7 validator. [Development](docs/DEVELOPMENT.md) has the full guide.
 
 ```bash
 ./scripts/setup.sh   # once: .env, containers, Matrix users, database, FHIR patient, Matrix room and widget
