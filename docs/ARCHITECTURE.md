@@ -8,7 +8,7 @@ This page describes what runs, how the parts talk, and what the request service 
 |---|---|---|---|---|
 | Synapse | Matrix homeserver for `klinikum.example` | Reused | [`matrixdotorg/synapse`](https://hub.docker.com/r/matrixdotorg/synapse) | 8008 |
 | Element Web | Dr. Hofer's chat client | Reused | [`vectorim/element-web`](https://hub.docker.com/r/vectorim/element-web) | 8081 |
-| Request service (ordy) | Outside portal, widget, identity checks, parser, FHIR mapper, audit log, SMS screen | Built | TypeScript: [Next.js](https://nextjs.org/docs) 16 (App Router), [tRPC](https://trpc.io/docs) v11, [zod](https://zod.dev/), [Drizzle](https://orm.drizzle.team/), [openid-client](https://github.com/panva/openid-client) (T07), [markdown-it](https://github.com/markdown-it/markdown-it) (T10) | 3010 |
+| Request service (ordy) | Outside portal, widget, identity checks, parser, FHIR mapper, audit log, SMS screen | Built | TypeScript: [Next.js](https://nextjs.org/docs) 16 (App Router), [tRPC](https://trpc.io/docs) v11, [zod](https://zod.dev/), [Drizzle](https://orm.drizzle.team/), [openid-client](https://github.com/panva/openid-client) (T07), [markdown-it](https://github.com/markdown-it/markdown-it) (T10), UI with [shadcn/ui](https://ui.shadcn.com/) on Tailwind CSS | 3010 |
 | Matrix bot | Notices and `!status` in Dr. Hofer's room | Built | TypeScript process in `src/bot/`, small Matrix client on `fetch` in `src/server/matrix/client.ts` | none |
 | Postgres | Requests, bindings, audit log | Reused | [`postgres:17-alpine`](https://hub.docker.com/_/postgres) | 5433, mapped to 5432 in the container |
 | Simulated ID Austria | OpenID Connect login with fake citizens | Configured (T02) | [Keycloak](https://www.keycloak.org/server/containers) | 8080 |
@@ -103,7 +103,7 @@ The widget gets a Matrix OpenID token from Element through the widget API and se
 | **Cancel** | Cancels an open request |
 | Request list | Shows each request with its state and its audit entries |
 
-The request form has the document type, the patient, the given name, the family name, the organisation, and either an email address or a phone number. The request procedure rejects a request unless it has a patient, a given name, a family name, and either an email address or a phone number. Separate given and family name fields avoid guessing which part of "Eva Maria Brandl" is the family name.
+The request form has the document type, the patient, the given name, the family name, the organisation, and either an email address or a phone number. The request procedure rejects a request unless it has a patient, a given name, a family name, an organisation, and either an email address or a phone number. Separate given and family name fields avoid guessing which part of "Eva Maria Brandl" is the family name.
 
 | Field | Request 1 | Request 2 |
 |---|---|---|
@@ -247,8 +247,14 @@ src/
   app/                        Next.js pages and route handlers
     api/trpc/[trpc]/route.ts  tRPC endpoint
     api/healthz/route.ts      health check for scripts and containers
-    widget/page.tsx           request form inside Element (placeholder)
-    r/[token]/, auth/         outside portal and ID Austria login, planned, T07 and T09
+    widget/                   request form inside Element. Sending is planned, T04 and T05
+    r/[token]/                outside portal: landing page and answer form. Data loading planned, T04, T07, T09
+    auth/                     ID Austria login, planned, T07
+    sms/page.tsx              SMS screen. Reading the SMS log planned, T06
+    audit/page.tsx            audit log for the demo, localhost only
+  components/ui/              shadcn/ui components, added with `pnpm dlx shadcn@4.22.1 add <name>`
+  components/                 shared UI such as the portal frame
+  lib/                        code shared by server and browser: document types, request input, `cn`
   trpc/                       React client for tRPC (TanStack Query)
   server/
     api/trpc.ts               context and procedures: public, clinic, eid
@@ -260,6 +266,7 @@ src/
     ehvd/                     eHVD SOAP client, planned (T15)
     matrix/client.ts          Matrix client-server API
     auth/eid-session.ts       outside person's session cookie
+    portal/data.ts            data loaders for the portal and SMS pages, stubs until T04, T06, T07
   bot/                        Matrix bot process and commands
 scripts/
   setup.sh                    one-time setup
