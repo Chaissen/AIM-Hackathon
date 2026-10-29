@@ -157,7 +157,7 @@ export function AppShell({ crumbs, actions, children }: { crumbs: React.ReactNod
         </header>
         <main className="mx-auto grid w-full max-w-6xl content-start gap-6 p-4 md:p-6">{children}</main>
         <footer className="mx-auto w-full max-w-6xl px-4 pb-6 text-xs text-muted-foreground md:px-6">
-          <FileText className="mr-1 inline size-3" /> Prototype with made-up data. Not for clinical use.
+          <FileText className="mr-1 inline size-3" /> Prototype with synthetic data. ID Austria is simulated. Not for clinical use.
         </footer>
       </SidebarInset>
 
