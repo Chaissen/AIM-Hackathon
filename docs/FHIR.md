@@ -17,6 +17,8 @@ This page lists the FHIR R4 resources the request service files, how they refere
 
 We file all resources of one answer in one [transaction Bundle](https://hl7.org/fhir/R4/http.html#transaction), so an answer is filed completely or not at all.
 
+`src/server/fhir/mappers.ts` builds the Observations, the DiagnosticReport, and the DocumentReference from the parsed document, each with a `urn:uuid:` fullUrl. The filing (T13) passes in the Patient, Practitioner, and Organization references and wraps the entries into the transaction Bundle.
+
 ## How the resources reference each other
 
 ```
@@ -209,6 +211,8 @@ The request service puts `track/scenario/patient.json` on the server with `PUT P
 2. It fetches each resource from HAPI into `out/filed/`.
 3. It runs the validator on each file, as the scenario README says: `java -jar validator_cli.jar <file> -version 4.0`.
 4. It counts the issues with severity error. The target is 0. Warnings do not count.
+
+The mapper output for the three scenario documents (fixtures in `src/server/documents/scenario-fixtures.ts`) has 0 errors and only the `dom-6` warning.
 
 The validator checks LOINC codes against tx.fhir.org, so it needs internet access.
 

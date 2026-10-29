@@ -269,8 +269,8 @@ src/
     api/root.ts               app router and createCaller
     api/routers/              one router per area
     db/                       Drizzle schema and client
-    fhir/                     FHIR client, mappers planned (T12 to T14)
-    documents/                parser and patient check (T10, T11), typed records in types.ts
+    fhir/                     FHIR client, lab and rehab mappers (T12, T14)
+    documents/                parser and patient check (T10, T11), typed records in types.ts, the scenario documents as parsed records for tests
     identity/names.ts         name words and subset test from Identity, shared by the patient check and T08
     ehvd/oid.ts               OID check shared by the login and pnpm citizen
     ehvd/                     eHVD SOAP client, planned (T15)
