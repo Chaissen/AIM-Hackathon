@@ -108,6 +108,10 @@ export async function findRequestByToken(db: Db, token: string): Promise<Request
   return found ? getRequest(db, found.id) : null;
 }
 
+export async function saveIdToken(db: Db, id: number, idToken: string): Promise<void> {
+  await db.update(requests).set({ idToken }).where(eq(requests.id, id));
+}
+
 /** The requests one network member sent, newest first. */
 export async function listRequests(db: Db, requester: string, limit = 100): Promise<RequestRow[]> {
   await expireDueRequests(db);

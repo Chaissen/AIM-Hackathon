@@ -177,7 +177,8 @@ Before sending, the request service compares the words of the message with the p
 |---|---|
 | `GET /r/{token}` | Writes `link_opened`. Shows the requesting doctor and clinic and a **Log in with ID Austria** button. |
 | `GET /auth/login` | Redirects to Keycloak with `state`, `nonce`, PKCE, and `prompt=login`. |
-| `GET /auth/callback` | Swaps the code for tokens, verifies the ID token, runs the identity checks, and writes `identity_checked`. |
+| `GET /auth/callback` | Swaps the code for tokens, verifies the ID token, ends the Keycloak session, and stores the ID token on the request. The identity checks and `identity_checked` follow with T08. |
+| `GET /auth/failed` | Says the login has expired and asks the person to open the link again. |
 | `GET /r/{token}/answer` | Shows the patient, the requested document, the upload field, and fields for the patient's name and birth date. Only while the request is `verified`, and only for the person whose person number the request stores. |
 | `POST /r/{token}/answer` | Writes `answer_sent`, parses the document, runs the patient check, files the resources, and writes `answer_filed`. |
 | `GET /sms` | Shows every SMS the request service would have sent, like a phone screen. |
@@ -185,7 +186,7 @@ Before sending, the request service compares the words of the message with the p
 
 The pages are Next.js routes. `/auth/login` and `/auth/callback` are route handlers, because they need real redirects and cookies. The answer page loads its data and sends the upload through tRPC (`eidProcedure`, the upload as `FormData`).
 
-A signed session cookie (`ordy_eid_session`, see `src/server/auth/eid-session.ts`) holds the request id and, after login, the person number (the bPK, never `sub`). It expires after 30 minutes.
+After the login, a signed session cookie (`ordy_eid_session`, see `src/server/auth/eid-session.ts`) holds the request id, the person number (the bPK, never `sub`), the names, the function level, and the eHVD OID. It expires after 30 minutes. The ID token stays on the server, on the request row. During the login, a second signed cookie, `ordy_eid_login`, carries `state`, `nonce`, and the PKCE verifier to the callback. [The login for T07](IDENTITY.md#the-login-for-t07) has the details.
 
 ## Document parsing
 
@@ -214,11 +215,11 @@ The request service keeps three Postgres tables, defined with Drizzle in `src/se
 
 | Table | Columns |
 |---|---|
-| `requests` | `id`, `doc_type`, `patient_id`, `given`, `family`, `org`, `channel`, `address`, `requester`, `requester_name`, `state`, `link_hash`, `failed_checks`, `person_number`, `created_at`, `expires_at`, `matrix_room`, `matrix_event` |
+| `requests` | `id`, `doc_type`, `patient_id`, `given`, `family`, `org`, `channel`, `address`, `requester`, `requester_name`, `state`, `link_hash`, `failed_checks`, `person_number`, `id_token`, `created_at`, `expires_at`, `matrix_room`, `matrix_event` |
 | `bindings` | `given`, `family`, `org`, `person_number`, `practitioner_id`, `first_verified_at` |
 | `audit_log` | `id`, `at`, `event`, `request_id`, `actor_kind`, `actor`, `outcome`, `detail` |
 
-In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `org` are the person as Dr. Hofer typed them. `requester` is the Matrix ID of the network member who sent the request, and `requester_name` is their Matrix display name at that time, for example "Dr. Lena Hofer", as one line of at most 100 characters. The portal and the messages use it. Members set their display name themselves, so one member could pose as another in a message; the audit log always keeps the Matrix ID. A production version takes the name from a directory the members cannot edit, or sets `enable_set_displayname: false` in Synapse. `link_hash` is the hex SHA-256 of the link token. `person_number` is the bPK of the person who passed the identity check, or who was held; after **Accept** it names the accepted person. Only that person sees the answer page and may answer. `matrix_room` and `matrix_event` hold the room and the first notice of the request's thread (T05).
+In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `org` are the person as Dr. Hofer typed them. `requester` is the Matrix ID of the network member who sent the request, and `requester_name` is their Matrix display name at that time, for example "Dr. Lena Hofer", as one line of at most 100 characters. The portal and the messages use it. Members set their display name themselves, so one member could pose as another in a message; the audit log always keeps the Matrix ID. A production version takes the name from a directory the members cannot edit, or sets `enable_set_displayname: false` in Synapse. `link_hash` is the hex SHA-256 of the link token. `person_number` is the bPK of the person who passed the identity check, or who was held; after **Accept** it names the accepted person. Only that person sees the answer page and may answer. `id_token` is the ID token of the last login, exactly as received, for the Provenance signature. `matrix_room` and `matrix_event` hold the room and the first notice of the request's thread (T05).
 
 `bindings` remembers which ID Austria person number answered as a given person at a given organisation. Its key is `given`, `family`, and `org`, so each person at an organisation has one person number. The audit log never holds document text.
 
@@ -284,8 +285,8 @@ src/
     api/trpc/[trpc]/route.ts  tRPC endpoint
     api/healthz/route.ts      health check for scripts and containers
     widget/                   request form inside Element. Sending is planned, T05
-    r/[token]/                outside portal: landing page and answer form. Login and answer planned, T07, T09
-    auth/                     ID Austria login, planned, T07
+    r/[token]/                outside portal: landing page and answer form. Answer planned, T09
+    auth/                     ID Austria login and callback route handlers, expired-login page. Identity checks planned, T08
     sms/page.tsx              SMS screen. Reading the SMS log planned, T06
     audit/page.tsx            audit UI; authenticated data via clinic.audit
   components/ui/              shadcn/ui components, added with `pnpm dlx shadcn@4.22.1 add <name>`
@@ -308,8 +309,9 @@ src/
     ehvd/                     eHVD SOAP client, planned (T15)
     matrix/client.ts          Matrix client-server API
     matrix/notices.ts         notice texts and notifyRoom for Dr. Hofer's room
-    auth/eid-session.ts       outside person's session cookie
-    portal/data.ts            data loaders for the portal and SMS pages, the SMS log is a stub until T06
+    auth/eid-session.ts       outside person's session cookie and login cookie
+    auth/id-austria.ts        OpenID Connect login: discovery, code swap, Keycloak logout, claims to session
+    portal/data.ts            data loaders for the portal, the login, and the SMS page. The SMS log is a stub until T06
   bot/                        Matrix bot process and commands
 scripts/
   setup.sh                    one-time setup
