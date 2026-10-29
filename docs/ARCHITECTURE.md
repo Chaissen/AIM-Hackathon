@@ -183,6 +183,8 @@ The parser reads headings and tables from markdown-it tokens and splits `Key: va
 
 The document kind picks the mapper. `lab report` goes to the lab mapper and `discharge report` goes to the rehab mapper. Any other kind becomes a DocumentReference with the text attached, held for Dr. Hofer.
 
+The parser lives in `src/server/documents/`. `parseDocument()` returns a typed `LabResult`, `RehabReport`, or generic document (`types.ts`), or a list of reasons the uploader can act on; it never throws on content. It converts the unit `10^9/L` to UCUM `10*9/L`, computes `N`, `H`, or `L` from the reference range, and reads a stay that names the month once, twice, or crosses a year. `checkAnswerPatient()` in `patient-check.ts` runs `samePatient()` on the document and on the form, and `uploadHash()` gives the SHA-256 that stays in the audit log when an upload is discarded.
+
 ### AI fallback (optional, cut first)
 
 If the parser cannot read a document, a language model may extract the same fields as JSON against a fixed schema. Every value and every LOINC code it returns must appear word for word in the document. The patient check stays deterministic. An answer read by the model always waits until Dr. Hofer accepts it in the widget.
@@ -268,6 +270,8 @@ src/
     api/routers/              one router per area
     db/                       Drizzle schema and client
     fhir/                     FHIR client, mappers planned (T12 to T14)
+    documents/                parser and patient check (T10, T11), typed records in types.ts
+    identity/names.ts         name words and subset test from Identity, shared by the patient check and T08
     ehvd/oid.ts               OID check shared by the login and pnpm citizen
     ehvd/                     eHVD SOAP client, planned (T15)
     matrix/client.ts          Matrix client-server API
