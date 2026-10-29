@@ -191,22 +191,28 @@ ID Austria returns the full official name. Dr. Hofer types what she knows. The m
 | Eva Brandl | Thomas Wagner | Fail |
 
 ```ts
-// Dr., DDr., Dr.in, Mag.a, Univ.-Prof., Dipl.-Ing., Prim. The female ending needs its dot, so "Dia" stays a name.
-export const TITLE = /^(?:(?:d?dr|mag|prof|univ|med|di|ing|dipl|prim)(?:\.(?:in|a))?\.?-?)+$/i;
+// Dr., DDr., Dr.in, Mag.a, Univ.-Prof., Dipl.-Ing., Prim. Joined titles need a dot or hyphen between them
+// and the female ending needs its dot, so "Magdi" and "Dia" stay names.
+export const TITLE = /^(?:d?dr|mag|prof|univ|med|di|ing|dipl|prim)(?:\.(?:in|a))?(?:[.-]+(?:d?dr|mag|prof|univ|med|di|ing|dipl|prim)(?:\.(?:in|a))?)*\.?$/i;
 const SPELL_OUT: Record<string, string> = { "ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss" };
 
-export function nameWords(name: string): Set<string> {
-  const plain = name
-    .normalize("NFC") // a decomposed "ü" would otherwise lose its umlaut instead of becoming "ue"
-    .toLowerCase()
-    .split(/\s+/)
-    .filter((w) => !TITLE.test(w))
-    .join(" ")
+function plainWords(text: string): string[] {
+  return text
     .replace(/[äöüß]/g, (c) => SPELL_OUT[c])
     .replace(/[-.,]/g, " ")
     .normalize("NFKD")
-    .replace(/[^\x00-\x7f]/g, "");
-  return new Set(plain.split(/\s+/).filter((w) => w && !TITLE.test(w)));
+    .replace(/[^\x00-\x7f]/g, "")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+export function nameWords(name: string): Set<string> {
+  // NFC first: a decomposed "ü" would otherwise lose its umlaut instead of becoming "ue".
+  const tokens = name.normalize("NFC").toLowerCase().split(/\s+/).filter(Boolean);
+  const untitled = tokens.filter((t) => !TITLE.test(t.replace(/,+$/, ""))); // also "Beispiel, Dr.in, Maria"
+  const words = plainWords(untitled.join(" ")).filter((w) => !TITLE.test(w)); // also "Dr.Eva" without a space
+  // A name made only of title-like words, such as the given name "Di", keeps them.
+  return new Set(words.length ? words : plainWords(tokens.join(" ")));
 }
 
 const isSubset = (a: Set<string>, b: Set<string>) => [...a].every((w) => b.has(w));
@@ -220,7 +226,7 @@ export function matchRequestedPerson(reqGiven: string, reqFamily: string, idGive
 }
 ```
 
-`isSubset(a, b)` means every word in `a` is also in `b`. The request procedure refuses requests with an empty given name or family name, because an empty set passes every subset test.
+`isSubset(a, b)` means every word in `a` is also in `b`. The request procedure refuses requests with an empty given name or family name, because an empty set passes every subset test. For the same reason `nameWords` never strips a name down to nothing: a name made only of title-like words, such as the given name "Di", keeps them.
 
 ### Person number binding
 

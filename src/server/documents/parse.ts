@@ -19,7 +19,7 @@ type Table = { header: string[]; rows: string[][] };
 type Raw = {
   title: string | null;
   fields: Record<string, string>;
-  /** Keys that appear on more than one line. */
+  /** Known keys that appear on more than one line with different values. */
   duplicates: Set<string>;
   tables: Table[];
   free: string[];
@@ -57,9 +57,10 @@ function collect(markdown: string): Raw {
         if (!inList && m && (!section || KNOWN_KEYS.has(m[1]))) {
           const key = m[1];
           const value = m[2].trim();
-          // A second `Patient:` line could carry another patient past the patient check, so a key may repeat only with the same value.
+          // A second `Patient:` line could carry another patient past the patient check, so a known key may repeat only with
+          // the same value. An unknown key keeps its first value; every line of it is in the free text below anyway.
           if (!Object.hasOwn(raw.fields, key)) raw.fields[key] = value;
-          else if (raw.fields[key] !== value) raw.duplicates.add(key);
+          else if (raw.fields[key] !== value && KNOWN_KEYS.has(key)) raw.duplicates.add(key);
           // An unknown key such as `Note:` is also free text, so the comment reaches the conclusion.
           if (!KNOWN_KEYS.has(key)) addText(line);
         } else addText(inList ? `- ${line}` : line);
@@ -100,10 +101,10 @@ export function parsePersonLine(raw: string): PersonLine | null {
   return { raw, titles, given: words.join(" "), family, details: details.filter(Boolean) };
 }
 
-/** `3.1` or `3,1`. Null for `1,245`, which may mean 1245 with a thousands separator or 1.245. */
+/** `3.1`, `3,1`, or `0,125`. Null for `1,245`, which may mean 1245 with a thousands separator or 1.245. */
 function toNumber(text: string): number | null {
   const t = text.trim();
-  if (/^-?\d{1,3}(?:,\d{3})+$/.test(t) || !/^-?\d+(?:[.,]\d+)?$/.test(t)) return null;
+  if (/^-?[1-9]\d{0,2}(?:,\d{3})+$/.test(t) || !/^-?\d+(?:[.,]\d+)?$/.test(t)) return null;
   return Number(t.replace(",", "."));
 }
 

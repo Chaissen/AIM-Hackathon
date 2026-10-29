@@ -223,3 +223,15 @@ test("Austrian titles, also the female forms, are split off the name", () => {
   // A given name that looks like a title without its dot stays a name.
   assert.equal(parsePersonLine("Dia Brandl")?.given, "Dia");
 });
+
+test("a leading zero means a decimal comma, and an unknown key may repeat", () => {
+  const maria = scenario("lab-result-maria-beispiel.md");
+  assert.equal((parsed(maria.replace("| 3.1 |", "| 0,125 |")) as LabResult).rows[3].value, 0.125);
+  const notes = parsed(maria.replace("All values are within the reference range.", "Note: first.\n\nNote: second.")) as LabResult;
+  assert.equal(notes.conclusion, "Note: first. Note: second.");
+});
+
+test("joined titles need a separator, so a name such as Magdi stays a name", () => {
+  assert.equal(parsePersonLine("Magdi Hassan, lab physician")?.given, "Magdi");
+  assert.deepEqual(parsePersonLine("Univ.-Prof. Dipl.-Ing. Dr.med. Eva Brandl")?.titles, ["Univ.-Prof.", "Dipl.-Ing.", "Dr.med."]);
+});
