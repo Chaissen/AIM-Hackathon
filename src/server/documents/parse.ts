@@ -2,7 +2,7 @@ import MarkdownIt from "markdown-it";
 
 import { TITLE } from "@/server/identity/names";
 import { parseDate, parseStay, parseViennaDateTime } from "./dates";
-import type { LabRow, ParseResult, ParsedDocument, PersonLine } from "./types";
+import type { LabRow, ParseResult, ParsedDocument, PersonLine, SafetyRefusal } from "./types";
 
 // Reads the scenario Markdown format into typed records (docs/ARCHITECTURE.md, "Document parsing").
 
@@ -169,6 +169,7 @@ export function parseDocument(markdown: string): ParseResult {
   // A byte order mark (Windows editors) would hide the `#` of the heading from markdown-it.
   const raw = collect(markdown.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n"));
   const errors: string[] = [];
+  const safety = new Set<SafetyRefusal>();
 
   const colon = raw.title?.indexOf(":") ?? -1;
   if (!raw.title || colon <= 0) errors.push('The file has no heading such as "# Labor Kanalstraße: lab report".');
@@ -180,7 +181,10 @@ export function parseDocument(markdown: string): ParseResult {
   const birthDate = born ? parseDate(born) : null;
   if (!patientLine) errors.push('The file has no line such as "Patient: Maria Beispiel, born 12 March 1961".');
   else if (!patientName?.trim() || !birthDate) errors.push(`The patient line "${patientLine}" needs a name and a birth date such as "born 12 March 1961".`);
-  for (const key of raw.duplicates) errors.push(`The file has more than one "${key}:" line.`);
+  for (const key of raw.duplicates) {
+    errors.push(`The file has more than one "${key}:" line.`);
+    safety.add("repeated-key");
+  }
 
   const base = {
     title: raw.title ?? "",
@@ -205,7 +209,10 @@ export function parseDocument(markdown: string): ParseResult {
     // A second table would be values the mappers never file, so the results must be in exactly one.
     const table = raw.tables.length === 1 ? raw.tables[0] : null;
     if (!raw.tables.length) errors.push("The lab report has no result table.");
-    else if (!table) errors.push("The lab report has more than one table. Put all results in one table.");
+    else if (!table) {
+      errors.push("The lab report has more than one table. Put all results in one table.");
+      safety.add("several-tables");
+    }
     const rows = table ? labRows(table, errors) : [];
     if (table && !table.rows.length) errors.push("The result table has no rows.");
     document = {
@@ -234,5 +241,5 @@ export function parseDocument(markdown: string): ParseResult {
     document = { ...base, type: "other" };
   }
 
-  return errors.length ? { ok: false, errors } : { ok: true, document };
+  return errors.length ? { ok: false, errors, safety: [...safety] } : { ok: true, document };
 }
