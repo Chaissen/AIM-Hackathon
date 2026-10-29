@@ -91,9 +91,15 @@ export async function findRequestByToken(db: Db, token: string): Promise<Request
   return found ? getRequest(db, found.id) : null;
 }
 
-export async function listRequests(db: Db, limit = 100): Promise<RequestRow[]> {
+/** The requests one network member sent, newest first. */
+export async function listRequests(db: Db, requester: string, limit = 100): Promise<RequestRow[]> {
   await expireDueRequests(db);
-  return db.select().from(requests).orderBy(desc(requests.createdAt), desc(requests.id)).limit(limit);
+  return db
+    .select()
+    .from(requests)
+    .where(eq(requests.requester, requester))
+    .orderBy(desc(requests.createdAt), desc(requests.id))
+    .limit(limit);
 }
 
 /**

@@ -131,6 +131,16 @@ test("get returns the request with its audit entries, and list includes it", { s
   await assert.rejects(clinic.request.get({ id: 2_147_483_647 }), (e) => e instanceof TRPCError && e.code === "NOT_FOUND");
 });
 
+test("a network member sees and cancels only their own requests", { skip: noDb }, async () => {
+  const { request } = await seed();
+  const colleague = createCaller(createContext({ kind: "clinic", mxid: mxid("colleague") }));
+  const notFound = (e: unknown) => e instanceof TRPCError && e.code === "NOT_FOUND";
+  await assert.rejects(colleague.request.get({ id: request.id }), notFound);
+  await assert.rejects(colleague.request.cancel({ id: request.id }), notFound);
+  assert.equal((await colleague.request.list()).some((r) => r.id === request.id), false);
+  assert.equal((await clinic.request.get({ id: request.id })).state, "sent");
+});
+
 test("cancel closes an open request and refuses a closed one", { skip: noDb }, async () => {
   const { request } = await seed();
   const cancelled = await clinic.request.cancel({ id: request.id });

@@ -32,10 +32,20 @@ const summary = (r: RequestRow) => ({
   expiresAt: r.expiresAt,
 });
 
-async function change(db: Db, id: number, event: RequestEvent) {
+const notFound = (id: number) => new TRPCError({ code: "NOT_FOUND", message: `Request ${id} does not exist` });
+
+// A network member sees and changes only the requests they sent. Someone else's request reads as not found,
+// so its existence does not leak either.
+const ownRequestProcedure = clinicProcedure.input(byId).use(async ({ ctx, input, next }) => {
+  const request = await getRequest(ctx.db, input.id);
+  if (request?.requester !== ctx.actor.mxid) throw notFound(input.id);
+  return next({ ctx: { ...ctx, request } });
+});
+
+async function change(ctx: { db: Db; request: RequestRow }, event: RequestEvent) {
   try {
-    const request = await applyEvent(db, id, event);
-    if (!request) throw new TRPCError({ code: "NOT_FOUND", message: `Request ${id} does not exist` });
+    const request = await applyEvent(ctx.db, ctx.request.id, event);
+    if (!request) throw notFound(ctx.request.id);
     return request;
   } catch (e) {
     if (e instanceof TransitionError) throw new TRPCError({ code: "CONFLICT", message: e.message, cause: e });
@@ -72,14 +82,12 @@ export const requestRouter = createTRPCRouter({
     return summary(request);
   }),
 
-  get: clinicProcedure.input(byId).query(async ({ ctx, input }) => {
-    const request = await getRequest(ctx.db, input.id);
-    if (!request) throw new TRPCError({ code: "NOT_FOUND", message: `Request ${input.id} does not exist` });
-    const audit = await ctx.db.select().from(auditLog).where(eq(auditLog.requestId, input.id)).orderBy(asc(auditLog.at), asc(auditLog.id));
-    return { ...summary(request), audit };
+  get: ownRequestProcedure.query(async ({ ctx }) => {
+    const audit = await ctx.db.select().from(auditLog).where(eq(auditLog.requestId, ctx.request.id)).orderBy(asc(auditLog.at), asc(auditLog.id));
+    return { ...summary(ctx.request), audit };
   }),
 
-  list: clinicProcedure.query(async ({ ctx }) => (await listRequests(ctx.db)).map(summary)),
+  list: clinicProcedure.query(async ({ ctx }) => (await listRequests(ctx.db, ctx.actor.mxid)).map(summary)),
 
-  cancel: clinicProcedure.input(byId).mutation(async ({ ctx, input }) => summary(await change(ctx.db, input.id, "cancel"))),
+  cancel: ownRequestProcedure.mutation(async ({ ctx }) => summary(await change(ctx, "cancel"))),
 });
