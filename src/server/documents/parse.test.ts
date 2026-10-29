@@ -174,3 +174,64 @@ test("person lines split titles, given and family names, and details", () => {
     details: ["lab physician"],
   });
 });
+
+test("a result with a thousands separator is refused, a decimal comma is read", () => {
+  const maria = scenario("lab-result-maria-beispiel.md");
+  const grouped = parseDocument(maria.replace("| 245 |", "| 1,245 |"));
+  assert.equal(grouped.ok, false);
+  if (!grouped.ok) assert.deepEqual(grouped.errors, ['Row 3 (Platelets): the result "1,245" is not a number.']);
+  const decimal = parsed(maria.replace("| 3.1 |", "| 3,1 |")) as LabResult;
+  assert.equal(decimal.rows[3].value, 3.1);
+});
+
+test("a LOINC code with a wrong check digit is refused", () => {
+  const result = parseDocument(scenario("lab-result-maria-beispiel.md").replace("6301-6", "6301-5"));
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.errors.join(" "), /"6301-5" is not a LOINC code .* check digit/);
+  // All scenario codes and the report code 11502-2 from docs/FHIR.md have valid check digits.
+  for (const file of ["lab-result-maria-beispiel.md", "lab-result-max-beispiel.md"]) assert.equal((parsed(scenario(file)) as LabResult).rows.length, 4);
+  assert.ok(parseDocument(scenario("lab-result-maria-beispiel.md").replace("6301-6", "11502-2")).ok);
+});
+
+test("a byte order mark at the start does not hide the heading", () => {
+  const doc = parsed(`\uFEFF${scenario("lab-result-maria-beispiel.md")}`) as LabResult;
+  assert.equal(doc.organisation, "Labor Kanalstraße");
+});
+
+test("an unknown key outside the sections stays in the conclusion", () => {
+  const doc = parsed(scenario("lab-result-maria-beispiel.md").replace("All values are within the reference range.", "Note: INR was measured twice.")) as LabResult;
+  assert.equal(doc.conclusion, "Note: INR was measured twice.");
+  assert.equal(doc.fields["Note"], "INR was measured twice.");
+});
+
+test("a key repeated with the same value is fine", () => {
+  const maria = scenario("lab-result-maria-beispiel.md").replace(/\r\n/g, "\n");
+  const doc = parsed(`${maria}\nPatient: Maria Beispiel, born 12 March 1961\n`);
+  assert.deepEqual(doc.patient, { name: "Maria Beispiel", birthDate: "1961-03-12" });
+});
+
+test("every paragraph of a list item is list text, not a field", () => {
+  const rehab = scenario("rehab-report-maria-beispiel.md").replace(/\r\n/g, "\n");
+  const doc = parsed(rehab.replace("- Continue the home exercises.\n", "- Continue the home exercises.\n\n  Reason: keeps the hip mobile\n\n")) as RehabReport;
+  assert.match(doc.reason ?? "", /^rehabilitation after a total hip replacement/);
+  assert.match(doc.sections[2].text, /- Reason: keeps the hip mobile/);
+});
+
+test("Austrian titles, also the female forms, are split off the name", () => {
+  assert.deepEqual(parsePersonLine("Prim. Dr.in Eva Brandl, lab physician")?.titles, ["Prim.", "Dr.in"]);
+  assert.equal(parsePersonLine("Mag.a DDr. Eva Brandl")?.given, "Eva");
+  // A given name that looks like a title without its dot stays a name.
+  assert.equal(parsePersonLine("Dia Brandl")?.given, "Dia");
+});
+
+test("a leading zero means a decimal comma, and an unknown key may repeat", () => {
+  const maria = scenario("lab-result-maria-beispiel.md");
+  assert.equal((parsed(maria.replace("| 3.1 |", "| 0,125 |")) as LabResult).rows[3].value, 0.125);
+  const notes = parsed(maria.replace("All values are within the reference range.", "Note: first.\n\nNote: second.")) as LabResult;
+  assert.equal(notes.conclusion, "Note: first. Note: second.");
+});
+
+test("joined titles need a separator, so a name such as Magdi stays a name", () => {
+  assert.equal(parsePersonLine("Magdi Hassan, lab physician")?.given, "Magdi");
+  assert.deepEqual(parsePersonLine("Univ.-Prof. Dipl.-Ing. Dr.med. Eva Brandl")?.titles, ["Univ.-Prof.", "Dipl.-Ing.", "Dr.med."]);
+});

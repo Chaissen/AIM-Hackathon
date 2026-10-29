@@ -1,5 +1,6 @@
 import MarkdownIt from "markdown-it";
 
+import { TITLE } from "@/server/identity/names";
 import { parseDate, parseStay, parseViennaDateTime } from "./dates";
 import type { LabRow, ParseResult, ParsedDocument, PersonLine } from "./types";
 
@@ -12,14 +13,13 @@ type Token = ReturnType<typeof md.parse>[number];
 const KNOWN_KEYS = new Set(["Patient", "Requested by", "Sample taken", "Reported", "Stay", "Reason", "Validated by", "Written by", "Sent by"]);
 const KEY_LINE = /^([A-Z][A-Za-z ]{0,40}): (.+)$/;
 const LAB_COLUMNS = ["Test", "Result", "Unit", "Reference range", "LOINC code"] as const;
-const TITLE_WORD = /^(dr|mag|prof|univ|med|di|ing|dipl)\.?(-\w+\.?)*$/i;
 
 type Table = { header: string[]; rows: string[][] };
 
 type Raw = {
   title: string | null;
   fields: Record<string, string>;
-  /** Keys that appear on more than one line. */
+  /** Known keys that appear on more than one line with different values. */
   duplicates: Set<string>;
   tables: Table[];
   free: string[];
@@ -31,12 +31,15 @@ function collect(markdown: string): Raw {
   const raw: Raw = { title: null, fields: {}, duplicates: new Set(), tables: [], free: [], sections: [] };
   const tokens = md.parse(markdown, {});
   let section: Raw["sections"][number] | null = null;
+  let listDepth = 0;
 
   const addText = (line: string) => (section ? section.lines.push(line) : raw.free.push(line));
 
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
-    if (t.type === "heading_open") {
+    if (t.type === "bullet_list_open" || t.type === "ordered_list_open") listDepth++;
+    else if (t.type === "bullet_list_close" || t.type === "ordered_list_close") listDepth--;
+    else if (t.type === "heading_open") {
       const text = tokens[i + 1]?.content.trim() ?? "";
       if (t.tag === "h1" && raw.title === null) raw.title = text;
       else if (t.tag === "h2") raw.sections.push((section = { heading: text, lines: [] }));
@@ -46,14 +49,20 @@ function collect(markdown: string): Raw {
       raw.tables.push(table);
       i = end;
     } else if (t.type === "inline" && tokens[i - 1]?.type === "paragraph_open") {
-      const inList = tokens[i - 2]?.type === "list_item_open";
+      // Every paragraph of a list item is list text, not only the first one.
+      const inList = listDepth > 0;
       for (const line of t.content.split("\n").map((l) => l.trim()).filter(Boolean)) {
         const m = line.match(KEY_LINE);
         // Split at the first ": " (docs). In a section only the known keys count.
         if (!inList && m && (!section || KNOWN_KEYS.has(m[1]))) {
-          // A second `Patient:` line could carry another patient past the patient check, so no key may repeat.
-          if (Object.hasOwn(raw.fields, m[1])) raw.duplicates.add(m[1]);
-          else raw.fields[m[1]] = m[2].trim();
+          const key = m[1];
+          const value = m[2].trim();
+          // A second `Patient:` line could carry another patient past the patient check, so a known key may repeat only with
+          // the same value. An unknown key keeps its first value; every line of it is in the free text below anyway.
+          if (!Object.hasOwn(raw.fields, key)) raw.fields[key] = value;
+          else if (raw.fields[key] !== value && KNOWN_KEYS.has(key)) raw.duplicates.add(key);
+          // An unknown key such as `Note:` is also free text, so the comment reaches the conclusion.
+          if (!KNOWN_KEYS.has(key)) addText(line);
         } else addText(inList ? `- ${line}` : line);
       }
     }
@@ -86,13 +95,29 @@ export function parsePersonLine(raw: string): PersonLine | null {
   const [namePart, ...details] = raw.split(",").map((s) => s.trim());
   const words = namePart.split(/\s+/).filter(Boolean);
   const titles: string[] = [];
-  while (words.length > 1 && TITLE_WORD.test(words[0])) titles.push(words.shift()!);
+  while (words.length > 1 && TITLE.test(words[0])) titles.push(words.shift()!);
   const family = words.pop();
   if (!family) return null;
   return { raw, titles, given: words.join(" "), family, details: details.filter(Boolean) };
 }
 
-const toNumber = (text: string) => (/^-?\d+(?:[.,]\d+)?$/.test(text.trim()) ? Number(text.trim().replace(",", ".")) : null);
+/** `3.1`, `3,1`, or `0,125`. Null for `1,245`, which may mean 1245 with a thousands separator or 1.245. */
+function toNumber(text: string): number | null {
+  const t = text.trim();
+  if (/^-?[1-9]\d{0,2}(?:,\d{3})+$/.test(t) || !/^-?\d+(?:[.,]\d+)?$/.test(t)) return null;
+  return Number(t.replace(",", "."));
+}
+
+/** A LOINC code such as `6301-6`, with the mod-10 check digit after the dash (Luhn over the digits before it). */
+function isLoinc(code: string): boolean {
+  const m = /^(\d{1,7})-(\d)$/.exec(code);
+  if (!m) return false;
+  const sum = [...m[1]].reverse().reduce((acc, c, i) => {
+    const d = Number(c) * (i % 2 === 0 ? 2 : 1);
+    return acc + (d > 9 ? d - 9 : d);
+  }, 0);
+  return (10 - (sum % 10)) % 10 === Number(m[2]);
+}
 
 function labRows(table: Table, errors: string[]): LabRow[] {
   const col = Object.fromEntries(LAB_COLUMNS.map((c) => [c, table.header.indexOf(c)])) as Record<(typeof LAB_COLUMNS)[number], number>;
@@ -109,8 +134,8 @@ function labRows(table: Table, errors: string[]): LabRow[] {
       errors.push(`Row ${n + 1} (${test || "no test name"}): the result "${cell("Result")}" is not a number.`);
       return [];
     }
-    if (!/^\d{1,7}-\d$/.test(cell("LOINC code"))) {
-      errors.push(`Row ${n + 1} (${test}): "${cell("LOINC code")}" is not a LOINC code such as 6301-6.`);
+    if (!isLoinc(cell("LOINC code"))) {
+      errors.push(`Row ${n + 1} (${test}): "${cell("LOINC code")}" is not a LOINC code such as 6301-6, or its check digit is wrong.`);
       return [];
     }
     const [lowText, highText, ...extra] = cell("Reference range").split(" to ");
@@ -141,7 +166,8 @@ function labRows(table: Table, errors: string[]): LabRow[] {
  * any other kind a GenericDocument. Never throws on content; problems come back in `errors`.
  */
 export function parseDocument(markdown: string): ParseResult {
-  const raw = collect(markdown.replace(/\r\n?/g, "\n"));
+  // A byte order mark (Windows editors) would hide the `#` of the heading from markdown-it.
+  const raw = collect(markdown.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n"));
   const errors: string[] = [];
 
   const colon = raw.title?.indexOf(":") ?? -1;
