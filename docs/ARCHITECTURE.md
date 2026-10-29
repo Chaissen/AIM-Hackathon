@@ -92,7 +92,7 @@ A failed identity check does not change the state, so the real person can still 
 
 Dr. Hofer sends requests and makes every decision about them in the ordy widget. `pnpm matrix:bootstrap` pins it in her room. There are no chat commands for requests.
 
-The widget gets a Matrix OpenID token from Element through the widget API and sends it as `Authorization: Bearer` with every tRPC call. The request service checks the token with Synapse (`verifyOpenIdToken` in `src/server/matrix/client.ts`). It accepts only users on its own homeserver, `MATRIX_SERVER_NAME`, which is `klinikum.example` in the demo. The checked Matrix ID is the actor in the audit log.
+The widget uses `matrix-widget-api` to get a Matrix OpenID token from Element after the user approves identity sharing, and sends it as `Authorization: Bearer` with every clinic tRPC call. Patient and audit data come only from `clinic.patients` and `clinic.audit`, both protected by `clinicProcedure`; neither page embeds that data in its initial HTML or React server payload. Tokens and the clinic query cache stay in memory and are discarded on expiry or unmount. The widget includes an **Audit log** tab. The request service checks the token with Synapse (`verifyOpenIdToken` in `src/server/matrix/client.ts`). It accepts only users on its own homeserver, `MATRIX_SERVER_NAME`, which is `klinikum.example` in the demo. The checked Matrix ID is the actor in the audit log.
 
 | Part of the widget | Effect |
 |---|---|
@@ -164,7 +164,7 @@ Before sending, the request service compares the words of the message with the p
 | `GET /r/{token}/answer` | Shows the patient, the requested document, the upload field, and fields for the patient's name and birth date. Only after the identity check passes. |
 | `POST /r/{token}/answer` | Writes `answer_sent`, parses the document, runs the patient check, files the resources, and writes `answer_filed`. |
 | `GET /sms` | Shows every SMS the request service would have sent, like a phone screen. |
-| `GET /audit` | Shows the audit log for the demo. Bound to localhost. |
+| `GET /audit` | Audit UI; data requires a verified Matrix clinic identity. Use the widget's **Audit log** tab in Element. |
 
 The pages are Next.js routes. `/auth/login` and `/auth/callback` are route handlers, because they need real redirects and cookies. The answer page loads its data and sends the upload through tRPC (`eidProcedure`, the upload as `FormData`).
 
@@ -245,12 +245,12 @@ Every entry has a UTC timestamp in `at`. The widget and `GET /audit` show the en
 
 ## Configuration
 
-All variables are read and validated in `src/env.ts`. Each one has a demo default, so `.env` is optional. `.env.example` lists them.
+Configuration is read in `src/env.ts`. Service addresses and demo accounts have defaults. Outside-person sessions require a private `ORDY_SECRET`; an empty, short, or known placeholder key cannot sign or authenticate sessions. Setup generates a random key and preserves it across reruns. `.env.example` lists the variables.
 
 | Variable | Default |
 |---|---|
 | `PUBLIC_URL` | `http://localhost:3010` |
-| `ORDY_SECRET` | demo value, set your own in `.env` |
+| `ORDY_SECRET` | empty (outside-person sessions disabled); setup writes a private 32-byte random key to `.env` |
 | `DATABASE_URL` | `postgres://ordy:ordy@localhost:5433/ordy` |
 | `FHIR_BASE_URL` | `http://localhost:8090/fhir` |
 | `MATRIX_HOMESERVER_URL`, `MATRIX_SERVER_NAME` | `http://localhost:8008`, `klinikum.example` |
@@ -289,7 +289,7 @@ src/
     r/[token]/                outside portal: landing page and answer form. Data loading planned, T04, T07, T09
     auth/                     ID Austria login, planned, T07
     sms/page.tsx              SMS screen. Reading the SMS log planned, T06
-    audit/page.tsx            audit log for the demo, localhost only
+    audit/page.tsx            audit UI; authenticated data via clinic.audit
   components/ui/              shadcn/ui components, added with `pnpm dlx shadcn@4.22.1 add <name>`
   components/                 shared UI such as the portal frame
   lib/                        code shared by server and browser: document types, request input, `cn`
