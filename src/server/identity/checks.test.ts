@@ -9,6 +9,7 @@ import {
   checkLevel,
   checkName,
   checkPersonNumber,
+  checkRequestPerson,
   FULL_FUNCTION,
   keycloakUnreachable,
   matchRequestedPerson,
@@ -44,12 +45,21 @@ test("the name-match table in docs/IDENTITY.md", () => {
   }
 });
 
-test("a requested name that is only a title never passes", () => {
-  assert.deepEqual(checkName({ given: "Dr.", family: "Brandl" }, { givenName: "Thomas", familyName: "Brandl" }), {
+test("a requested name without words never passes", () => {
+  assert.deepEqual(checkName({ given: "-", family: "Brandl" }, { givenName: "Thomas", familyName: "Brandl" }), {
     check: "name",
     verdict: "hold",
     reason: "requested_name_empty",
   });
+  // A title alone keeps its word (names.ts), so it holds as a partial match rather than passing.
+  assert.equal(checkName({ given: "Dr.", family: "Brandl" }, { givenName: "Thomas", familyName: "Brandl" }).verdict, "hold");
+});
+
+test("a decomposed umlaut from the token matches the typed one", () => {
+  // "Müller" in NFD: u followed by a combining diaeresis.
+  const decomposed = { givenName: "Jürgen", familyName: "Müller" };
+  assert.equal(checkName({ given: "Jürgen", family: "Müller" }, decomposed).verdict, "pass");
+  assert.equal(checkName({ given: "Juergen", family: "Mueller" }, decomposed).verdict, "pass");
 });
 
 test("only full function passes the level check", () => {
@@ -91,6 +101,20 @@ test("an unreachable service holds and never passes", () => {
   // A fail still wins over an outage.
   const wagner = { ...evaBrandl, givenName: "Thomas", familyName: "Wagner" };
   assert.equal(checkIdentity({ requested: request1, login: wagner, binding: null, unreachable: ["ehvd"] }).verdict, "fail");
+});
+
+test("the request person: only the bound or accepted bPK passes", () => {
+  assert.deepEqual(checkRequestPerson("GH:a", "GH:a"), { check: "request_person", verdict: "pass", reason: "same_person" });
+  assert.deepEqual(checkRequestPerson("GH:a", "GH:b"), { check: "request_person", verdict: "fail", reason: "other_person" });
+  assert.deepEqual(checkRequestPerson("GH:a", null), { check: "request_person", verdict: "fail", reason: "other_person" });
+});
+
+test("acceptance lifts a hold for the accepted person only, never a fail", () => {
+  const petra = { ...evaBrandl, givenName: "Petra", personNumber: "GH:petra", gdaOid: null };
+  assert.equal(checkIdentity({ requested: request1, login: petra, binding: null }).verdict, "hold");
+  assert.equal(checkIdentity({ requested: request1, login: petra, binding: null, accepted: "GH:petra" }).verdict, "pass");
+  assert.equal(checkIdentity({ requested: request1, login: petra, binding: null, accepted: "GH:other" }).verdict, "fail");
+  assert.equal(checkIdentity({ requested: request1, login: { ...petra, level: BASIC_FUNCTION }, binding: null, accepted: "GH:petra" }).verdict, "fail");
 });
 
 test("the second Eva Brandl fails once the first one is bound", () => {

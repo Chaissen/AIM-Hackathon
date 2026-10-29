@@ -163,7 +163,7 @@ The logout matters when several people log in through the same browser, as jury 
 
 ## Identity checks
 
-The request service runs three checks after login. They make sure the right person answers. It shows the patient and the document type only if the result is pass. A fourth check, the release check, runs when the answer arrives and makes sure the person responsible for the content released it. [Who may release a document](#who-may-release-a-document) describes it.
+The request service runs four checks after login: the level, the name, the person number, and the eHVD claim. Once a request is bound to a person, a fifth one, the request person, runs too. They make sure the right person answers. It shows the patient and the document type only if the result is pass. One more check, the release check, runs when the answer arrives and makes sure the person responsible for the content released it. [Who may release a document](#who-may-release-a-document) describes it.
 
 | Check | Pass | Hold | Fail |
 |---|---|---|---|
@@ -171,15 +171,36 @@ The request service runs three checks after login. They make sure the right pers
 | Name | All requested name words are in the ID Austria name | The family names share a word but do not match fully | No shared family name word |
 | Person number | No binding yet, or the binding matches `urn:pvpgvat:oidc.bpk` | | A binding exists for this person and organisation with a different bPK, or the token has no bPK |
 | eHVD claim | No `urn:eidgvat:attributes.gda`, or one that `gdaOidFromClaim` reads | | The claim is present but malformed |
+| Request person, only for a request that is `verified` or `answer_held` | `urn:pvpgvat:oidc.bpk` equals `requests.person_number` | | Another bPK. Only the person who passed, or whom Dr. Hofer accepted, may answer. |
 
-Any fail blocks the person, writes `identity_checked` with `fail` and `misdelivery_caught` with `wrong_person`, and tells Dr. Hofer. A hold on the name sets the request to `identity_held`, and Dr. Hofer accepts or rejects it in the widget.
+Any fail blocks the person, writes `identity_checked` with `fail` and `misdelivery_caught` with `wrong_person`, adds one to `failed_checks`, and tells Dr. Hofer. When the name failed, she gets the wrong-person notice from [M1](#m1-wrong-address) and [M2](#m2-forwarded-request). When the name matched and another check failed, the person may be the right one with the wrong login, so the notice gives the reason, for example "Request 1 was opened by Eva Brandl, but the identity check failed. The ID Austria login has only basic function, and a request needs full function. Nothing was shown or filed."
+
+A hold with a logged-in person sets a `sent` request to `identity_held` and stores the person's bPK in `requests.person_number`. Three things hold: a name that matches only in part, a requested name with no words, and an unreachable eHVD. Dr. Hofer accepts or rejects the person in the widget. **Accept** moves the request to `verified` and keeps that bPK, so the accepted person passes from then on even though her name still matches only in part, and anyone else fails the request person check.
+
+A login changes the state only while the request is `sent`, as the lifecycle table says:
+
+| Request state | Pass | Hold | Fail |
+|---|---|---|---|
+| `sent` | `verified`, stores the bPK, answer page | `identity_held`, stores the bPK, held notice | unchanged, `locked` on the third fail |
+| `identity_held` | unchanged, held page | unchanged, held page, no notice, the held person stays | unchanged, counted |
+| `verified` | unchanged, answer page | unchanged, held page | unchanged, counted |
+| `answer_held` | unchanged, held page | unchanged, held page | unchanged, counted |
+| any other | no check runs; the link does not work | | |
+
+A pass or a hold of the person `requests.person_number` names, in `verified` or `answer_held`, counts as a pass: Dr. Hofer accepted them, or they passed before. A fail still fails.
 
 If Keycloak or the eHVD cannot be reached, the request service treats it as a hold, never as a pass. A fail still wins over an outage.
 
 - **Keycloak unreachable.** There is no verified person, so there is nobody for Dr. Hofer to accept. The request service writes `identity_checked` with `hold` and the reason `keycloak_unreachable`, keeps the state, and asks the person to try again later. The attempt does not count toward the lock.
 - **eHVD unreachable.** The person logged in, so the request goes to `identity_held`, and Dr. Hofer gets "Request 1 is on hold. The eHVD could not be reached to confirm Eva Brandl. Accept or reject the person in the widget."
 
-The checks live in `src/server/identity/checks.ts`. Each returns `pass`, `hold`, or `fail` with a reason code, and `identity_checked` stores the list of checks with their verdicts and reasons in `detail`. `misdelivery_caught` stores only the failed checks and the new `failed_checks` count. `src/server/identity/login.ts` turns the result into the state the lifecycle should move to, the audit entries, the page the person sees, and the notice. The callback calls `runIdentityChecks` from there right after it ends the Keycloak session. The request core passes in the binding lookup, the audit writer, the state change, and `notifyRoom` as ports (`IdentityCheckPorts`).
+The checks live in `src/server/identity/checks.ts`. Each returns `pass`, `hold`, or `fail` with a reason code, and `identity_checked` stores the list of checks as `{ check, result, reason }` in `detail`. `misdelivery_caught` stores only the failed checks. `src/server/identity/login.ts` turns the result into the transition, the audit entries, the page the person sees, and the notice. The callback calls `runIdentityChecks` from there right after it ends the Keycloak session. The request core passes in five ports (`IdentityCheckPorts`):
+
+- `findBinding` reads `bindings` for the requested name and organisation.
+- `recordAudit` writes an audit entry.
+- `incrementFailedChecks` adds one to `failed_checks` in one statement, `UPDATE … SET failed_checks = failed_checks + 1 … RETURNING failed_checks`, and returns the new count. The lock follows from that count. Reading the count and writing it back would let logins at the same time all write 1, and none would lock.
+- `transition` applies a change only while the request is still in its `from` state (`… WHERE state = 'sent'`) and stores the bPK in the same statement. It returns false when the state changed in between. Then a lost pass shows "try again", and a lost hold sends no notice, because Dr. Hofer was told about the person who won.
+- `notify` posts the notice with `notifyRoom`. A failed notice never changes what the person sees.
 
 ### Name match
 

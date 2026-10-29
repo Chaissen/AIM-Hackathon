@@ -12,6 +12,7 @@ export type LevelReason = "full" | "basic" | "missing" | "unknown";
 export type NameReason = "match" | "partial" | "no_shared_family_name" | "requested_name_empty";
 export type PersonNumberReason = "no_binding" | "binding_matches" | "binding_differs" | "missing";
 export type EhvdClaimReason = "none" | "readable" | "malformed";
+export type RequestPersonReason = "same_person" | "other_person";
 export type ServiceReason = "keycloak_unreachable" | "ehvd_unreachable";
 
 export type CheckResult =
@@ -19,6 +20,7 @@ export type CheckResult =
   | { check: "name"; verdict: Verdict; reason: NameReason }
   | { check: "person_number"; verdict: Verdict; reason: PersonNumberReason }
   | { check: "ehvd_claim"; verdict: Verdict; reason: EhvdClaimReason }
+  | { check: "request_person"; verdict: Verdict; reason: RequestPersonReason }
   | { check: "service"; verdict: Verdict; reason: ServiceReason };
 
 export type IdentityResult = { verdict: Verdict; checks: CheckResult[] };
@@ -69,6 +71,16 @@ export function checkEhvdClaim(gdaOid: string | null | Error): CheckResult {
   return { check: "ehvd_claim", verdict: "pass", reason: gdaOid === null ? "none" : "readable" };
 }
 
+/**
+ * The person the request is already bound to (`requests.person_number`): the one who passed, or the one Dr. Hofer
+ * accepted. Only that person may answer, so anyone else fails, even with the right name.
+ */
+export function checkRequestPerson(bound: string, personNumber: string | null | undefined): CheckResult {
+  return personNumber === bound
+    ? { check: "request_person", verdict: "pass", reason: "same_person" }
+    : { check: "request_person", verdict: "fail", reason: "other_person" };
+}
+
 /** A service the checks depend on could not be reached. That is a hold, never a pass. */
 export const serviceUnreachable = (service: "keycloak" | "ehvd"): CheckResult => ({
   check: "service",
@@ -99,19 +111,29 @@ export type IdentityCheckInput = {
   login: LoginIdentity;
   /** The bound bPK for the requested name and organisation, or null. */
   binding: string | null;
+  /**
+   * The bPK the request is bound to once it is verified: the person who passed, or the held person Dr. Hofer accepted.
+   * Null before that. Pass it only for a verified request; a held person is not accepted yet.
+   */
+  accepted?: string | null;
   /** Services that could not be reached while checking this login, for example the eHVD for the claim's OID. */
   unreachable?: ReadonlyArray<"ehvd">;
 };
 
 /** All checks for one login. When Keycloak itself cannot be reached there is no login; use `keycloakUnreachable()`. */
-export function checkIdentity({ requested, login, binding, unreachable = [] }: IdentityCheckInput): IdentityResult {
-  return combine([
+export function checkIdentity({ requested, login, binding, accepted = null, unreachable = [] }: IdentityCheckInput): IdentityResult {
+  const result = combine([
     checkLevel(login.level),
     checkName(requested, login),
     checkPersonNumber(binding, login.personNumber),
     checkEhvdClaim(login.gdaOid),
+    ...(accepted === null ? [] : [checkRequestPerson(accepted, login.personNumber)]),
     ...unreachable.map(serviceUnreachable),
   ]);
+  // Dr. Hofer already accepted this person, or they passed before: a partial name or an outage no longer holds them.
+  // The checks keep their own verdicts for the audit log. A fail still fails.
+  if (result.verdict === "hold" && accepted !== null && login.personNumber === accepted) return { verdict: "pass", checks: result.checks };
+  return result;
 }
 
 /** Keycloak (ID Austria) could not be reached, so no identity was verified. A hold, never a pass. */

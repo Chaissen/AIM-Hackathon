@@ -4,8 +4,8 @@ import { test } from "node:test";
 
 import { noticeText, type Notice } from "@/server/matrix/notices";
 
-import type { LoginIdentity } from "./checks";
-import { runIdentityChecks, type AuditEntry, type CheckedRequest, type IdentityCheckPorts, type LoginDecision } from "./login";
+import { BASIC_FUNCTION, type LoginIdentity } from "./checks";
+import { runIdentityChecks, type AuditEntry, type CheckedRequest, type IdentityCheckPorts, type LoginOutcome, type RequestState } from "./login";
 
 // The test citizens of the simulated ID Austria, from the realm Keycloak imports (docs/IDENTITY.md, "Test citizens").
 type RealmUser = { username: string; firstName: string; lastName: string; attributes: Record<string, string[]> };
@@ -26,135 +26,293 @@ function citizen(username: string): LoginIdentity {
   };
 }
 
-// Request 1: Dr. Eva Brandl at Labor Kanalstraße, by email.
-const request1 = (failedChecks = 0): CheckedRequest => ({ id: 1, given: "Eva", family: "Brandl", org: "Labor Kanalstraße", failedChecks });
+const eva = citizen("eva.brandl");
+const petra: LoginIdentity = { ...eva, givenName: "Petra", personNumber: "GH:petra", gdaOid: null };
 const recipient = "Dr. Eva Brandl";
+const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-function fakePorts(binding: string | null = null) {
+/**
+ * Request 1 (Dr. Eva Brandl at Labor Kanalstraße) in an in-memory store. The ports keep the contract the request core
+ * must keep: the count goes up atomically, and a transition applies only while the state is still `from`.
+ */
+function store(state: RequestState = "sent", { failedChecks = 0, personNumber = null as string | null, binding = null as string | null } = {}) {
+  const row = { id: 1, given: "Eva", family: "Brandl", org: "Labor Kanalstraße", state, failedChecks, personNumber };
   const audit: AuditEntry[] = [];
-  const saved: { requestId: number; state: LoginDecision["state"]; failedChecks: number }[] = [];
   const notices: Notice[] = [];
   const ports: IdentityCheckPorts = {
     findBinding: async () => binding,
     recordAudit: async (entry) => void audit.push(entry),
-    saveOutcome: async (requestId, outcome) => void saved.push({ requestId, ...outcome }),
-    notify: async (_requestId, notice) => void notices.push(notice),
+    incrementFailedChecks: async () => {
+      await tick();
+      return ++row.failedChecks;
+    },
+    transition: async (_id, change) => {
+      await tick();
+      if (row.state !== change.from) return false;
+      row.state = change.to;
+      if ("personNumber" in change) row.personNumber = change.personNumber;
+      return true;
+    },
+    notify: async (_id, notice) => void notices.push(notice),
   };
-  return { ports, audit, saved, notices };
+  const request = (): CheckedRequest => ({ ...row });
+  const login = (who: LoginIdentity, unreachable: ReadonlyArray<"ehvd"> = []) =>
+    runIdentityChecks(ports, request(), recipient, { ok: true, login: who }, unreachable);
+  return { row, ports, audit, notices, request, login };
 }
+
+const events = (audit: AuditEntry[]) => audit.map((e) => [e.event, e.outcome]);
 
 for (const [test_, username, name] of [
   ["M1", "anna.huber", "Anna Huber"],
   ["M2", "thomas.wagner", "Thomas Wagner"],
 ] as const) {
   test(`${test_}: ${username} is blocked and logged`, async () => {
-    const { ports, audit, saved, notices } = fakePorts();
-    const decision = await runIdentityChecks(ports, request1(), recipient, { ok: true, login: citizen(username) });
+    const s = store();
+    const run = await s.login(citizen(username));
 
     // Blocked: nothing shown, no answer possible, the state stays so Dr. Brandl can still answer.
-    assert.equal(decision.result.verdict, "fail");
-    assert.equal(decision.page, "wrong_person");
-    assert.equal(decision.state, null);
+    assert.equal(run.result?.verdict, "fail");
+    assert.equal(run.page, "wrong_person");
+    assert.equal(run.transition, null);
+    assert.equal(s.row.state, "sent");
 
     // Logged: identity_checked with fail and misdelivery_caught with wrong_person.
-    assert.deepEqual(
-      audit.map((e) => [e.event, e.outcome]),
-      [
-        ["identity_checked", "fail"],
-        ["misdelivery_caught", "wrong_person"],
-      ],
-    );
-    for (const entry of audit) {
+    assert.deepEqual(events(s.audit), [
+      ["identity_checked", "fail"],
+      ["misdelivery_caught", "wrong_person"],
+    ]);
+    for (const entry of s.audit) {
       assert.equal(entry.requestId, 1);
       assert.equal(entry.actorKind, "outside_person");
       assert.equal(entry.actor, `${name} (${citizen(username).personNumber})`);
     }
-    assert.deepEqual(audit[1].detail, { checks: [{ check: "name", verdict: "fail", reason: "no_shared_family_name" }], failedChecks: 1 });
+    assert.deepEqual(s.audit[1].detail, { checks: [{ check: "name", result: "fail", reason: "no_shared_family_name" }] });
     // The audit log never names the patient.
-    assert.doesNotMatch(JSON.stringify(audit), /Beispiel/);
+    assert.doesNotMatch(JSON.stringify(s.audit), /Beispiel/);
 
     // Counts toward the lock.
-    assert.deepEqual(saved, [{ requestId: 1, state: null, failedChecks: 1 }]);
+    assert.equal(run.failedChecks, 1);
+    assert.equal(s.row.failedChecks, 1);
 
     // Dr. Hofer gets a Matrix notice.
-    assert.equal(notices.length, 1);
-    assert.equal(
-      noticeText(notices[0]),
+    assert.deepEqual(s.notices.map(noticeText), [
       `Request 1 was opened by someone who is not Dr. Eva Brandl (ID Austria name: ${name}). Nothing was shown or filed. Check the address.`,
-    );
+    ]);
   });
 }
 
-test("M2: the link still works for Dr. Brandl after a failed check", async () => {
-  const { ports, audit, saved, notices } = fakePorts();
-  const decision = await runIdentityChecks(ports, request1(1), recipient, { ok: true, login: citizen("eva.brandl") });
-  assert.equal(decision.page, "answer");
-  assert.deepEqual(saved, [{ requestId: 1, state: "verified", failedChecks: 1 }]);
-  assert.deepEqual(audit.map((e) => [e.event, e.outcome]), [["identity_checked", "pass"]]);
-  assert.equal(notices.length, 0);
+test("M2: the link still works for Dr. Brandl after a failed check, and binds her", async () => {
+  const s = store("sent", { failedChecks: 1 });
+  const run = await s.login(eva);
+  assert.equal(run.page, "answer");
+  assert.deepEqual(run.transition, { from: "sent", to: "verified", personNumber: eva.personNumber });
+  assert.deepEqual([s.row.state, s.row.personNumber, s.row.failedChecks], ["verified", eva.personNumber, 1]);
+  assert.deepEqual(events(s.audit), [["identity_checked", "pass"]]);
+  assert.equal(s.notices.length, 0);
+
+  // She logs in again after the session expired: still the answer page, no transition.
+  const again = await s.login(eva);
+  assert.equal(again.page, "answer");
+  assert.equal(again.transition, null);
 });
 
 test("the third failed check locks the link", async () => {
-  const { ports, saved } = fakePorts();
-  const decision = await runIdentityChecks(ports, request1(2), recipient, { ok: true, login: citizen("thomas.wagner") });
-  assert.equal(decision.page, "wrong_person");
-  assert.deepEqual(saved, [{ requestId: 1, state: "locked", failedChecks: 3 }]);
+  const s = store("sent", { failedChecks: 2 });
+  const run = await s.login(citizen("thomas.wagner"));
+  assert.equal(run.page, "wrong_person");
+  assert.deepEqual(run.transition, { from: "sent", to: "locked" });
+  assert.deepEqual([s.row.state, s.row.failedChecks], ["locked", 3]);
 });
 
-test("a partial name match holds for Dr. Hofer", async () => {
-  const { ports, audit, saved, notices } = fakePorts();
-  const petra = { ...citizen("eva.brandl"), givenName: "Petra", gdaOid: null };
-  const decision = await runIdentityChecks(ports, request1(), recipient, { ok: true, login: petra });
-  assert.equal(decision.page, "held");
-  assert.deepEqual(saved, [{ requestId: 1, state: "identity_held", failedChecks: 0 }]);
-  assert.deepEqual(audit.map((e) => [e.event, e.outcome]), [["identity_checked", "hold"]]);
-  assert.equal(
-    noticeText(notices[0]),
+test("three wrong logins at the same time still lock the link", async () => {
+  const s = store();
+  const runs = await Promise.all(["anna.huber", "thomas.wagner", "anna.huber"].map((u) => s.login(citizen(u))));
+  assert.deepEqual(runs.map((r) => r.failedChecks).sort(), [1, 2, 3]);
+  assert.deepEqual([s.row.state, s.row.failedChecks], ["locked", 3]);
+});
+
+test("a failed check outside sent counts but asks for no transition the lifecycle lacks", async () => {
+  for (const state of ["verified", "identity_held", "answer_held"] as const) {
+    const s = store(state, { failedChecks: 2, personNumber: eva.personNumber });
+    const run = await s.login(citizen("thomas.wagner"));
+    assert.equal(run.page, "wrong_person", state);
+    assert.equal(run.transition, null, state);
+    assert.deepEqual([s.row.state, s.row.failedChecks], [state, 3]);
+  }
+});
+
+test("a partial name match holds for Dr. Hofer and stores the held person", async () => {
+  const s = store();
+  const run = await s.login(petra);
+  assert.equal(run.page, "held");
+  assert.deepEqual([s.row.state, s.row.personNumber, s.row.failedChecks], ["identity_held", "GH:petra", 0]);
+  assert.deepEqual(events(s.audit), [["identity_checked", "hold"]]);
+  assert.deepEqual(s.notices.map(noticeText), [
     "Request 1 is on hold. The ID Austria name Petra Brandl matches Dr. Eva Brandl only in part. Accept or reject the person in the widget.",
-  );
+  ]);
+});
+
+test("after Accept, the held person can answer, and only she", async () => {
+  const s = store();
+  await s.login(petra);
+  // Dr. Hofer clicks Accept: identity_held → verified. requests.person_number keeps Petra.
+  s.row.state = "verified";
+
+  const run = await s.login(petra);
+  assert.equal(run.result?.verdict, "pass");
+  assert.equal(run.page, "answer");
+  assert.equal(run.transition, null);
+  assert.equal(s.row.state, "verified");
+  // The name still holds in the audit detail; the acceptance is why she passes.
+  assert.deepEqual(s.audit.at(-1)?.detail, {
+    checks: [
+      { check: "level", result: "pass", reason: "full" },
+      { check: "name", result: "hold", reason: "partial" },
+      { check: "person_number", result: "pass", reason: "no_binding" },
+      { check: "ehvd_claim", result: "pass", reason: "none" },
+      { check: "request_person", result: "pass", reason: "same_person" },
+    ],
+  });
+
+  // Somebody else, even with the full requested name, fails now.
+  s.notices.length = 0;
+  const other = await s.login(eva);
+  assert.equal(other.page, "wrong_person");
+  assert.deepEqual(s.notices.map(noticeText), [
+    "Request 1 was opened by Eva Brandl, but the identity check failed. Another person already logged in for this request as Dr. Eva Brandl. Nothing was shown or filed.",
+  ]);
+});
+
+test("a login while the identity is held changes nothing", async () => {
+  const s = store("identity_held", { personNumber: "GH:petra" });
+  // A full pass does not skip Dr. Hofer's decision.
+  const pass = await s.login(eva);
+  assert.equal(pass.result?.verdict, "pass");
+  assert.equal(pass.page, "held");
+  assert.equal(pass.transition, null);
+  // A second partial match does not replace the held person.
+  const hold = await s.login({ ...petra, givenName: "Paula", personNumber: "GH:paula" });
+  assert.equal(hold.page, "held");
+  assert.equal(hold.transition, null);
+  assert.deepEqual([s.row.state, s.row.personNumber], ["identity_held", "GH:petra"]);
+  assert.equal(s.notices.length, 0);
+  assert.deepEqual(events(s.audit), [
+    ["identity_checked", "pass"],
+    ["identity_checked", "hold"],
+  ]);
+});
+
+test("a login while the answer is held shows the held page", async () => {
+  const s = store("answer_held", { personNumber: eva.personNumber });
+  const run = await s.login(eva);
+  assert.equal(run.page, "held");
+  assert.equal(run.transition, null);
+});
+
+test("a hold that loses the race to another login tells Dr. Hofer nothing", async () => {
+  const s = store();
+  const [held, passed] = await Promise.all([s.login(petra), s.login(eva)]);
+  // Petra's transition ran first in this store, so Eva's pass finds the request held.
+  assert.equal(held.applied, true);
+  assert.equal(passed.applied, false);
+  assert.equal(passed.page, "unavailable");
+  assert.equal(s.row.state, "identity_held");
+
+  const t = store();
+  t.ports.transition = async () => false;
+  const lost = await t.login(petra);
+  assert.equal(lost.page, "held");
+  assert.equal(lost.notice, null);
+  assert.equal(t.notices.length, 0);
 });
 
 test("Keycloak unreachable holds without a state change and shows nothing", async () => {
-  const { ports, audit, saved, notices } = fakePorts();
-  const decision = await runIdentityChecks(ports, request1(), recipient, { ok: false, reason: "keycloak_unreachable" });
-  assert.equal(decision.result.verdict, "hold");
-  assert.equal(decision.page, "unavailable");
-  assert.deepEqual(saved, []);
-  assert.deepEqual(audit, [
+  const s = store();
+  const outcome: LoginOutcome = { ok: false, reason: "keycloak_unreachable" };
+  const run = await runIdentityChecks(s.ports, s.request(), recipient, outcome);
+  assert.equal(run.result?.verdict, "hold");
+  assert.equal(run.page, "unavailable");
+  assert.deepEqual([s.row.state, s.row.failedChecks], ["sent", 0]);
+  assert.deepEqual(s.audit, [
     {
       event: "identity_checked",
       requestId: 1,
       actorKind: "anonymous",
       actor: "ID Austria login",
       outcome: "hold",
-      detail: { checks: [{ check: "service", verdict: "hold", reason: "keycloak_unreachable" }] },
+      detail: { checks: [{ check: "service", result: "hold", reason: "keycloak_unreachable" }] },
     },
   ]);
-  assert.equal(notices.length, 0);
+  assert.equal(s.notices.length, 0);
 });
 
-test("the eHVD unreachable holds the right person for Dr. Hofer", async () => {
-  const { ports, saved, notices } = fakePorts();
-  const decision = await runIdentityChecks(ports, request1(), recipient, { ok: true, login: citizen("eva.brandl") }, ["ehvd"]);
-  assert.equal(decision.page, "held");
-  assert.deepEqual(saved, [{ requestId: 1, state: "identity_held", failedChecks: 0 }]);
-  assert.equal(
-    noticeText(notices[0]),
+test("the eHVD unreachable holds a new person for Dr. Hofer, not the bound one", async () => {
+  const s = store();
+  const run = await s.login(eva, ["ehvd"]);
+  assert.equal(run.page, "held");
+  assert.deepEqual([s.row.state, s.row.personNumber], ["identity_held", eva.personNumber]);
+  assert.deepEqual(s.notices.map(noticeText), [
     "Request 1 is on hold. The eHVD could not be reached to confirm Eva Brandl. Accept or reject the person in the widget.",
-  );
+  ]);
+
+  const bound = store("verified", { personNumber: eva.personNumber });
+  assert.equal((await bound.login(eva, ["ehvd"])).page, "answer");
+});
+
+test("a link that no longer works runs no check", async () => {
+  for (const state of ["awaiting_confirmation", "filed", "cancelled", "expired", "locked"] as const) {
+    const s = store(state);
+    const run = await s.login(citizen("anna.huber"));
+    assert.equal(run.page, "closed", state);
+    assert.equal(run.result, null, state);
+    assert.deepEqual([s.audit.length, s.notices.length, s.row.failedChecks], [0, 0, 0], state);
+  }
+});
+
+test("a fail with the right name tells Dr. Hofer the actual reason", async () => {
+  const cases: [string, LoginIdentity, string | null, string][] = [
+    [
+      "basic level",
+      { ...eva, level: BASIC_FUNCTION },
+      null,
+      "The ID Austria login has only basic function, and a request needs full function.",
+    ],
+    ["no level", { ...eva, level: undefined }, null, "The login carries no ID Austria level, as with a foreign eID."],
+    ["no bPK", { ...eva, personNumber: null }, null, "The login carries no person number."],
+    ["malformed gda claim", { ...eva, gdaOid: new Error("bad") }, null, "The eHVD entry in the login could not be read."],
+    [
+      "second Eva Brandl against the binding",
+      citizen("eva.brandl2"),
+      eva.personNumber,
+      "The person number differs from the one bound to Dr. Eva Brandl at Labor Kanalstraße.",
+    ],
+  ];
+  for (const [label, who, binding, reason] of cases) {
+    const s = store("sent", { binding });
+    const run = await s.login(who);
+    assert.equal(run.page, "wrong_person", label);
+    assert.deepEqual(events(s.audit), [
+      ["identity_checked", "fail"],
+      ["misdelivery_caught", "wrong_person"],
+    ], label);
+    assert.deepEqual(s.notices.map(noticeText), [
+      `Request 1 was opened by Eva Brandl, but the identity check failed. ${reason} Nothing was shown or filed.`,
+    ], label);
+  }
 });
 
 test("a failed notice does not change what the person sees", async () => {
-  const { ports, audit } = fakePorts();
-  ports.notify = async () => {
+  const s = store();
+  s.ports.notify = async () => {
     throw new Error("Matrix down");
   };
   const error = console.error;
   console.error = () => {};
   try {
-    const decision = await runIdentityChecks(ports, request1(), recipient, { ok: true, login: citizen("anna.huber") });
-    assert.equal(decision.page, "wrong_person");
-    assert.equal(audit.length, 2);
+    const run = await s.login(citizen("anna.huber"));
+    assert.equal(run.page, "wrong_person");
+    assert.equal(s.audit.length, 2);
   } finally {
     console.error = error;
   }

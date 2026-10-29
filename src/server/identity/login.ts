@@ -12,23 +12,38 @@ export const MAX_FAILED_CHECKS = 3;
 
 export type AuditEntry = Omit<typeof auditLog.$inferInsert, "id" | "at">;
 
-/** The request fields the checks need. `failedChecks` is `requests.failed_checks` before this login. */
-export type CheckedRequest = { id: number; given: string; family: string; org: string; failedChecks: number };
+/** The states in which the link works for the outside person. In any other state the callback shows "This link does not work". */
+export const LIVE_STATES = ["sent", "identity_held", "verified", "answer_held"] as const;
+export type LiveState = (typeof LIVE_STATES)[number];
+export type RequestState = LiveState | "awaiting_confirmation" | "filed" | "cancelled" | "expired" | "locked";
+
+/** The request fields the checks need. `personNumber` is `requests.person_number`: the passed, held, or accepted person. */
+export type CheckedRequest = { id: number; state: RequestState; given: string; family: string; org: string; personNumber: string | null };
+
+/**
+ * The only state changes a login makes. They are the identity rows of the lifecycle table, and all start from `sent`:
+ * a login while Dr. Hofer decides, or after the request is verified, changes no state.
+ */
+export type LoginTransition =
+  | { from: "sent"; to: "verified"; personNumber: string }
+  | { from: "sent"; to: "identity_held"; personNumber: string }
+  | { from: "sent"; to: "locked" };
 
 /**
  * What the outside person sees. Only `answer` shows the patient and the document type.
- * - `held`: Dr. Hofer decides in the widget.
+ * - `held`: Dr. Hofer decides about this person or about the answer in the widget.
  * - `wrong_person`: "This request is for someone else. Nothing was shared with you."
- * - `unavailable`: ID Austria could not be reached, try again later.
+ * - `unavailable`: ID Austria could not be reached, or the request changed during the login. Try again.
+ * - `closed`: the link no longer works.
  */
-export type LoginPage = "answer" | "held" | "wrong_person" | "unavailable";
+export type LoginPage = "answer" | "held" | "wrong_person" | "unavailable" | "closed";
 
 export type LoginDecision = {
   result: IdentityResult;
-  /** The state the check asks for. Null keeps the state. The lifecycle module (T04) applies it. */
-  state: "verified" | "identity_held" | "locked" | null;
-  /** `requests.failed_checks` after this login. */
-  failedChecks: number;
+  /** The state change to try. A fail never has one here; the lock follows from `incrementFailedChecks`. */
+  transition: LoginTransition | null;
+  /** A fail adds one to `requests.failed_checks`. */
+  countsTowardLock: boolean;
   page: LoginPage;
   audit: AuditEntry[];
   notice: Notice | null;
@@ -36,50 +51,102 @@ export type LoginDecision = {
 
 const fullName = (login: LoginIdentity) => `${login.givenName} ${login.familyName}`;
 
-/** Only what the checks found. Never the patient, never document text. */
-const checkDetail = (checks: CheckResult[]) => ({ checks: checks.map(({ check, verdict, reason }) => ({ check, verdict, reason })) });
+/** Only what the checks found, in the shape of `IdentityCheck` in the audit writer. Never the patient, never document text. */
+const checkDetail = (checks: CheckResult[]) => ({ checks: checks.map(({ check, verdict, reason }) => ({ check, result: verdict, reason })) });
+
+/** The person a verified request is bound to: they passed, or Dr. Hofer accepted them. A held person is not accepted yet. */
+export const acceptedPerson = (request: CheckedRequest) =>
+  request.state === "verified" || request.state === "answer_held" ? request.personNumber : null;
 
 /**
- * Turns a check result into the request change, the audit entries and the notice to Dr. Hofer.
+ * Turns a check result into the state change, the audit entries, the page and the notice to Dr. Hofer.
  * `recipient` is how notices name the requested person, for example "Dr. Eva Brandl". `login` is null when Keycloak
  * could not be reached.
  */
-export function decideLogin(request: CheckedRequest, recipient: string, login: LoginIdentity | null, result: IdentityResult): LoginDecision {
+export function decideLogin(
+  request: CheckedRequest & { state: LiveState },
+  recipient: string,
+  login: LoginIdentity | null,
+  result: IdentityResult,
+): LoginDecision {
   const actor = login
     ? { actorKind: "outside_person" as const, actor: `${fullName(login)} (${login.personNumber ?? "no person number"})` }
     : { actorKind: "anonymous" as const, actor: "ID Austria login" };
   const checked: AuditEntry = { event: "identity_checked", requestId: request.id, ...actor, outcome: result.verdict, detail: checkDetail(result.checks) };
+  const none = { transition: null, countsTowardLock: false, notice: null };
 
   if (result.verdict === "fail") {
-    const failedChecks = request.failedChecks + 1;
     const failed = result.checks.filter((c) => c.verdict === "fail");
     return {
       result,
-      state: failedChecks >= MAX_FAILED_CHECKS ? "locked" : null,
-      failedChecks,
+      transition: null,
+      countsTowardLock: true,
       page: "wrong_person",
-      audit: [
-        checked,
-        { event: "misdelivery_caught", requestId: request.id, ...actor, outcome: "wrong_person", detail: { ...checkDetail(failed), failedChecks } },
-      ],
-      notice: { kind: "wrong-person", requestId: request.id, recipient, idAustriaName: login ? fullName(login) : "unknown" },
+      audit: [checked, { event: "misdelivery_caught", requestId: request.id, ...actor, outcome: "wrong_person", detail: checkDetail(failed) }],
+      notice: failNotice(request, recipient, login, failed),
     };
   }
 
-  if (result.verdict === "hold") {
+  // A hold or a pass has a login with a person number: the person number check fails without one.
+  const personNumber = login?.personNumber;
+  if (!login || !personNumber) {
     // Without a login there is nobody for Dr. Hofer to accept. The state stays and the person tries again later.
-    if (!login) return { result, state: null, failedChecks: request.failedChecks, page: "unavailable", audit: [checked], notice: null };
+    return { result, ...none, page: "unavailable", audit: [checked] };
+  }
+
+  if (result.verdict === "hold") {
+    // Only the first hold on a sent request asks Dr. Hofer. Later holds change nothing and stay in the audit log.
+    if (request.state !== "sent") return { result, ...none, page: "held", audit: [checked] };
     return {
       result,
-      state: "identity_held",
-      failedChecks: request.failedChecks,
+      ...none,
+      transition: { from: "sent", to: "identity_held", personNumber },
       page: "held",
       audit: [checked],
       notice: { kind: "held", requestId: request.id, hold: "identity", reason: holdReason(result.checks, recipient, login) },
     };
   }
 
-  return { result, state: "verified", failedChecks: request.failedChecks, page: "answer", audit: [checked], notice: null };
+  switch (request.state) {
+    case "sent":
+      return { result, ...none, transition: { from: "sent", to: "verified", personNumber }, page: "answer", audit: [checked] };
+    case "verified":
+      // The bound person logs in again, for example after the session expired.
+      return { result, ...none, page: "answer", audit: [checked] };
+    case "identity_held":
+    case "answer_held":
+      // Dr. Hofer decides first. A pass never skips her Accept.
+      return { result, ...none, page: "held", audit: [checked] };
+  }
+}
+
+/** The lock after a fail, from the count `incrementFailedChecks` returned. Only `sent → locked` is in the lifecycle table. */
+export const lockTransition = (state: RequestState, failedChecks: number): LoginTransition | null =>
+  state === "sent" && failedChecks >= MAX_FAILED_CHECKS ? { from: "sent", to: "locked" } : null;
+
+/** A failed name means someone else opened the link. Any other fail may be the right person, so the notice says why. */
+function failNotice(request: CheckedRequest, recipient: string, login: LoginIdentity | null, failed: CheckResult[]): Notice {
+  const idAustriaName = login ? fullName(login) : "unknown";
+  if (failed.some((c) => c.check === "name")) return { kind: "wrong-person", requestId: request.id, recipient, idAustriaName };
+  return { kind: "identity-failed", requestId: request.id, idAustriaName, reason: failed.map((c) => failReason(c, recipient, request.org)).join(" ") };
+}
+
+function failReason(check: CheckResult, recipient: string, org: string): string {
+  switch (check.check) {
+    case "level":
+      if (check.reason === "basic") return "The ID Austria login has only basic function, and a request needs full function.";
+      if (check.reason === "missing") return "The login carries no ID Austria level, as with a foreign eID.";
+      return "The login carries an unknown ID Austria level.";
+    case "person_number":
+      if (check.reason === "missing") return "The login carries no person number.";
+      return `The person number differs from the one bound to ${recipient} at ${org}.`;
+    case "ehvd_claim":
+      return "The eHVD entry in the login could not be read.";
+    case "request_person":
+      return `Another person already logged in for this request as ${recipient}.`;
+    default:
+      return `The ${check.check} check failed.`;
+  }
 }
 
 /** The reason sentence of a held notice, for example "The ID Austria name Petra Brandl matches Dr. Eva Brandl only in part." */
@@ -101,13 +168,39 @@ export interface IdentityCheckPorts {
   findBinding(key: { given: string; family: string; org: string }): Promise<string | null>;
   /** Writes one audit entry (`recordAudit` from T04). */
   recordAudit(entry: AuditEntry): Promise<void>;
-  /** Stores `failed_checks` and moves the request to `state` through the lifecycle module, unless it is null. */
-  saveOutcome(requestId: number, outcome: { state: LoginDecision["state"]; failedChecks: number }): Promise<void>;
+  /**
+   * Adds one to `requests.failed_checks` atomically and returns the new count, for example
+   * `UPDATE requests SET failed_checks = failed_checks + 1 WHERE id = $1 RETURNING failed_checks`, or the same under a
+   * row lock. Never read the count and write it back: logins at the same time would all write 1 and none would lock.
+   */
+  incrementFailedChecks(requestId: number): Promise<number>;
+  /**
+   * Applies the change only if the request is still in `from`, for example
+   * `UPDATE requests SET state = $to, person_number = $personNumber WHERE id = $1 AND state = $from`, and stores
+   * `personNumber` in `requests.person_number` in the same statement. Returns false when the state changed in between.
+   */
+  transition(requestId: number, change: LoginTransition): Promise<boolean>;
   /** Posts the notice in the request's thread with `notifyRoom`. */
   notify(requestId: number, notice: Notice): Promise<void>;
 }
 
 export type LoginOutcome = { ok: true; login: LoginIdentity } | { ok: false; reason: "keycloak_unreachable" };
+
+export type LoginRun = {
+  /** Null when the link no longer works and no check ran. */
+  result: IdentityResult | null;
+  page: LoginPage;
+  /** The change that was tried, and whether the request was still in `from`. */
+  transition: LoginTransition | null;
+  applied: boolean;
+  /** The count after a fail, from `incrementFailedChecks`. Null when nothing was counted. */
+  failedChecks: number | null;
+  audit: AuditEntry[];
+  /** The notice that was sent, or null. */
+  notice: Notice | null;
+};
+
+const isLive = (state: RequestState): state is LiveState => (LIVE_STATES as readonly RequestState[]).includes(state);
 
 /**
  * Runs the checks for one login and applies the decision. The callback calls it right after the ID token is verified
@@ -120,26 +213,47 @@ export async function runIdentityChecks(
   recipient: string,
   outcome: LoginOutcome,
   unreachable: ReadonlyArray<"ehvd"> = [],
-): Promise<LoginDecision> {
+): Promise<LoginRun> {
+  if (!isLive(request.state)) {
+    return { result: null, page: "closed", transition: null, applied: false, failedChecks: null, audit: [], notice: null };
+  }
+  const live = { ...request, state: request.state };
+
   let decision: LoginDecision;
   if (outcome.ok) {
     const binding = await ports.findBinding({ given: request.given, family: request.family, org: request.org });
-    const result = checkIdentity({ requested: request, login: outcome.login, binding, unreachable });
-    decision = decideLogin(request, recipient, outcome.login, result);
+    const result = checkIdentity({ requested: request, login: outcome.login, binding, accepted: acceptedPerson(request), unreachable });
+    decision = decideLogin(live, recipient, outcome.login, result);
   } else {
-    decision = decideLogin(request, recipient, null, keycloakUnreachable());
+    decision = decideLogin(live, recipient, null, keycloakUnreachable());
   }
 
   for (const entry of decision.audit) await ports.recordAudit(entry);
-  if (decision.state !== null || decision.failedChecks !== request.failedChecks) {
-    await ports.saveOutcome(request.id, { state: decision.state, failedChecks: decision.failedChecks });
+
+  let { transition, page, notice } = decision;
+  let failedChecks: number | null = null;
+  if (decision.countsTowardLock) {
+    failedChecks = await ports.incrementFailedChecks(request.id);
+    transition = lockTransition(request.state, failedChecks);
   }
-  if (decision.notice) {
+
+  let applied = false;
+  if (transition) {
+    applied = await ports.transition(request.id, transition);
+    if (!applied) {
+      // Another login or Dr. Hofer changed the request in between. Show nothing; the next login sees the new state.
+      if (transition.to === "verified") page = "unavailable";
+      // Someone else's hold won; Dr. Hofer was told about them, not about this person.
+      if (transition.to === "identity_held") notice = null;
+    }
+  }
+
+  if (notice) {
     try {
-      await ports.notify(request.id, decision.notice);
+      await ports.notify(request.id, notice);
     } catch (error) {
       console.error(`identity check: notice for request ${request.id} failed`, error);
     }
   }
-  return decision;
+  return { result: decision.result, page, transition, applied, failedChecks, audit: decision.audit, notice };
 }
