@@ -184,24 +184,29 @@ ID Austria returns the full official name. Dr. Hofer types what she knows. The m
 | Eva Brandl | Eva Maria Brandl | Pass. An extra given name is fine. |
 | Eva Brandl | Eva Brandl-Huber | Pass. A double family name contains Brandl. |
 | Eva Mueller | Eva Müller | Pass. Both spell out to `mueller`. |
-| Dr. Eva Brandl | Eva Brandl | Pass. Titles are ignored. |
+| Dr. Eva Brandl | Eva Brandl | Pass. Titles are ignored, also female forms such as `Dr.in` and `Mag.a`. |
 | Eva Brandl-Huber | Eva Brandl | Hold. The family names share only Brandl. |
 | Eva Brandl | Petra Brandl | Hold. Same family name, different given name. |
 | Eva Brandl | Eva Huber | Fail. A married name change also fails, and Dr. Hofer can send a new request. |
 | Eva Brandl | Thomas Wagner | Fail |
 
 ```ts
-const TITLES = new Set(["dr", "mag", "prof", "med", "univ", "di", "ing"]);
+// Dr., DDr., Dr.in, Mag.a, Univ.-Prof., Dipl.-Ing., Prim. The female ending needs its dot, so "Dia" stays a name.
+export const TITLE = /^(?:(?:d?dr|mag|prof|univ|med|di|ing|dipl|prim)(?:\.(?:in|a))?\.?-?)+$/i;
 const SPELL_OUT: Record<string, string> = { "ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss" };
 
 export function nameWords(name: string): Set<string> {
   const plain = name
+    .normalize("NFC") // a decomposed "ü" would otherwise lose its umlaut instead of becoming "ue"
     .toLowerCase()
+    .split(/\s+/)
+    .filter((w) => !TITLE.test(w))
+    .join(" ")
     .replace(/[äöüß]/g, (c) => SPELL_OUT[c])
     .replace(/[-.,]/g, " ")
     .normalize("NFKD")
     .replace(/[^\x00-\x7f]/g, "");
-  return new Set(plain.split(/\s+/).filter((w) => w && !TITLES.has(w)));
+  return new Set(plain.split(/\s+/).filter((w) => w && !TITLE.test(w)));
 }
 
 const isSubset = (a: Set<string>, b: Set<string>) => [...a].every((w) => b.has(w));

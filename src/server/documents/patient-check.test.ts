@@ -67,3 +67,9 @@ test("uploadHash is the SHA-256 hex of the upload", () => {
   assert.equal(uploadHash("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
   assert.equal(uploadHash(scenario("lab-result-max-beispiel.md")).length, 64);
 });
+
+test("decomposed umlauts and Austrian female titles still match", () => {
+  const mueller = { family: "Müller", given: ["Jürgen"], birthDate: "1950-05-05" };
+  assert.equal(samePatient("Ju\u0308rgen Mu\u0308ller", "1950-05-05", mueller), true);
+  assert.equal(samePatient("Dr.in Mag.a Jürgen Müller", "1950-05-05", mueller), true);
+});
