@@ -137,6 +137,16 @@ await caller.request.cancel({ id: 1 });
 
 Do not import `server-only` in modules that the bot or the scripts use. It throws outside Next.js.
 
+## Add a UI component
+
+The pages use [shadcn/ui](https://ui.shadcn.com/). The components live in `src/components/ui/` and belong to us, so edit them freely.
+
+```bash
+pnpm dlx shadcn@4.22.1 add dialog
+```
+
+Pin the CLI version, so it fits the 7-day rule. The UI uses the system font and one accent colour, both set in `src/app/globals.css`. Every page shows the disclaimer from [Compliance and safety](COMPLIANCE_AND_SAFETY.md) through `src/app/layout.tsx`.
+
 ## Add a bot command
 
 Add an entry to `src/bot/commands.ts`. The command gets a caller that acts as the sender and the text after the command name. Keep the logic in a tRPC procedure. Requests and the decisions about them belong in the widget, not in bot commands. `!help` lists every command automatically.
