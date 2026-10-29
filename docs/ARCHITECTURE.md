@@ -185,6 +185,8 @@ The document kind picks the mapper. `lab report` goes to the lab mapper and `dis
 
 The parser lives in `src/server/documents/`. `parseDocument()` returns a typed `LabResult`, `RehabReport`, or generic document (`types.ts`), or a list of reasons the uploader can act on; it never throws on content. It converts the unit `10^9/L` to UCUM `10*9/L`, computes `N`, `H`, or `L` from the reference range, and reads a stay that names the month once, twice, or crosses a year. `checkAnswerPatient()` in `patient-check.ts` runs `samePatient()` on the document and on the form, and `uploadHash()` gives the SHA-256 that stays in the audit log when an upload is discarded.
 
+`extra.test.ts` runs our extra test documents from `track/scenario/extra/` through the parser and the patient check ([Development](DEVELOPMENT.md#extra-test-documents)). Their index lists the gaps the parser still has: one-sided ranges such as `< 5`, units that need more than `^` to `*` to become UCUM (`µmol/L`, `mIU/L`), and the title `Prim.`.
+
 ### AI fallback (optional, cut first)
 
 If the parser cannot read a document, a language model may extract the same fields as JSON against a fixed schema. Every value and every LOINC code it returns must appear word for word in the document. The patient check stays deterministic. An answer read by the model always waits until Dr. Hofer accepts it in the widget.
@@ -287,7 +289,7 @@ scripts/
   citizen.ts                  add a test citizen to the simulated ID Austria
   validate.ts                 planned, T18: HL7 validator on every filed resource
   audit-check.ts              planned, T17: six event types per request
-track/                        track brief, scenario, patient.json, and test documents
+track/                        track brief, scenario, patient.json, test documents, and our extra set in scenario/extra/
 ```
 
 ## Run it

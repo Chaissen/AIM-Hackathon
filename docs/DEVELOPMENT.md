@@ -69,7 +69,7 @@ Check that everything works:
 | Keycloak (simulated ID Austria) | http://localhost:8080 | `admin` / `keycloak-demo-2026` for the admin console |
 | eHVD mock (T23) | http://localhost:8095/ehvd.wsdl | none, IP allowlist as in [eHVD](EHVD.md) |
 
-Test citizens for the ID Austria login: `eva.brandl` / `demo-eva`, `stefan.kern` / `demo-stefan`, `thomas.wagner` / `demo-thomas`, `anna.huber` / `demo-anna`, and `eva.brandl2` / `demo-eva2`. [Identity and misdelivery](IDENTITY.md#test-citizens) says whom each one plays. There is no sign-up page. `pnpm citizen` adds more people.
+Test citizens for the ID Austria login: `eva.brandl` / `demo-eva`, `stefan.kern` / `demo-stefan`, `thomas.wagner` / `demo-thomas`, `anna.huber` / `demo-anna`, and `eva.brandl2` / `demo-eva2`. [Identity and misdelivery](IDENTITY.md#test-citizens) says whom each one plays. There is no sign-up page. `pnpm citizen` adds more people, such as the two senders of the [extra test documents](#extra-test-documents).
 
 ## Commands
 
@@ -150,6 +150,27 @@ Pin the CLI version, so it fits the 7-day rule. The UI uses the system font and 
 ## Add a bot command
 
 Add an entry to `src/bot/commands.ts`. The command gets a caller that acts as the sender and the text after the command name. Keep the logic in a tRPC procedure. Requests and the decisions about them belong in the widget, not in bot commands. `!help` lists every command automatically.
+
+## Extra test documents
+
+The jury tests with new outside people and new documents in the scenario's Markdown format, some for the wrong patient. Our own set lives in `track/scenario/extra/`, one file per document, in exactly the format of `track/scenario/documents/`. Synthetic data only.
+
+`track/scenario/extra/index.md` has one table row per document:
+
+| Column | Meaning |
+|---|---|
+| File | The file name, for example `lab-result-maria-beispiel-kidney.md` |
+| Kind | `Lab result`, `Rehab report`, or `Other` (any other heading kind, which the parser returns as a generic document) |
+| Patient | Name and birth date exactly as the document writes them |
+| Sender | The outside person who uploads it |
+| Expected | Starts with `Filed` or `Blocked`, then why |
+| Trap | What it tests, for example a double family name, a decimal comma, a unit like `10^12/L`, or a range written as `< 5` |
+
+The set holds at least 3 lab results for Maria with other tests, 2 rehab reports whose stay spans two months, and 3 documents for other patients, one with Maria's family name and a different birth date. The index also lists the 2 extra outside people with double names and the `pnpm citizen` commands that add them. Keycloak keeps them only until the container is recreated, so run the commands again after `./scripts/setup.sh`.
+
+`pnpm test` runs `src/server/documents/extra.test.ts`. It reads the index, runs every file through `parseDocument` and `checkAnswerPatient` with the form filled in from the document, and asserts the kind, the patient, and the outcome. It also asserts the parser values the Trap column names. An expectation the parser does not meet yet is a `todo` test and a row under "Open parser gaps" in the index. It shows up in every run without failing it. Remove the `todo` with the parser fix.
+
+To add a document, write the file, add its row to the index, and run `pnpm test`. If the parser disagrees, decide whether the document, the expectation, or the parser is wrong. Never bend the document to make the test pass.
 
 ## Configuration
 
