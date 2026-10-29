@@ -1,0 +1,53 @@
+# ordy infrastructure: Matrix (Synapse + Element), HAPI FHIR, Mailpit, Postgres.
+# The ordy app itself (Next.js + Matrix bot) runs on the host with `pnpm dev`.
+services:
+  synapse:
+    image: matrixdotorg/synapse:latest
+    volumes:
+      - ./docker/synapse:/data
+    ports:
+      - "8008:8008"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8008/health"]
+      interval: 5s
+      retries: 30
+
+  element:
+    image: vectorim/element-web:latest
+    volumes:
+      - ./docker/element/config.json:/app/config.json:ro
+    ports:
+      - "8081:80"
+
+  hapi:
+    image: hapiproject/hapi:latest
+    ports:
+      - "8090:8080"
+    environment:
+      hapi.fhir.fhir_version: R4
+      hapi.fhir.allow_external_references: "true"
+      hapi.fhir.cors.allowed_origin: "*"
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ordy
+      POSTGRES_PASSWORD: ordy
+      POSTGRES_DB: ordy
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ordy -d ordy"]
+      interval: 3s
+      retries: 30
+
+volumes:
+  pgdata:

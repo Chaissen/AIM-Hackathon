@@ -8,14 +8,16 @@ This page describes what runs, how the parts talk, and what the request service 
 |---|---|---|---|---|
 | Synapse | Matrix homeserver for `klinikum.example` | Reused | [`matrixdotorg/synapse`](https://hub.docker.com/r/matrixdotorg/synapse) | 8008 |
 | Element Web | Dr. Hofer's chat client | Reused | [`vectorim/element-web`](https://hub.docker.com/r/vectorim/element-web) | 8081 |
-| Request service | Matrix bot, outside portal, identity checks, parser, FHIR mapper, audit log, SMS screen | Built | Python, [FastAPI](https://fastapi.tiangolo.com/), [Authlib](https://docs.authlib.org/en/latest/oauth2/client/web/fastapi.html), [matrix-nio](https://github.com/matrix-nio/matrix-nio), [markdown-it-py](https://github.com/executablebooks/markdown-it-py), SQLite | 8000 |
-| Simulated ID Austria | OpenID Connect login with fake citizens | Configured | [Keycloak](https://www.keycloak.org/server/containers) | 8080 |
+| Request service (ordy) | Outside portal, widget, identity checks, parser, FHIR mapper, audit log, SMS screen | Built | TypeScript: [Next.js](https://nextjs.org/docs) 16 (App Router), [tRPC](https://trpc.io/docs) v11, [zod](https://zod.dev/), [Drizzle](https://orm.drizzle.team/), [openid-client](https://github.com/panva/openid-client) (T07), [markdown-it](https://github.com/markdown-it/markdown-it) (T10) | 3010 |
+| Matrix bot | Commands and notices in Dr. Hofer's room | Built | TypeScript process in `src/bot/`, small Matrix client on `fetch` in `src/server/matrix/client.ts` | none |
+| Postgres | Requests, bindings, audit log | Reused | [`postgres:17-alpine`](https://hub.docker.com/_/postgres) | 5433, mapped to 5432 in the container |
+| Simulated ID Austria | OpenID Connect login with fake citizens | Configured (T02, not in `docker-compose.yml` yet) | [Keycloak](https://www.keycloak.org/server/containers) | 8080 |
 | Mock eHVD | Directory of healthcare people and organisations | Built | `ehvd/directory.json` | none |
 | Mailpit | Catches every outgoing email | Reused | [`axllent/mailpit`](https://hub.docker.com/r/axllent/mailpit) | 1025 SMTP, 8025 web |
 | HAPI FHIR | FHIR R4 server | Reused | [`hapiproject/hapi`](https://hub.docker.com/r/hapiproject/hapi) | 8090, mapped to 8080 in the container |
 | HL7 validator | Validates every filed resource | Reused | [`validator_cli.jar`](https://github.com/hapifhir/org.hl7.fhir.core/releases) | none |
 
-The Matrix bot runs inside the request service process. One process means one database connection and no internal API between bot and portal.
+The Matrix bot runs as a second Node.js process next to Next.js, because Next.js does not keep a long-running sync loop. `pnpm dev` starts both. The bot calls the same tRPC procedures as the widget and the portal through `createCaller`, inside its own process, so there is no internal HTTP API and every rule exists once. Both processes share the Postgres database.
 
 Every reused part can be replaced. Synapse can be any Matrix homeserver, Keycloak can be real ID Austria or another OpenID Connect provider, Mailpit can be any SMTP server, and HAPI can be any FHIR R4 server.
 
@@ -24,12 +26,13 @@ Every reused part can be replaced. Synapse can be any Matrix homeserver, Keycloa
  Element Web                                             browser
      |                                                      |   |
      v                                                      |   | login
-  Synapse <---- bot (matrix-nio) ----+                      |   v
-                                     |                      |  Keycloak (simulated ID Austria)
-                              Request service <-------------+   |
+  Synapse <---- ordy bot (Node.js) --+                      |   v
+     |                    createCaller   |                      |  Keycloak (simulated ID Austria)
+     +-- widget (iframe) ---tRPC--> Request service <-----------+   |
+                              (Next.js + tRPC router)              |
                                |   |   |   |   <-- signed token-+
                                |   |   |   +--> HAPI FHIR
-                               |   |   +------> SQLite: requests, bindings, audit log
+                               |   |   +------> Postgres: requests, bindings, audit log
                                |   +----------> mock eHVD (JSON)
                                +--------------> Mailpit (email), /sms page (SMS)
 ```
@@ -87,7 +90,9 @@ A failed identity check does not change the state, so the real person can still 
 
 ## Matrix bot
 
-The bot listens in rooms it has joined. It accepts commands only from Matrix users listed in `directory.json`, which holds `@lena.hofer:klinikum.example` for the demo.
+The bot listens in rooms it has joined. It accepts commands only from Matrix users listed in `directory.json`, which holds `@lena.hofer:klinikum.example` for the demo. Until the mock eHVD exists (T15), it accepts any user on `klinikum.example`.
+
+Built so far: `!help`, and `!status` without an id, which checks the database, the FHIR server, and Matrix. The commands below are planned (T05).
 
 | Command | Effect |
 |---|---|
@@ -99,7 +104,7 @@ The bot listens in rooms it has joined. It accepts commands only from Matrix use
 | `!cancel <id>` | Cancels an open request |
 | `!status <id>` | Shows the state and the audit entries of a request |
 
-The bot parses commands with `shlex.split` and `str.partition("=")`. It rejects a request without `given`, `family`, `patient`, and either `email` or `phone`. Separate `given` and `family` fields avoid guessing which part of "Eva Maria Brandl" is the family name.
+The bot splits a command into words with a quote-aware tokenizer and splits each `key=value` at the first `=`. It rejects a request without `given`, `family`, `patient`, and either `email` or `phone`. Separate `given` and `family` fields avoid guessing which part of "Eva Maria Brandl" is the family name.
 
 The bot answers in a thread under the request message:
 
@@ -119,14 +124,14 @@ Subject: Secure request from Klinikum Beispielstadt
 Hello,
 
 Dr. Lena Hofer at Klinikum Beispielstadt has sent you a secure request.
-Open it here: http://localhost:8000/r/<link token>
+Open it here: http://localhost:3010/r/<link token>
 
 You need ID Austria to open it. The link expires on 5 November 2026.
 If you did not expect this message, you can ignore it.
 ```
 
 ```
-Klinikum Beispielstadt: Dr. L. Hofer sent you a secure request. Open it with ID Austria: http://localhost:8000/r/<link token> (valid until 5 Nov)
+Klinikum Beispielstadt: Dr. L. Hofer sent you a secure request. Open it with ID Austria: http://localhost:3010/r/<link token> (valid until 5 Nov)
 ```
 
 Before sending, the request service compares the words of the message with the patient's name words, the birth date in the formats `1961-03-12`, `12.03.1961`, and `12 March 1961`, and the document type words. It compares whole words, not substrings. A substring check would block every message, because the patient's family name "Beispiel" is part of "Klinikum Beispielstadt". [Compliance and safety](COMPLIANCE_AND_SAFETY.md) has the rule.
@@ -143,7 +148,9 @@ Before sending, the request service compares the words of the message with the p
 | `GET /sms` | Shows every SMS the request service would have sent, like a phone screen. |
 | `GET /audit` | Shows the audit log for the demo. Bound to localhost. |
 
-A signed session cookie holds the request id and, after login, the person number. It expires after 30 minutes.
+The pages are Next.js routes. `/auth/login` and `/auth/callback` are route handlers, because they need real redirects and cookies. The answer page loads its data and sends the upload through tRPC (`eidProcedure`, the upload as `FormData`).
+
+A signed session cookie (`ordy_eid_session`, see `src/server/auth/eid-session.ts`) holds the request id and, after login, the person number. It expires after 30 minutes.
 
 ## Document parsing
 
@@ -154,7 +161,7 @@ The scenario documents share one Markdown format:
 - for lab results, a table with the columns `Test`, `Result`, `Unit`, `Reference range`, and `LOINC code`
 - free text sections such as `## Course` and `## Recommendations`
 
-The parser reads headings and tables from markdown-it-py tokens and splits `Key: value` lines with `str.partition(": ")`. It reads dates with `datetime.strptime` in the `Europe/Vienna` time zone, for example `"%d %B %Y, %H:%M"` for `22 October 2026, 08:10`. The `Patient` line splits at `", born "` into name and birth date.
+The parser reads headings and tables from markdown-it tokens and splits `Key: value` lines at the first `": "`. It reads dates against a fixed list of formats in the `Europe/Vienna` time zone, for example `22 October 2026, 08:10`. The `Patient` line splits at `", born "` into name and birth date.
 
 The document kind picks the mapper. `lab report` goes to the lab mapper and `discharge report` goes to the rehab mapper. Any other kind becomes a DocumentReference with the text attached, held for Dr. Hofer.
 
@@ -164,7 +171,7 @@ If the parser cannot read a document, a language model may extract the same fiel
 
 ## Storage
 
-The request service keeps three SQLite tables.
+The request service keeps three Postgres tables, defined with Drizzle in `src/server/db/schema.ts`. Migrations live in `drizzle/`. `audit_log` exists already. `requests` and `bindings` come with T04.
 
 | Table | Columns |
 |---|---|
@@ -189,61 +196,79 @@ Every entry has a UTC timestamp in `at`. `!status <id>` in Matrix and `GET /audi
 
 ## Configuration
 
-| Variable | Example |
+All variables are read and validated in `src/env.ts`. Each one has a demo default, so `.env` is optional. `.env.example` lists them.
+
+| Variable | Default |
 |---|---|
-| `PUBLIC_BASE_URL` | `http://localhost:8000` |
-| `MATRIX_HOMESERVER` | `http://localhost:8008` |
-| `MATRIX_BOT_USER` | `@requestbot:klinikum.example` |
-| `MATRIX_BOT_PASSWORD` | in `.env` only |
+| `PUBLIC_URL` | `http://localhost:3010` |
+| `ORDY_SECRET` | demo value, set your own in `.env` |
+| `DATABASE_URL` | `postgres://ordy:ordy@localhost:5433/ordy` |
+| `FHIR_BASE_URL` | `http://localhost:8090/fhir` |
+| `MATRIX_HOMESERVER_URL`, `MATRIX_SERVER_NAME` | `http://localhost:8008`, `klinikum.example` |
+| `MATRIX_BOT_USER`, `MATRIX_BOT_PASSWORD` | `ordy`, demo value |
+| `MATRIX_HOFER_USER`, `MATRIX_HOFER_PASSWORD` | `lena.hofer`, demo value (setup scripts only) |
+| `MATRIX_ROOM_ALIAS` | `outside-documents` |
 | `OIDC_METADATA_URL` | `http://localhost:8080/realms/idaustria-sim/.well-known/openid-configuration` |
-| `OIDC_CLIENT_ID` | `request-service` |
-| `OIDC_CLIENT_SECRET` | in `.env` only |
-| `FHIR_BASE` | `http://localhost:8090/fhir` |
-| `SMTP_HOST`, `SMTP_PORT` | `localhost`, `1025` |
-| `SESSION_SECRET` | in `.env` only |
+| `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | `request-service`, in `.env` only |
+| `SMTP_HOST`, `SMTP_PORT`, `MAILPIT_API_URL` | `localhost`, `1025`, `http://localhost:8025` |
+| `ANTHROPIC_API_KEY` | unset, only for the optional AI fallback |
 
 To switch to real ID Austria, change `OIDC_METADATA_URL`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET`, and map the claim names in one place. [Identity and misdelivery](IDENTITY.md) lists the claims.
 
-## Repository layout (planned)
+## Repository layout
+
+Files marked *planned* do not exist yet. The task id says who builds them.
 
 ```
-docker-compose.yml
-.env.example
-keycloak/realm-idaustria-sim.json
-ehvd/directory.json
-synapse/                      generated homeserver.yaml
-element/config.json
-service/
-	app.py                    FastAPI routes and session
-	bot.py                    Matrix commands and notices
-	doctypes.py               the document types table
-	identity.py               name match, eHVD check, bindings
-	parser.py                 Markdown to typed records
-	fhir_mapper.py            typed records to FHIR JSON
-	audit.py
-	messages.py               email and SMS templates and the content check
+docker-compose.yml            Synapse, Element, HAPI, Mailpit, Postgres (Keycloak: T02)
+.env.example                  all variables with demo values
+docker/element/config.json    Element config
+docker/synapse/               generated homeserver.yaml (git ignores it)
+keycloak/realm-idaustria-sim.json   planned, T02
+ehvd/directory.json           planned, T15
+drizzle/                      generated SQL migrations
+src/
+  env.ts                      zod-validated configuration
+  app/                        Next.js pages and route handlers
+    api/trpc/[trpc]/route.ts  tRPC endpoint
+    api/healthz/route.ts      health check for scripts and containers
+    widget/page.tsx           request form inside Element (placeholder)
+    r/[token]/, auth/         outside portal and ID Austria login, planned, T07 and T09
+  trpc/                       React client for tRPC (TanStack Query)
+  server/
+    api/trpc.ts               context and procedures: public, clinic, eid
+    api/root.ts               app router and createCaller
+    api/routers/              one router per area
+    db/                       Drizzle schema and client
+    fhir/                     FHIR client, mappers planned (T12 to T14)
+    matrix/client.ts          Matrix client-server API
+    auth/eid-session.ts       outside person's session cookie
+  bot/                        Matrix bot process and commands
 scripts/
-	validate.sh               HL7 validator on every filed resource
-	audit_check.py            six event types per request
+  setup.sh                    one-time setup
+  reset.sh                    empty Postgres, HAPI, and Mailpit, reload the patient
+  bootstrap-matrix.ts         room, invites, widget
+  seed-fhir.ts                Maria Beispiel into HAPI
+  validate.ts                 planned, T18: HL7 validator on every filed resource
+  audit-check.ts              planned, T17: six event types per request
 track/                        track brief, scenario, patient.json, and test documents
 ```
 
-## Run it (planned)
+## Run it
 
-1. Copy `.env.example` to `.env` and fill in the secrets.
-2. Generate the Synapse config once:
-	`docker run --rm -v ./synapse:/data -e SYNAPSE_SERVER_NAME=klinikum.example -e SYNAPSE_REPORT_STATS=no matrixdotorg/synapse generate`
-3. Start everything with `docker compose up -d`.
-4. Create the Matrix users `@lena.hofer` and `@requestbot` with `register_new_matrix_user` inside the Synapse container.
-5. Open Element at `http://localhost:8081`, log in as Dr. Hofer, create a room, and invite the bot.
-6. Send the request commands from the Matrix bot section.
-7. Open Mailpit at `http://localhost:8025` or the SMS screen at `http://localhost:8000/sms` and follow the link.
+[Development](DEVELOPMENT.md) has the full guide. In short:
+
+1. `./scripts/setup.sh` once. It creates `.env`, starts the containers, registers the Matrix users, migrates the database, loads the patient, and creates Dr. Hofer's room with the widget.
+2. `pnpm dev` starts Next.js on `http://localhost:3010` and the bot.
+3. Open Element at `http://localhost:8081` and log in as `lena.hofer` / `hofer-demo-2026`. The room "Dr. Hofer · Outside documents" is there. Send `!status`.
+4. Mailpit is at `http://localhost:8025`, the SMS screen at `http://localhost:3010/sms` (T06).
 
 ## Sources
 
 - [Synapse](https://github.com/element-hq/synapse) and [Element Web](https://github.com/element-hq/element-web)
 - [Keycloak: importing and exporting realms](https://www.keycloak.org/server/importExport) and [server administration guide](https://www.keycloak.org/docs/latest/server_admin/index.html)
-- [Authlib: FastAPI OAuth client](https://docs.authlib.org/en/latest/oauth2/client/web/fastapi.html)
+- [openid-client](https://github.com/panva/openid-client)
+- [Next.js documentation](https://nextjs.org/docs), [tRPC](https://trpc.io/docs), [Drizzle ORM](https://orm.drizzle.team/docs/overview)
 - [Mailpit](https://mailpit.axllent.org/)
 - [HAPI FHIR JPA server starter](https://github.com/hapifhir/hapi-fhir-jpaserver-starter)
 - [OpenID Connect Core 1.0](https://openid.net/specs/openid-connect-core-1_0.html)

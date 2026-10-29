@@ -118,7 +118,7 @@ Doc 1 grades each answer as correct, acceptable, or unsafe. An unsafe grade bloc
 
 ### Demo path from Dev 1
 
-Dev 1 provides a reset command that empties SQLite, HAPI, and Mailpit, and reloads the patient. Dev 1 also provides a rehearsed path through both requests and the three misdelivery tests.
+`pnpm reset` empties Postgres, HAPI, and Mailpit, and reloads the patient. Dev 1 also provides a rehearsed path through both requests and the three misdelivery tests.
 
 ### Escalation
 

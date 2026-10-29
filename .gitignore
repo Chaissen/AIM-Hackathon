@@ -1,0 +1,25 @@
+# dependencies
+/node_modules
+.pnpm-debug.log*
+
+# next.js
+/.next/
+/build
+next-env.d.ts
+*.tsbuildinfo
+
+# env files (.env.example is committed)
+.env*
+!.env.example
+
+# local data and tools
+/data/
+/tools/
+/out/
+docker/synapse/*
+!docker/synapse/.gitkeep
+
+# misc
+.DS_Store
+*.pem
+coverage/

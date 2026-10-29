@@ -1,6 +1,6 @@
 # UML: current use case and relations
 
-Status: there is no code yet. These diagrams model the target system from [`track/README.md`](../track/README.md) and [WHITEPAPER.md](WHITEPAPER.md).
+Status: the stack is set up, the features in these diagrams are not built yet. These diagrams model the target system from [`track/README.md`](../track/README.md) and [WHITEPAPER.md](WHITEPAPER.md).
 Dashed elements are **proposed**: the register and everything new it brings. Add comments as `> 💬 Name: ...`.
 
 ## 1. Use case diagram
@@ -192,7 +192,7 @@ flowchart LR
     subgraph Clinic["Runs at the clinic"]
         element["Element Web"] <--> synapse["Synapse<br/>(Matrix)"]
         synapse <--> bot["Request bot"]
-        bot <--> core["Core service<br/>(FastAPI)"]
+        bot <--> core["Core service<br/>(Next.js + tRPC)"]
         core <--> fhirsrv[("HAPI FHIR")]
         core --> audit[("Audit log")]
         core <-.-> reg[("Register<br/>(proposed)")]
@@ -217,6 +217,6 @@ The track says outside people are **in no directory**. The PGK directory only li
 | R2 Who adds outside contacts? | Dr. Hofer on her first request (name + contact). The entry gets "verified" after the first successful eID check | |
 | R3 What does ID Austria give us? | Name + birth date, plus an eID identifier (bPK-like). We store the identifier so later answers must come from the same person, not just the same name | |
 | R4 Lookalike detection | Compare the typed address against known domains (`labor-kanaI` vs `labor-kanal`) → warning before sending (helps M1) | |
-| R5 Is this in scope for the demo? | Minimal version: a seeded JSON or SQLite table, no admin UI | |
+| R5 Is this in scope for the demo? | Minimal version: a seeded JSON file or a Postgres table, no admin UI | |
 
 > 💬 Add further information here.

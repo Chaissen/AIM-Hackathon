@@ -51,7 +51,7 @@ Keycloak speaks the same protocol, OpenID Connect. Switching to real ID Austria 
 
 The realm `idaustria-sim` lives in `keycloak/realm-idaustria-sim.json`. Keycloak imports it at startup with `start-dev --import-realm`.
 
-- The client `request-service` is confidential and uses the standard flow. Its redirect URI is `http://localhost:8000/auth/callback`.
+- The client `request-service` is confidential and uses the standard flow. Its redirect URI is `http://localhost:3010/auth/callback`.
 - The user profile declares `birthdate`, required at registration, and `ida_level`, which only admins can edit and which defaults to `urn:eidgvat:eid.status.full`.
 - The `profile` client scope already maps `birthdate`. Two more mappers add `idaustria_level` and `idaustria_authentication_level`.
 - Self-registration is on. A jury member creates a new outside person in about 20 seconds. The registration page says that real ID Austria identities come from the state.
@@ -86,7 +86,7 @@ All names, dates, and passwords are synthetic.
     |<-- answer form or refusal -|                                  |
 ```
 
-The request service never sees the password. Keycloak signs the ID token with its private key, and the request service checks it with Keycloak's public key, so the person cannot change their own name. The code swap runs server to server with a secret the browser never sees. Authlib does the redirects, the code swap, and the signature check.
+The request service never sees the password. Keycloak signs the ID token with its private key, and the request service checks it with Keycloak's public key, so the person cannot change their own name. The code swap runs server to server with a secret the browser never sees. The library `openid-client` does the redirects, the code swap, and the signature check inside two Next.js route handlers.
 
 ## Identity checks
 
@@ -118,29 +118,32 @@ ID Austria returns the full official name. Dr. Hofer types what she knows. The m
 | Eva Brandl | Eva Huber | Fail. A married name change also fails, and Dr. Hofer can send a new request. |
 | Eva Brandl | Thomas Wagner | Fail |
 
-```python
-import unicodedata
+```ts
+const TITLES = new Set(["dr", "mag", "prof", "med", "univ", "di", "ing"]);
+const SPELL_OUT: Record<string, string> = { "ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss" };
 
-TITLES = {"dr", "mag", "prof", "med", "univ", "di", "ing"}
-SPELL_OUT = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss", "-": " ", ".": " ", ",": " "})
+export function nameWords(name: string): Set<string> {
+  const plain = name
+    .toLowerCase()
+    .replace(/[äöüß]/g, (c) => SPELL_OUT[c])
+    .replace(/[-.,]/g, " ")
+    .normalize("NFKD")
+    .replace(/[^\x00-\x7f]/g, "");
+  return new Set(plain.split(/\s+/).filter((w) => w && !TITLES.has(w)));
+}
 
+const isSubset = (a: Set<string>, b: Set<string>) => [...a].every((w) => b.has(w));
+const shares = (a: Set<string>, b: Set<string>) => [...a].some((w) => b.has(w));
 
-def name_words(name: str) -> set[str]:
-	spelled = name.lower().translate(SPELL_OUT)
-	plain = unicodedata.normalize("NFKD", spelled).encode("ascii", "ignore").decode()
-	return set(plain.split()) - TITLES
-
-
-def match_requested_person(req_given: str, req_family: str, id_given: str, id_family: str) -> str:
-	want_family, got_family = name_words(req_family), name_words(id_family)
-	if want_family <= got_family and name_words(req_given) <= name_words(id_given):
-		return "pass"
-	if want_family & got_family:
-		return "hold"
-	return "fail"
+export function matchRequestedPerson(reqGiven: string, reqFamily: string, idGiven: string, idFamily: string) {
+  const wantFamily = nameWords(reqFamily), gotFamily = nameWords(idFamily);
+  if (isSubset(wantFamily, gotFamily) && isSubset(nameWords(reqGiven), nameWords(idGiven))) return "pass";
+  if (shares(wantFamily, gotFamily)) return "hold";
+  return "fail";
+}
 ```
 
-`<=` means every word on the left is also on the right. The bot refuses requests with an empty `given` or `family`, because an empty set passes every subset test.
+`isSubset(a, b)` means every word in `a` is also in `b`. The bot refuses requests with an empty `given` or `family`, because an empty set passes every subset test.
 
 ### Person number binding
 
@@ -230,12 +233,13 @@ Dr. Brandl logs in and uploads `lab-result-max-beispiel.md`, a result for Max Be
 4. The audit log has `misdelivery_caught` with `patient_mismatch`. Dr. Hofer gets a Matrix message that names Maria and does not name Max.
 5. The request service discards the upload and keeps only its SHA-256 hash.
 
-```python
-def same_patient(doc_name: str, doc_birth_date: date, patient: Patient) -> bool:
-	family = name_words(patient.family)
-	all_names = family | name_words(" ".join(patient.given))
-	doc_words = name_words(doc_name)
-	return doc_birth_date == patient.birth_date and family <= doc_words and doc_words <= all_names
+```ts
+export function samePatient(docName: string, docBirthDate: string, patient: { family: string; given: string[]; birthDate: string }) {
+  const family = nameWords(patient.family);
+  const allNames = new Set([...family, ...nameWords(patient.given.join(" "))]);
+  const docWords = nameWords(docName);
+  return docBirthDate === patient.birthDate && isSubset(family, docWords) && isSubset(docWords, allNames);
+}
 ```
 
 The request service runs this check on the document and on the name and birth date typed into the form. Both must pass.
