@@ -1,4 +1,5 @@
-# ordy infrastructure: Matrix (Synapse + Element), HAPI FHIR, Mailpit, Postgres, Keycloak (simulated ID Austria).
+# ordy infrastructure: Matrix (Synapse + Element), HAPI FHIR, Mailpit, Postgres, Keycloak (simulated ID Austria),
+# and the eHVD mock.
 # The ordy app itself (Next.js + Matrix bot) runs on the host with `pnpm dev`.
 services:
   synapse:
@@ -77,6 +78,20 @@ services:
       retries: 5
       start_period: 60s
       start_interval: 2s
+
+  ehvd:
+    build:
+      context: .
+      dockerfile: services/ehvd-mock/Dockerfile
+    environment:
+      EHVD_ALLOWLIST: "${EHVD_ALLOWLIST:-127.0.0.0/8, ::1/128, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7}"
+      EHVD_SCHEMA_ERRORS: ${EHVD_SCHEMA_ERRORS:-http-403}
+    ports:
+      - "8095:8095"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8095/healthz"]
+      interval: 5s
+      retries: 30
 
 volumes:
   pgdata:
