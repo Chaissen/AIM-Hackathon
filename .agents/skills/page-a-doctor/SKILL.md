@@ -11,7 +11,7 @@ Run this from the repo root:
 .agents/skills/page-a-doctor/scripts/page-doctor.sh
 ```
 
-It unmutes the Mac, sets the output volume to 100, and opens https://www.youtube.com/watch?v=273eSvOwpKk in Google Chrome. It also sets the YouTube player itself to full volume when Chrome allows JavaScript from Apple Events (View > Developer > Allow JavaScript from Apple Events). Without that setting, the system volume does the job.
+It unmutes the Mac, sets the output volume to 100, opens https://www.youtube.com/watch?v=273eSvOwpKk in a new tab in Google Chrome, and brings Chrome to the front. It also sets the YouTube player itself to full volume when Chrome allows JavaScript from Apple Events (View > Developer > Allow JavaScript from Apple Events). Without that setting, the system volume does the job.
 
 - The script controls apps outside the workspace. If a sandbox blocks it, as Codex's can, rerun it with escalated permissions.
 - Page once per need, not again on every turn about the same question.
