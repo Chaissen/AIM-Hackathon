@@ -15,7 +15,6 @@ Status: design written; TypeScript stack set up (Next.js, tRPC, Postgres, Matrix
 | [Identity and misdelivery](docs/IDENTITY.md) | Real ID Austria and eHVD, the Keycloak simulation, the identity checks, and the three misdelivery tests |
 | [FHIR model](docs/FHIR.md) | The resources we file, how they reference each other, and how we validate them |
 | [Timeline](docs/TIMELINE.md) | Milestones, tasks, owners, and the cut list |
-| [Roles and workflow](docs/ROLES_AND_WORKFLOW.md) | Who owns what, git rules, and handoffs |
 | [Compliance and safety](docs/COMPLIANCE_AND_SAFETY.md) | Synthetic data, message rules, data we keep, AI rules, and the disclaimer |
 | [UML diagrams](docs/UML.md) | Use cases, domain classes, and component relations |
 | [Track brief](track/README.md) and [scenario](track/scenario/README.md) | The task as the organisers wrote it |

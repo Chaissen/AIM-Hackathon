@@ -12,8 +12,6 @@ Track 2, health data interoperability. The event window is assumed to run from T
 | **Doc 1** | Identity policy per document type, test documents, misdelivery runs, clinical review of the FHIR content |
 | **Doc 2** | Demo script, timed test with someone new, video, README design answers |
 
-[Roles and workflow](ROLES_AND_WORKFLOW.md) has the full ownership table.
-
 ## Milestones
 
 Each milestone may slip 30 minutes. A longer slip triggers the cut list.
