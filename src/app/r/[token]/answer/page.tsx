@@ -11,7 +11,7 @@ import { AnswerForm } from "./answer-form";
 const formatDate = (iso: string) =>
   new Date(`${iso}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
 
-// GET /r/{token}/answer: only after the identity check passed (organisations/ARCHITECTURE.md, "Outside portal").
+// GET /r/{token}/answer: only after the identity check passed (docs/ARCHITECTURE.md, "Outside portal").
 export default function AnswerPage({ params }: PageProps<"/r/[token]/answer">) {
   return (
     <Suspense fallback={<PortalFrame>{null}</PortalFrame>}>

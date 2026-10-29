@@ -3,7 +3,7 @@ import { z } from "zod";
 import { documentTypeKeys } from "@/lib/document-types";
 
 // What Dr. Hofer gives for one request, in the widget or with `!request`.
-// organisations/ARCHITECTURE.md, "Matrix bot": a request needs given, family, patient, and either email or phone.
+// docs/ARCHITECTURE.md, "Matrix bot": a request needs given, family, patient, and either email or phone.
 export const requestInput = z
   .object({
     docType: z.enum(documentTypeKeys),
@@ -22,7 +22,7 @@ export const requestInput = z
 
 export type RequestInput = z.infer<typeof requestInput>;
 
-/** The same request as a bot command, in the format of organisations/ARCHITECTURE.md. */
+/** The same request as a bot command, in the format of docs/ARCHITECTURE.md. */
 export function toRequestCommand(v: RequestInput): string {
   const q = (s: string) => (/\s/.test(s) ? `"${s}"` : s);
   const contact = v.email ? `email=${q(v.email)}` : `phone=${q(v.phone ?? "")}`;

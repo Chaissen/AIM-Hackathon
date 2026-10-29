@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import { fhirFetch } from "@/server/fhir/client";
 import { RequestForm, type PatientOption } from "./request-form";
 
-// Request form inside Element (organisations/ARCHITECTURE.md). Rendered in a narrow side panel.
+// Request form inside Element (docs/ARCHITECTURE.md). Rendered in a narrow side panel.
 export default function Widget() {
   return (
     <main className="mx-auto grid w-full max-w-md gap-4 px-4 py-5">

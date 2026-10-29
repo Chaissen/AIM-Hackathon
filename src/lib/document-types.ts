@@ -1,4 +1,4 @@
-// The document types table from organisations/ARCHITECTURE.md, "Document types".
+// The document types table from docs/ARCHITECTURE.md, "Document types".
 // To add a type, add a row here and in the docs.
 export const DOCUMENT_TYPES = {
   "lab-result": { label: "Lab result", messageName: "lab result", channel: "email" },

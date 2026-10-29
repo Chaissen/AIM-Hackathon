@@ -24,7 +24,7 @@ export function PortalMessage({ title, children }: { title: string; children: Re
   );
 }
 
-/** Shown after a failed identity check. Says nothing about the patient or the document (organisations/IDENTITY.md, M1). */
+/** Shown after a failed identity check. Says nothing about the patient or the document (docs/IDENTITY.md, M1). */
 export function Refusal() {
   return (
     <PortalFrame>
