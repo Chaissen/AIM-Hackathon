@@ -12,7 +12,8 @@ import type {
   Reference,
 } from "fhir/r4";
 
-import type { LabResult, LabRow, ParsedDocument, RehabReport, ViennaDateTime } from "@/server/documents/types";
+import { viennaInstant } from "@/server/documents/dates";
+import type { LabResult, LabRow, ParsedDocument, RehabReport } from "@/server/documents/types";
 
 // Lab and rehab mappers (docs/FHIR.md, "Lab result mapping" and "Rehab report mapping").
 // They only build the clinical resources. The filing (T13) creates the Practitioner and Organization,
@@ -24,32 +25,33 @@ const UCUM = "http://unitsofmeasure.org";
 /** A resource with the `urn:uuid:` fullUrl it gets in the transaction Bundle. */
 export type Entry<T extends FhirResource> = { fullUrl: `urn:uuid:${string}`; resource: T };
 
-/** Reference values, such as `Patient/maria-beispiel` or the `urn:uuid:` fullUrl of another Bundle entry. */
+/** A server id such as `Patient/maria-beispiel`, or the `urn:uuid:` fullUrl of another Bundle entry. */
+export type ReferenceValue = `urn:uuid:${string}` | `${"Patient" | "Practitioner" | "Organization"}/${string}`;
+
 export type MapContext = {
   /** `Patient/maria-beispiel`, chosen by the request, never by the document. */
-  patient: string;
+  patient: ReferenceValue;
   /** The organisation from the heading. */
-  organization: string;
-  /** The physician under `Validated by` or `Written by`. Null when the document names none. */
-  practitioner: string | null;
+  organization: ReferenceValue;
+  /** The physician under `Validated by` or `Written by`. Null when the filing has none. */
+  practitioner: ReferenceValue | null;
 };
 
 export type LabResultEntries = { diagnosticReport: Entry<DiagnosticReport>; observations: Entry<Observation>[] };
-
-// An instant needs seconds and an offset (docs/FHIR.md, validator traps).
-const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
 
 const entry = <T extends FhirResource>(resource: T): Entry<T> => ({ fullUrl: `urn:uuid:${randomUUID()}`, resource });
 
 // A new object for every use, so no two resources share one.
 const ref = (reference: string): Reference => ({ reference });
 
-/** Optional elements may also be null. Required ones may not, so they never drop out. */
+/** Optional elements may also be null. Required ones may not. */
 type Draft<T> = { [K in keyof T]: undefined extends T[K] ? T[K] | null : T[K] };
 
 /**
  * Leaves out the elements that are null, undefined, or an empty string, because FHIR JSON allows no empty values
  * (`ele-1`) and a jury document may leave a cell empty. Typed by the element, so a misspelled key fails the typecheck.
+ * It works on one level only and keeps empty arrays, so nested elements go through their own `compact`.
+ * A required string must not be empty either; the parser guarantees that for every one used here.
  */
 const compact = <T extends object>(element: Draft<T>): T =>
   Object.fromEntries(Object.entries(element).filter(([, value]) => value !== null && value !== undefined && value !== "")) as T;
@@ -62,9 +64,9 @@ const markdownAttachment = (doc: ParsedDocument, title?: string): Attachment =>
     title,
   });
 
-// INR has no unit, so its quantities carry only the value.
+// A unit the parser could not code in UCUM stays text only, so it cannot fail the UCUM check. INR has no unit at all.
 const quantity = (value: number, row: LabRow): Quantity =>
-  row.ucum ? { value, unit: row.unitText, system: UCUM, code: row.ucum } : { value };
+  compact<Quantity>({ value, unit: row.unitText, system: row.ucum ? UCUM : null, code: row.ucum });
 
 // The parser gives both bounds or neither. A row without bounds and without text gets no range (`ref-1`).
 function referenceRange(row: LabRow): ObservationReferenceRange[] | null {
@@ -116,9 +118,8 @@ export function mapLabResult(doc: LabResult, context: MapContext): LabResultEntr
   return { diagnosticReport, observations };
 }
 
-/** `filedAt` is an instant with seconds and the Vienna offset, for example `2026-10-29T14:02:12+01:00`. */
-export function mapRehabReport(doc: RehabReport, context: MapContext, filedAt: ViennaDateTime): Entry<DocumentReference> {
-  if (!INSTANT.test(filedAt)) throw new Error(`filedAt "${filedAt}" is not an instant such as 2026-10-29T14:02:12+01:00.`);
+/** `filedAt` is the moment of filing. It becomes `date`, an instant in Europe/Vienna. */
+export function mapRehabReport(doc: RehabReport, context: MapContext, filedAt: Date): Entry<DocumentReference> {
   return entry(
     compact<DocumentReference>({
       resourceType: "DocumentReference",
@@ -126,7 +127,7 @@ export function mapRehabReport(doc: RehabReport, context: MapContext, filedAt: V
       docStatus: "final",
       type: { coding: [{ system: LOINC, code: "18842-5" }], text: "Rehab discharge report" },
       subject: ref(context.patient),
-      date: filedAt,
+      date: viennaInstant(filedAt),
       author: (context.practitioner ? [context.practitioner, context.organization] : [context.organization]).map(ref),
       description: doc.reason,
       content: [{ attachment: markdownAttachment(doc, doc.title) }],

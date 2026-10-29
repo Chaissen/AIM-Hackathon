@@ -3,6 +3,7 @@ import MarkdownIt from "markdown-it";
 import { TITLE } from "@/server/identity/names";
 import { parseDate, parseStay, parseViennaDateTime } from "./dates";
 import type { LabRow, ParseResult, ParsedDocument, PersonLine } from "./types";
+import { toUcum } from "./ucum";
 
 // Reads the scenario Markdown format into typed records (docs/ARCHITECTURE.md, "Document parsing").
 
@@ -148,8 +149,7 @@ function labRows(table: Table, errors: string[]): LabRow[] {
         test,
         value,
         valueText: cell("Result"),
-        // UCUM writes powers with "*": "10^9/L" becomes "10*9/L" (docs/FHIR.md, validator traps).
-        ucum: unitText ? unitText.replace(/\^/g, "*") : null,
+        ucum: toUcum(unitText),
         unitText,
         low: hasRange ? low : null,
         high: hasRange ? high : null,

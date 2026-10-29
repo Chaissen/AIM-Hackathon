@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { labResultMaria, labResultMax, rehabReportMaria } from "@/server/documents/scenario-fixtures";
+import type { LabRow, ParsedDocument } from "@/server/documents/types";
 
 import { type MapContext, mapLabResult, mapRehabReport } from "./mappers";
 
@@ -11,12 +12,28 @@ const context: MapContext = {
   practitioner: "urn:uuid:practitioner",
 };
 
-const decode = (data: string | undefined) => Buffer.from(data ?? "", "base64").toString("utf8");
+const filedAt = new Date("2026-10-29T13:02:12Z");
 
 const UUID_URN = /^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 const aptt = labResultMaria.rows[1];
 const seconds = (value: number) => ({ value, unit: "s", system: "http://unitsofmeasure.org", code: "s" });
+const markdownAttachment = (doc: ParsedDocument) => ({
+  contentType: "text/markdown; charset=utf-8",
+  data: Buffer.from(doc.markdown, "utf8").toString("base64"),
+});
+const withRow = (row: LabRow) => mapLabResult({ ...labResultMaria, rows: [row] }, context).observations[0].resource;
+
+/** Paths of every null, empty string, empty array, or empty object, which FHIR JSON does not allow (`ele-1`). */
+function emptyValues(value: unknown, path = "$"): string[] {
+  if (value === null || value === "") return [path];
+  if (Array.isArray(value)) return value.length ? value.flatMap((v, i) => emptyValues(v, `${path}[${i}]`)) : [path];
+  if (typeof value === "object") {
+    const entries = Object.entries(value);
+    return entries.length ? entries.flatMap(([k, v]) => emptyValues(v, `${path}.${k}`)) : [path];
+  }
+  return [];
+}
 
 test("mapLabResult builds the aPTT Observation exactly as in docs/FHIR.md", () => {
   const { observations } = mapLabResult(labResultMaria, context);
@@ -43,13 +60,18 @@ test("mapLabResult gives INR values without a unit and platelets in UCUM", () =>
   assert.equal(platelets.valueQuantity?.unit, "10^9/L");
 });
 
+test("mapLabResult keeps a unit the parser could not code in UCUM as text only", () => {
+  const observation = withRow({ ...aptt, ucum: null, unitText: "G/L", value: 6.5, low: 4, high: 10, rangeText: "4 to 10" });
+  assert.deepEqual(observation.valueQuantity, { value: 6.5, unit: "G/L" });
+  assert.deepEqual(observation.referenceRange, [{ low: { value: 4, unit: "G/L" }, high: { value: 10, unit: "G/L" }, text: "4 to 10" }]);
+});
+
 test("mapLabResult builds the DiagnosticReport around the Observations", () => {
   const { diagnosticReport, observations } = mapLabResult(labResultMaria, context);
-  const { presentedForm, ...rest } = diagnosticReport.resource;
   assert.match(diagnosticReport.fullUrl, UUID_URN);
   for (const o of observations) assert.match(o.fullUrl, UUID_URN);
   assert.equal(new Set(observations.map((o) => o.fullUrl)).size, 4);
-  assert.deepEqual(rest, {
+  assert.deepEqual(diagnosticReport.resource, {
     resourceType: "DiagnosticReport",
     status: "final",
     category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/v2-0074", code: "LAB" }] }],
@@ -61,16 +83,20 @@ test("mapLabResult builds the DiagnosticReport around the Observations", () => {
     resultsInterpreter: [{ reference: "urn:uuid:practitioner" }],
     result: observations.map((o) => ({ reference: o.fullUrl })),
     conclusion: "All values are within the reference range.",
+    presentedForm: [markdownAttachment(labResultMaria)],
   });
-  assert.equal(presentedForm?.length, 1);
-  assert.equal(presentedForm?.[0].contentType, "text/markdown; charset=utf-8");
-  assert.equal(decode(presentedForm?.[0].data), labResultMaria.markdown);
 });
 
 test("mapLabResult gives every resource its own reference objects", () => {
   const { diagnosticReport, observations } = mapLabResult(labResultMaria, context);
-  const subjects = [diagnosticReport, ...observations].map((e) => e.resource.subject);
-  assert.equal(new Set(subjects).size, 5);
+  const report = diagnosticReport.resource;
+  const references = [
+    report.subject,
+    report.performer?.[0],
+    report.resultsInterpreter?.[0],
+    ...observations.flatMap((o) => [o.resource.subject, o.resource.performer?.[0]]),
+  ];
+  assert.equal(new Set(references).size, 11);
 });
 
 test("mapLabResult passes the parser's H for Max Beispiel's raised INR and aPTT through", () => {
@@ -78,42 +104,49 @@ test("mapLabResult passes the parser's H for Max Beispiel's raised INR and aPTT 
   assert.deepEqual(codes, ["H", "H", "N", "N"]);
 });
 
-test("mapLabResult leaves out the physician and the conclusion when the document has none", () => {
-  const { diagnosticReport, observations } = mapLabResult(
-    { ...labResultMaria, conclusion: null, validatedBy: null },
-    { ...context, practitioner: null },
-  );
+test("mapLabResult leaves out the physician when the filing passes none, and a missing conclusion", () => {
+  const { diagnosticReport, observations } = mapLabResult({ ...labResultMaria, conclusion: null }, { ...context, practitioner: null });
   assert.equal("resultsInterpreter" in diagnosticReport.resource, false);
   assert.equal("conclusion" in diagnosticReport.resource, false);
   assert.equal("performer" in observations[0].resource, false);
 });
 
 test("mapLabResult keeps only the text of a range the parser could not split", () => {
-  const row = { ...aptt, low: null, high: null, rangeText: "below 37", interpretation: null };
-  const [observation] = mapLabResult({ ...labResultMaria, rows: [row] }, context).observations;
-  assert.equal("interpretation" in observation.resource, false);
-  assert.deepEqual(observation.resource.referenceRange, [{ text: "below 37" }]);
+  const observation = withRow({ ...aptt, low: null, high: null, rangeText: "below 37", interpretation: null });
+  assert.equal("interpretation" in observation, false);
+  assert.deepEqual(observation.referenceRange, [{ text: "below 37" }]);
 });
 
 test("mapLabResult leaves out the elements of empty cells", () => {
-  const row = { ...aptt, test: "", low: null, high: null, rangeText: "", interpretation: null };
-  const [observation] = mapLabResult({ ...labResultMaria, rows: [row] }, context).observations;
-  assert.equal("referenceRange" in observation.resource, false);
-  assert.deepEqual(observation.resource.code, { coding: [{ system: "http://loinc.org", code: "14979-9" }] });
+  const observation = withRow({ ...aptt, test: "", ucum: null, unitText: "", low: null, high: null, rangeText: "", interpretation: null });
+  assert.equal("referenceRange" in observation, false);
+  assert.deepEqual(observation.code, { coding: [{ system: "http://loinc.org", code: "14979-9" }] });
+  assert.deepEqual(observation.valueQuantity, { value: 31 });
 });
 
 test("mapLabResult keeps zero values and zero bounds", () => {
-  const row = { ...aptt, value: 0, valueText: "0", low: 0, high: 2, rangeText: "0 to 2" };
-  const [observation] = mapLabResult({ ...labResultMaria, rows: [row] }, context).observations;
-  assert.deepEqual(observation.resource.valueQuantity, seconds(0));
-  assert.deepEqual(observation.resource.referenceRange, [{ low: seconds(0), high: seconds(2), text: "0 to 2" }]);
+  const observation = withRow({ ...aptt, value: 0, valueText: "0", low: 0, high: 2, rangeText: "0 to 2" });
+  assert.deepEqual(observation.valueQuantity, seconds(0));
+  assert.deepEqual(observation.referenceRange, [{ low: seconds(0), high: seconds(2), text: "0 to 2" }]);
+});
+
+test("no mapper output carries an empty value", () => {
+  const sparse = { ...context, practitioner: null };
+  const outputs = [
+    mapLabResult(labResultMaria, context),
+    mapLabResult(labResultMax, sparse),
+    mapLabResult({ ...labResultMaria, conclusion: null, rows: [{ ...aptt, test: "", ucum: null, unitText: "", low: null, high: null, rangeText: "", interpretation: null }] }, sparse),
+    mapLabResult({ ...labResultMaria, rows: [{ ...aptt, ucum: null, unitText: "G/L", low: null, high: null, rangeText: "below 37", interpretation: null }] }, context),
+    mapRehabReport(rehabReportMaria, context, filedAt),
+    mapRehabReport({ ...rehabReportMaria, reason: null }, sparse, filedAt),
+  ];
+  assert.deepEqual(emptyValues(JSON.parse(JSON.stringify(outputs))), []);
 });
 
 test("mapRehabReport builds the DocumentReference from docs/FHIR.md", () => {
-  const { fullUrl, resource } = mapRehabReport(rehabReportMaria, context, "2026-10-29T14:02:12+01:00");
-  const { content, ...rest } = resource;
+  const { fullUrl, resource } = mapRehabReport(rehabReportMaria, context, filedAt);
   assert.match(fullUrl, UUID_URN);
-  assert.deepEqual(rest, {
+  assert.deepEqual(resource, {
     resourceType: "DocumentReference",
     status: "current",
     docStatus: "final",
@@ -122,26 +155,13 @@ test("mapRehabReport builds the DocumentReference from docs/FHIR.md", () => {
     date: "2026-10-29T14:02:12+01:00",
     author: [{ reference: "urn:uuid:practitioner" }, { reference: "urn:uuid:organization" }],
     description: "rehabilitation after a total hip replacement on the left, on 18 August 2026 at Klinikum Beispielstadt",
+    content: [{ attachment: { ...markdownAttachment(rehabReportMaria), title: "Reha Waldblick: discharge report" } }],
     context: { period: { start: "2026-09-02", end: "2026-09-23" } },
   });
-  assert.equal(content.length, 1);
-  assert.equal(content[0].attachment.contentType, "text/markdown; charset=utf-8");
-  assert.equal(content[0].attachment.title, "Reha Waldblick: discharge report");
-  assert.equal(decode(content[0].attachment.data), rehabReportMaria.markdown);
 });
 
-test("mapRehabReport names only the organisation when no physician wrote the report", () => {
-  const { resource } = mapRehabReport(
-    { ...rehabReportMaria, reason: null, writtenBy: null },
-    { ...context, practitioner: null },
-    "2026-10-29T14:02:12+01:00",
-  );
+test("mapRehabReport names only the organisation when the filing passes no physician", () => {
+  const { resource } = mapRehabReport({ ...rehabReportMaria, reason: null }, { ...context, practitioner: null }, filedAt);
   assert.deepEqual(resource.author, [{ reference: "urn:uuid:organization" }]);
   assert.equal("description" in resource, false);
-});
-
-test("mapRehabReport refuses a filing time that is not an instant", () => {
-  for (const filedAt of ["2026-10-29T14:02+01:00", "2026-10-29T14:02:12", "2026-10-29"]) {
-    assert.throws(() => mapRehabReport(rehabReportMaria, context, filedAt), /is not an instant/);
-  }
 });

@@ -65,7 +65,7 @@ The report and the people who handle it are different. Dr. Leitner wrote the reh
 | Table column `Test` | `Observation.code.text` |
 | Table column `LOINC code` | `Observation.code.coding`, system `http://loinc.org`, without `display` |
 | Table column `Result` | `Observation.valueQuantity.value` |
-| Table column `Unit` | `Observation.valueQuantity` `unit`, `system` `http://unitsofmeasure.org`, and `code` in UCUM |
+| Table column `Unit` | `Observation.valueQuantity` `unit`, `system` `http://unitsofmeasure.org`, and `code` in UCUM. A unit the parser cannot code keeps only `unit`. |
 | Table column `Reference range` | `Observation.referenceRange` `low`, `high`, and `text` |
 | Computed from value and range | `Observation.interpretation`: `N`, `H`, or `L` from `http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation` |
 | Free text such as `All values are within the reference range.` | `DiagnosticReport.conclusion` |
@@ -214,17 +214,19 @@ The request service puts `track/scenario/patient.json` on the server with `PUT P
 3. It runs the validator on each file, as the scenario README says: `java -jar validator_cli.jar <file> -version 4.0`.
 4. It counts the issues with severity error. The target is 0. Warnings do not count.
 
-Until `pnpm validate` exists, the mappers were checked by hand: their output for the three scenario documents (fixtures in `src/server/documents/scenario-fixtures.ts`), on its own and inside a transaction Bundle, has 0 errors and only the `dom-6` warning.
+Until `pnpm validate` exists (T18), the mappers were checked by hand: their output for the three scenario documents (fixtures in `src/server/documents/scenario-fixtures.ts`), on its own and inside a transaction Bundle, has 0 errors and only the `dom-6` warning.
 
 The validator checks LOINC codes against tx.fhir.org, so it needs internet access.
 
 Traps we know about:
 
 - `10^9/L` is not valid UCUM. Use `10*9/L`.
+- The validator rejects a unit that is not UCUM, such as `µmol/L` or `IU/L`, and some lab spellings mean something else in UCUM: `G/L` is gauss per litre, not giga per litre. The parser codes only the units on its list in `src/server/documents/ucum.ts`, after fixing the usual spellings. Any other unit stays text in `unit`, without `system` and `code`.
 - A `dateTime` with a time needs a time zone. `Europe/Vienna` is `+02:00` until 25 October 2026 and `+01:00` after that. The sample times are `+02:00`, and the filing times are `+01:00`.
 - An `instant`, such as `issued` and `recorded`, needs seconds and a time zone.
 - A Quantity with a `code` needs a `system` (invariant `qty-3`).
 - FHIR JSON allows no empty strings (`ele-1`). The mappers leave an element out when its cell is empty, and leave out `referenceRange` when a row has neither bounds nor range text.
+- The validator rejects a LOINC code it does not know. The parser checks the LOINC check digit, which catches most typos.
 - The validator reports a `display` that differs from LOINC's. We leave `display` out and put the document's label into `code.text`, because jury documents may carry codes we have not looked up.
 - A resource without narrative gets a warning (`dom-6`), not an error. Only the Provenance gets a narrative.
 

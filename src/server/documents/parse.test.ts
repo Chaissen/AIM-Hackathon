@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { parseDate, parseStay, parseViennaDateTime } from "./dates";
+import { parseDate, parseStay, parseViennaDateTime, viennaInstant } from "./dates";
 import { parseDocument, parsePersonLine } from "./parse";
 import type { LabResult, ParsedDocument, RehabReport } from "./types";
 
@@ -143,6 +143,13 @@ test("a lab row with a result that is not a number is reported with its row", ()
   if (!result.ok) assert.deepEqual(result.errors, ['Row 2 (aPTT): the result "pending" is not a number.']);
 });
 
+test("a unit the UCUM list does not know stays text only", () => {
+  const markdown = scenario("lab-result-maria-beispiel.md").replace("| 10^9/L |", "| G/L |");
+  const doc = parsed(markdown) as LabResult;
+  assert.equal(doc.rows[2].unitText, "G/L");
+  assert.equal(doc.rows[2].ucum, null);
+});
+
 test("dates in Europe/Vienna get the right offset in summer and in winter", () => {
   assert.equal(parseViennaDateTime("22 October 2026, 08:10"), "2026-10-22T08:10:00+02:00");
   // Summer time ends on 25 October 2026 (docs/FHIR.md, validator traps).
@@ -151,6 +158,9 @@ test("dates in Europe/Vienna get the right offset in summer and in winter", () =
   assert.equal(parseViennaDateTime("1 January 2027, 0:05"), "2027-01-01T00:05:00+01:00");
   assert.equal(parseViennaDateTime("22 October 2026"), null);
   assert.equal(parseViennaDateTime("22 October 2026, 25:00"), null);
+  assert.equal(viennaInstant(new Date("2026-10-29T13:02:12.345Z")), "2026-10-29T14:02:12+01:00");
+  assert.equal(viennaInstant(new Date("2026-10-25T00:59:59Z")), "2026-10-25T02:59:59+02:00");
+  assert.equal(viennaInstant(new Date("2026-10-25T01:00:00Z")), "2026-10-25T02:00:00+01:00");
   assert.equal(parseDate("1 January 1960"), "1960-01-01");
   assert.equal(parseDate("29 February 2025"), null);
   assert.equal(parseDate("12 Mars 1961"), null);
