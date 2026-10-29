@@ -12,8 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // Separate Vite project with its own package.json and lint setup.
-    "frontend/**",
+    // UI prototype: separate Vite project with its own package.json and lint setup.
+    "prototype/**",
   ]),
 ]);
 
