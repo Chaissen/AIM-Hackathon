@@ -23,7 +23,7 @@ function Frame({ who, children }: { who?: string; children: React.ReactNode }) {
       </header>
       <main className="mx-auto grid w-full max-w-xl flex-1 content-start gap-4 px-4 py-8">{children}</main>
       <footer className="px-4 pb-6 text-center text-xs text-muted-foreground">
-        Prototype with made-up data. <a className="underline" href="#outbox">Back to the demo</a>
+        Prototype with synthetic data. ID Austria is simulated. Not for clinical use. <a className="underline" href="#outbox">Back to the demo</a>
       </footer>
     </div>
   )

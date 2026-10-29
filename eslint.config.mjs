@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // UI prototypes (Vite, plain HTML) with their own toolchain.
+    "prototype/**",
   ]),
 ]);
 
