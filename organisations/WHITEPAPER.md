@@ -1,249 +1,112 @@
-# WHITEPAPER - Structured Clinical Documentation Assistant
+# Whitepaper: Secure document requests from outside the network
 
-**Working title:** *ClinNote-to-FHIR* (rename before submission)
-**Track:** Clinical Documentation (with FHIR R4 interoperable output)
-**Status:** Hackathon prototype using synthetic data only. Not a medical device.
+**Track 2: Health Data Interoperability.** The requirements are in [`track/README.md`](../track/README.md) and the test data is in [`track/scenario/`](../track/scenario/).
+This is a living document. Add comments inline as `> 💬 Name: ...`. Put larger ideas in section 9.
 
-> Team note: figures marked **[measure]** are filled in with our own evaluation results before the pitch. Figures marked **[cited]** come from published literature and must carry a reference on the slide. Do not present an unmeasured number as a result.
+## 1. Problem and goal
 
-## 1. Executive Summary
+Doctors in the closed PGK/Matrix network still get results from outside labs and rehab clinics by fax or unencrypted email, then retype them by hand.
+**We build:** Dr. Hofer requests a document in Matrix. The outside person answers in the browser with no account and no install. Our service files the answer as valid FHIR R4 with Provenance and tells Dr. Hofer in Matrix.
 
-Clinicians spend a large share of their working day on documentation instead of on patients. Free-text notes are quick to write but hard to reuse: they cannot be searched reliably, they do not flow into other systems, and they invite transcription errors when copied into structured fields, referrals, or discharge letters.
+## 2. Scope
 
-We built an AI-assisted workflow that takes an unstructured clinical encounter note (or dictation transcript), extracts the clinically relevant facts, validates them against a strict JSON Schema, maps them to **HL7 FHIR R4** resources, and runs clinical guardrails (dose and laboratory plausibility, unit checks, grounding to source text) before anything is shown to the clinician. Every extracted item points back to the sentence it came from. Anything the system cannot ground or validate is flagged for human review instead of being guessed.
+**In:** Matrix bot command, email and SMS link (Mailpit plus a simulated SMS page), simulated ID Austria, an answer page (upload or form), Markdown → FHIR, HAPI FHIR storage, Matrix notification, audit log, misdelivery checks.
+**Out:** our own Matrix app, end-to-end encryption, real email or SMS, a real eID, documents that are not in the scenario Markdown format.
 
-The result is a clinician-reviewable structured draft that can be exchanged between systems, in line with the European move toward interoperable health records under the European Health Data Space (EHDS).
+**We are done when the jury metrics hold:**
 
-## 2. Clinical Problem Statement
-
-### 2.1 Unmet medical need
-
-- **Documentation burden.** Physicians report spending a substantial proportion of their working time on documentation and administrative tasks, with a significant part of it outside working hours **[cited]**. This contributes to burnout and reduces direct patient contact time.
-- **Unstructured data is hard to reuse.** Clinically important facts (medications, doses, allergies, problems, lab values) sit inside prose. Re-entering them into structured fields is manual, slow, and error-prone.
-- **Medication and lab transcription errors.** Wrong unit, decimal slip (e.g. 0.5 mg vs 5 mg), or a value attached to the wrong analyte can propagate into later documents and decisions **[cited]**.
-- **Interoperability gap.** Hospitals, GPs, and cross-border services often cannot exchange notes in machine-readable form, which conflicts with the goals of the EHDS regulation for primary use of health data across Member States.
-
-### 2.2 Target users
-
-| User | Need | How the tool helps |
-|---|---|---|
-| **Hospital physician / resident** | Finish the note and discharge letter faster | Pre-structured draft from the free-text note; one-click review |
-| **General practitioner** | Keep a clean problem and medication list | Extracted problems, medications, observations ready for the record |
-| **Clinical coder / documentation specialist** | Find codeable facts in prose | Source-linked extracted entities |
-| **Receiving clinician (referral, cross-border)** | Understand the patient quickly | Standard FHIR Bundle plus short human-readable summary |
-
-**Primary persona for the demo (confirm at Scope Lock):** a hospital resident writing a post-consultation note for an internal-medicine patient with several chronic conditions and a multi-drug regimen.
-
-### 2.3 Scope for the hackathon
-
-In scope: free-text English encounter notes (synthetic); extraction of problems, medications (name, dose, unit, frequency, route), allergies, vital signs and lab results; FHIR Bundle output; guardrails; clinician review UI.
-Out of scope: diagnosis or treatment recommendations; real patient data; integration with a live EHR; speech-to-text; non-English input; regulatory certification.
-
-## 3. Solution Overview
-
-### 3.1 AI workflow
-
-```
- Clinician note (synthetic text)
-            |
-            v
- [1] Pre-processing: de-identification check, sentence segmentation, section detection
-            |
-            v
- [2] LLM extraction with schema-constrained output (JSON Schema)
-            |
-            v
- [3] Validation layer: schema check -> unit normalisation -> dose/lab range checks
-            |                              |
-            |                              +--> fails: repair loop (max 2 tries) -> fallback "needs review"
-            v
- [4] Grounding check: every field must cite a source span in the note
-            |
-            v
- [5] FHIR mapper: JSON -> FHIR R4 Bundle (Condition, MedicationStatement, Observation, AllergyIntolerance)
-            |
-            v
- [6] Storage + retrieval (relational + vector/graph) -> clinician review UI with flags
-            |
-            v
- Clinician accepts / edits / rejects -> final structured record (export as FHIR JSON)
-```
-
-### 3.2 Integration points
-
-- **Input:** REST endpoint `POST /encounters/structure` (text in). Production path: EHR note-saved event or dictation system output.
-- **Output:** FHIR R4 Bundle (JSON) via REST; compatible with a FHIR server `POST [base]/Bundle` transaction.
-- **Terminology:** SNOMED CT, LOINC, and ATC/RxNorm mappings are loaded as reference tables for the prototype (a small subset is bundled; production would use a terminology server).
-- **Human in the loop:** nothing is written to a record without clinician acceptance.
-
-### 3.3 Expected clinical outcomes
-
-| Outcome | Expected effect | Evidence plan |
-|---|---|---|
-| Documentation time per encounter | Reduced by a measurable fraction | **[measure]** timed comparison on synthetic cases: manual structuring vs review-and-accept |
-| Structured-data completeness | Higher share of notes with complete medication and problem lists | **[measure]** field recall vs gold answers |
-| Transcription errors reaching the record | Fewer, because implausible doses or units are flagged | **[measure]** seeded-error detection rate |
-| Interoperability | Notes exportable in standard form | Validate Bundle against FHIR profile validator |
-
-## 4. Technical and Data Architecture
-
-### 4.1 Component view
-
-| Layer | Choice | Rationale |
-|---|---|---|
-| Frontend | Lightweight web UI (React or Streamlit) | Fast to build; side-by-side note vs structured output with source highlighting |
-| API | FastAPI (Python) | Typed models, auto OpenAPI docs, easy JSON Schema/Pydantic reuse |
-| LLM orchestration | Thin custom layer (no heavy framework) | Fewer moving parts; full control of retries and validation |
-| Validation | Pydantic + `jsonschema` | Same schema enforced at API boundary and on model output |
-| FHIR | `fhir.resources` (Pydantic FHIR models) | Programmatic FHIR R4 validation |
-| Relational store | SQLite or PostgreSQL | Encounters, extracted facts, review decisions, audit log |
-| Vector store | pgvector or Chroma | Retrieval of guideline snippets and terminology lookup |
-| Graph store (optional) | Neo4j or in-memory NetworkX | Drug-interaction and condition-medication relationships |
-| CI | GitHub Actions | Lint, tests, schema validation on every PR |
-
-### 4.2 Model selection
-
-Selection criteria: (1) reliable structured output / tool-calling against a JSON Schema, (2) accuracy on medical extraction, (3) latency under about 5 seconds per note, (4) data-handling terms suitable for a synthetic-data demo, (5) cost within hackathon credits.
-
-| Role | Candidate | Use |
-|---|---|---|
-| Primary extractor | A current frontier Claude model (e.g. Sonnet-class) via API with structured output | Main extraction, reasoning about negation and context |
-| Fast checker | A small, fast model (e.g. Haiku-class) | Second-opinion grounding check and unit-conversion sanity pass |
-| Embeddings | A general-purpose embedding model | Retrieval of reference snippets |
-| Deterministic layer | Plain Python | Dose and lab checks are **rules, not model opinions** |
-
-Dev 3 records the final choice, version string, and temperature (0 for extraction) in `docs/model_card.md` at Feature Freeze. Self-hosted open models are a documented alternative for production to keep data inside the hospital or EU region.
-
-### 4.3 Data and schema design
-
-**Principle:** the LLM fills a constrained JSON structure; deterministic code validates it; a mapper converts it to FHIR. The model never emits raw FHIR directly, which keeps outputs small, checkable, and testable.
-
-Intermediate JSON contract (abridged, `schemas/clinical_note.schema.json`):
-
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "required": ["encounter", "problems", "medications", "observations", "allergies", "review_flags"],
-  "properties": {
-    "encounter": {
-      "type": "object",
-      "required": ["note_id", "setting"],
-      "properties": {
-        "note_id": {"type": "string"},
-        "setting": {"enum": ["inpatient", "outpatient", "emergency", "primary_care"]}
-      }
-    },
-    "problems": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["text", "status", "source_span"],
-        "properties": {
-          "text": {"type": "string"},
-          "status": {"enum": ["active", "resolved", "suspected", "negated"]},
-          "snomed_code": {"type": ["string", "null"]},
-          "source_span": {"type": "string"}
-        }
-      }
-    },
-    "medications": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["name", "dose_value", "dose_unit", "frequency", "source_span"],
-        "properties": {
-          "name": {"type": "string"},
-          "dose_value": {"type": ["number", "null"]},
-          "dose_unit": {"enum": ["mg", "g", "mcg", "mL", "IU", "unit", null]},
-          "frequency": {"type": ["string", "null"]},
-          "route": {"enum": ["oral", "iv", "im", "sc", "topical", "inhaled", null]},
-          "atc_code": {"type": ["string", "null"]},
-          "source_span": {"type": "string"}
-        }
-      }
-    },
-    "observations": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["name", "value", "unit", "source_span"],
-        "properties": {
-          "name": {"type": "string"},
-          "loinc_code": {"type": ["string", "null"]},
-          "value": {"type": ["number", "null"]},
-          "unit": {"type": ["string", "null"]},
-          "source_span": {"type": "string"}
-        }
-      }
-    },
-    "allergies": {"type": "array", "items": {"type": "object"}},
-    "review_flags": {"type": "array", "items": {"type": "string"}}
-  },
-  "additionalProperties": false
-}
-```
-
-**FHIR mapping**
-
-| JSON section | FHIR R4 resource |
+| Metric | Target |
 |---|---|
-| `problems` | `Condition` (clinicalStatus, verificationStatus, code) |
-| `medications` | `MedicationStatement` (medicationCodeableConcept, dosage.doseAndRate, timing, route) |
-| `observations` | `Observation` (code LOINC, valueQuantity with UCUM units) |
-| `allergies` | `AllergyIntolerance` |
-| `encounter` | `Encounter` |
-| whole output | `Bundle` of type `collection`; plus `Provenance` pointing to the model version and source span |
+| HL7 validator errors on every filed resource | 0 |
+| Effort for the outside person (request 1) | 0 installs, 0 accounts, under 2 min |
+| Misdeliveries caught (M1–M3) | 3/3 |
+| Audit coverage (6 steps, each with who/what/when) | 6/6 |
 
-Patient identifiers in the prototype are synthetic UUIDs only.
+## 3. Flow
 
-### 4.4 Vector and graph database setup
+```
+Dr. Hofer (Element) ──!request──▶ Bot ──▶ Service: create Task + one-time link ──▶ Email (Mailpit) / SMS page
+                                                                                        │ [audit: request sent]
+Outside person opens link [audit: link opened] ──▶ Simulated ID Austria [audit: identity checked]
+   │  name must match the named recipient. If not: stop, show nothing, notify Dr. Hofer
+   ▼
+Answer page shows the request now ──▶ upload .md or fill the form (patient name + birth date) [audit: answer sent]
+   ▼
+Parse ─▶ patient match? ─no─▶ not filed, Matrix warning [audit: misdelivery caught]
+   │ yes
+   ▼
+FHIR transaction Bundle ─▶ HAPI [audit: answer filed] ─▶ Matrix: "Lab result from Dr. Brandl filed ✓"
+```
 
-- **Vector store (pgvector or Chroma):** collections `terminology` (SNOMED/LOINC/ATC labels with embeddings for fuzzy code lookup, e.g. "heart attack" -> myocardial infarction), and `guideline_snippets` (short, public, citable text on dose ranges). Chunk size about 200 tokens, top-k = 5, metadata includes source and licence.
-- **Graph store (optional):** nodes `Drug`, `Condition`, `Allergen`; edges `INTERACTS_WITH`, `CONTRAINDICATED_IN`, `TREATS`. Used for the "possible interaction" flag. If time-boxed out (see TIMELINE cut list), static tables replace it.
-- **Relational tables:** `encounters`, `extractions` (JSON blob plus model version), `flags`, `reviews` (accept/edit/reject with timestamp), `audit_log`.
+## 4. Architecture
 
-### 4.5 Evaluation
-
-- Gold set: 20 synthetic notes with gold-standard structured answers written by Doc 1.
-- Metrics: field-level precision and recall for problems, medications, observations; **schema-valid rate**; **hallucination rate** (extracted facts with no support in source text); **seeded-error detection** (wrong dose/unit cases correctly flagged); latency.
-- All results reported with the number of cases, so the audience can judge the sample size.
-
-## 5. Market and Clinical Impact, Pitch Value Proposition
-
-### 5.1 Impact model (to be filled with measured data)
-
-| Metric | How we calculate | Placeholder for slide |
+| Component | Tech (proposal) | Replaceable by |
 |---|---|---|
-| Time saved per patient | (manual structuring minutes) - (review-and-accept minutes), from timed trials on synthetic cases | **[measure]** minutes per note |
-| Time saved per clinician-day | time saved per patient x patients per day (assume 15-25 for outpatient; state assumption) | derived from above |
-| Error reduction | seeded dose/unit errors caught / seeded errors total | **[measure]** percent |
-| Completeness gain | share of gold fields recovered | **[measure]** percent |
+| Matrix server and client | Synapse + Element Web (Docker) | Conduit, any Matrix client |
+| Request bot | Python, `matrix-nio` | An Element widget |
+| Core service and answer portal | Python, FastAPI + HTML templates | – |
+| Email | SMTP to Mailpit | Any SMTP provider, FTAPI |
+| SMS | Our own "SMS inbox" page behind an `SmsSender` interface | Any SMS gateway |
+| Identity | Simulated ID Austria (OIDC-style login page) behind an `IdentityProvider` interface | Real ID Austria or another eIDAS eID |
+| FHIR server | HAPI FHIR (Docker, local) | Any FHIR R4 server |
+| Audit | FHIR `AuditEvent` plus a local append-only log | SIEM, ATNA repository |
+| Validation | `validator_cli.jar` in the metrics script; HAPI `$validate` before filing | – |
 
-Rule for the pitch: show the formula and the assumption, then the number. Never claim savings we did not measure on our own cases.
+Everything runs with a single `docker compose up`.
 
-### 5.2 Scalability across EU health systems
+## 5. Design answers (draft for the README)
 
-- **Standards-based output (FHIR R4)** aligns with the European EHR Exchange Format work under EHDS and the HL7 Europe profiles, so one pipeline can serve multiple Member States.
-- **Language layer is swappable:** the schema is language-neutral; supporting German, French, or Dutch notes is a prompt and terminology-mapping extension, not a rebuild.
-- **Deployment flexibility:** the model layer can run via an EU-region API or an on-premises open model, which suits hospital data-governance requirements.
-- **Low integration cost:** a single REST endpoint and a FHIR Bundle fit existing integration engines.
+1. **How does an outside person prove who they are without a directory?** Dr. Hofer names the person (for example "Dr. Eva Brandl") along with the contact. The link is possession proof only: single-use, random, expiring after 72 h. The outside person must also log in with an eID. The name the eID returns must match the named recipient. Nothing about the patient or the document is shown before that check passes.
+2. **Which identity check for which document?** *Proposal:* eID for both. The lab result goes by email, which is easy to mistype or forward, so possession of the link proves nothing. The rehab report goes by SMS, a stronger possession factor, but a colleague could still pick up the phone and the scenario forbids colleagues from answering. ➜ *Team decision (D2).*
+3. **Which FHIR resources and how are they linked?** See section 6.
+4. **How do we notice a misdelivery?** See section 7.
+5. **Where does it run?** *Proposal:* at the requesting clinic. The data never leaves the clinic's control, and the clinic already runs Matrix and FHIR. Only the answer portal is reachable from outside, over HTTPS.
 
-### 5.3 Value proposition (one sentence for the pitch)
+## 6. FHIR model
 
-> "We turn the note a doctor already writes into a verified, standards-based FHIR record in seconds, flag anything unsafe or unsupported, and leave the clinician in control, giving time back to patients and making health data portable across Europe."
+```
+Task (the request) ── for ─▶ Patient ◀── subject ── DiagnosticReport ── result ─▶ Observation ×4
+  │ requester: Practitioner Hofer                    DocumentReference (rehab)
+  │ owner: Practitioner Brandl / Kern
+  └ output ─▶ DiagnosticReport | DocumentReference
+Provenance ── target ─▶ all filed resources; agent = sender (onBehalfOf = their Organization);
+              recorded = time; policy + signature = how identity was checked (eID, timestamp)
+AuditEvent ×6 per request
+```
 
-### 5.4 Pitch structure (5 minutes)
+| Answer | Resources |
+|---|---|
+| Lab result | `DiagnosticReport` (LOINC 11502-2 "Laboratory report", status final), one `Observation` per row: LOINC from the table, `valueQuantity` with UCUM units, `referenceRange`, `effectiveDateTime` = sample taken, `issued` = reported |
+| Rehab report | `DocumentReference` (LOINC 18842-5 "Discharge summary"), Markdown attached as base64 `text/markdown` |
+| Both | `Practitioner` and `Organization` for the sender, `Provenance`, `Task` updated to `completed`, all sent as one transaction `Bundle` |
 
-1. **Problem (45 s)** - Doc 2 with one patient-story hook; Doc 1 confirms from clinical practice.
-2. **Live demo (90 s)** - synthetic note in, structured output out, a seeded wrong dose caught by the guardrail.
-3. **How it works and why it is safe (60 s)** - schema, validation, grounding, human review.
-4. **Results (45 s)** - measured numbers with sample size.
-5. **Impact and EU scale-up (45 s)** - EHDS alignment, next steps, ask.
+Gotchas: `10^9/L` → UCUM `10*9/L`. INR has no unit, so it gets a value only. Times use `+02:00` (CEST on 22 Oct). The Patient comes from `patient.json`. On the public HAPI server it gets our own ID.
 
-### 5.5 Risks and honest limitations
+## 7. Misdelivery handling
 
-- Prototype evaluated only on synthetic notes written by the team; real-world performance is unknown.
-- English only; terminology coverage is a small subset.
-- LLM output is non-deterministic; mitigated with temperature 0, schema constraints, and rule-based checks, but not eliminated.
-- Not validated clinically or certified; see `COMPLIANCE_AND_SAFETY.md`.
+| Test | What happens | Caught by |
+|---|---|---|
+| M1 wrong address (`labor-kanaI`) | The stranger opens the link and the eID name ≠ "Eva Brandl" → blocked, sees no patient or document type | Identity check, audit, Matrix warning |
+| M2 forwarded to a colleague | The colleague's eID name ≠ the recipient → blocked, nothing filed | Identity check, audit, Matrix warning |
+| M3 wrong patient (Max) | The document's patient and the form's patient ≠ the Task patient (name + birth date) → not filed | Patient match, audit, Matrix warning |
+| Bonus | At send time, warn about lookalike domains (`I` vs `l`) and unknown domains | Bot |
+
+## 8. Hard rules
+
+- Synthetic data only.
+- Emails and SMS contain no patient name, no birth date and no document type, only "Dr. Hofer, Klinikum Beispielstadt, sent you a secure request" plus the link.
+- The portal shows the request details only after a successful identity check.
+- Nothing is filed unless both the identity check and the patient match pass.
+- Each external product sits behind an interface (email, SMS, eID, FHIR server).
+
+## 9. Open decisions and team ideas
+
+| # | Decision | Proposal | Owner | Decided |
+|---|---|---|---|---|
+| D1 | Answer by upload, form or both | Both: upload the .md and confirm the patient name and birth date in two fields | Doc 1 | |
+| D2 | Identity level per document type | eID for both (see 5.2) | Doc 1 + Dev 3 | |
+| D3 | Use AI? | Optional: extract the rehab medications into `MedicationStatement`, only if they are 100 % correct on the scenario | Dev 3 | |
+| D4 | M2 behaviour: block or file-but-flag | Block, and tell Dr. Hofer who tried | Doc 1 | |
+| D5 | Where it runs | At the clinic (see 5.5) | All | |
+
+> 💬 Add ideas and comments here.
