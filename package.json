@@ -32,6 +32,7 @@
     "drizzle-orm": "^0.45.4",
     "jose": "^6.2.13",
     "lucide-react": "^1.61.0",
+    "markdown-it": "15.0.3",
     "next": "16.4.2",
     "postgres": "^3.4.9",
     "radix-ui": "^1.8.1",
@@ -44,6 +45,7 @@
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
     "@types/fhir": "^0.0.44",
+    "@types/markdown-it": "14.2.0",
     "@types/node": "^24.19.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",

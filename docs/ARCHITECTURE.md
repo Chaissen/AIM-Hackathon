@@ -175,6 +175,10 @@ The scenario documents share one Markdown format:
 
 The parser reads headings and tables from markdown-it tokens and splits `Key: value` lines at the first `": "`. It reads dates against a fixed list of formats in the `Europe/Vienna` time zone, for example `22 October 2026, 08:10`. The `Patient` line splits at `", born "` into name and birth date.
 
+The parser lives in `src/server/documents/`. `parseDocument(markdown)` returns `{ ok: true, document }` with a `LabResult`, a `RehabReport`, or a `GenericDocument` (types in `types.ts`), or `{ ok: false, reason }`. It never returns a half-read document. It refuses a document without a heading or a readable `Patient` line, a document with the same key twice, a lab report without exactly one results table, a result that is not a number, a missing or malformed LOINC code, and a missing date or person line that the kind needs. Times come back as FHIR `dateTime` with the Vienna offset of that day, birth dates and stays as `YYYY-MM-DD`. The parser already writes units as UCUM, so `10^9/L` becomes `10*9/L`. A reference range that is not `<low> to <high>` keeps only its text.
+
+`checkPatient` in `src/server/documents/patient-check.ts` runs `samePatient` on the document and on the form, and returns the SHA-256 hash of the upload. On `patient_mismatch` the answer flow discards the upload and writes only the hash to `misdelivery_caught`.
+
 The document kind picks the mapper. `lab report` goes to the lab mapper and `discharge report` goes to the rehab mapper. Any other kind becomes a DocumentReference with the text attached, held for Dr. Hofer.
 
 ### AI fallback (optional, cut first)
