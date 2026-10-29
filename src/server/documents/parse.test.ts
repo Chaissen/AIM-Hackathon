@@ -110,6 +110,32 @@ test("documents the parser cannot read come back with reasons, not exceptions", 
   }
 });
 
+test("a document with a key twice is refused, so a second patient cannot slip past the patient check", () => {
+  const maria = scenario("lab-result-maria-beispiel.md").replace(/\r\n/g, "\n");
+  const result = parseDocument(maria.replace("\nSample taken:", "\nPatient: Max Beispiel, born 1 January 1960\nSample taken:"));
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.deepEqual(result.errors, ['The file has more than one "Patient:" line.']);
+
+  // A known key inside a section counts too.
+  const rehab = scenario("rehab-report-maria-beispiel.md").replace(/\r\n/g, "\n");
+  const twice = parseDocument(rehab.replace("## Course\n", "## Course\n\nPatient: Max Beispiel, born 1 January 1960\n"));
+  assert.equal(twice.ok, false);
+});
+
+test("a lab report needs exactly one result table with rows", () => {
+  const maria = scenario("lab-result-maria-beispiel.md").replace(/\r\n/g, "\n");
+  const second = parseDocument(`${maria}\n| Test | Result |\n|---|---|\n| CRP | 3 |\n`);
+  assert.equal(second.ok, false);
+  if (!second.ok) assert.deepEqual(second.errors, ["The lab report has more than one table. Put all results in one table."]);
+
+  const empty = parseDocument(
+    "# Labor Kanalstraße: lab report\n\nPatient: Maria Beispiel, born 12 March 1961\nSample taken: yesterday\nReported: 22 October 2026, 11:40\n\n| Test | Result | Unit | Reference range | LOINC code |\n|---|---|---|---|---|\n",
+  );
+  assert.equal(empty.ok, false);
+  // Every reason comes back, not only the first one.
+  if (!empty.ok) assert.deepEqual(empty.errors, ['"Sample taken: yesterday" is not a date such as "22 October 2026, 08:10".', "The result table has no rows."]);
+});
+
 test("a lab row with a result that is not a number is reported with its row", () => {
   const markdown = scenario("lab-result-maria-beispiel.md").replace("| aPTT | 31 |", "| aPTT | pending |");
   const result = parseDocument(markdown);

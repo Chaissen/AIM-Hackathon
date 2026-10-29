@@ -10,9 +10,9 @@ export function nameWords(name: string): Set<string> {
     .replace(/[äöüß]/g, (c) => SPELL_OUT[c])
     .replace(/[-.,]/g, " ")
     .normalize("NFKD")
-    .replace(/[\u0080-￿]/g, "");
+    .replace(/[^\x00-\x7f]/g, "");
   return new Set(plain.split(/\s+/).filter((w) => w && !TITLES.has(w)));
 }
 
-/** Every word in `a` is also in `b`. */
+/** Every word in `a` is also in `b`. An empty `a` passes, so callers must refuse empty names. */
 export const isSubset = (a: Set<string>, b: Set<string>) => [...a].every((w) => b.has(w));
