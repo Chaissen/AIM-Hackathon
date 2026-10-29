@@ -112,16 +112,16 @@ Keycloak does not simulate the phone-app confirmation that real ID Austria uses.
 
 | Metric | Target | How we measure |
 |---|---|---|
-| FHIR validation | 0 errors | `scripts/validate.sh` exports every resource filed during a run and runs the HL7 validator with `-version 4.0`. It counts issues with severity `error`. |
+| FHIR validation | 0 errors | `pnpm validate` (`scripts/validate.ts`) exports every resource filed during a run and runs the HL7 validator with `-version 4.0`. It counts issues with severity `error`. |
 | Effort for the outside person | 0 installs, 0 accounts, under 2 minutes | Someone new answers request 1 with a stopwatch running from opening the email in Mailpit to pressing send. The audit times from `link_opened` to `answer_sent` back up the stopwatch. We count ID Austria as an existing state ID, not as an account with us. |
 | Misdeliveries caught | 3 of 3 | We run M1, M2, and M3 from `track/scenario/misdelivery.md` on request 1. Each must show the outcome that the test names and a `misdelivery_caught` audit entry. |
-| Audit coverage | 6 of 6 | `scripts/audit_check.py` lists the six event types for a request, each with who, what, and when. |
+| Audit coverage | 6 of 6 | `pnpm audit:check` (`scripts/audit-check.ts`) lists the six event types for a request, each with who, what, and when. |
 
 The scripts are planned. [Timeline](TIMELINE.md) has the owners.
 
 ## How this answers the judging questions
 
-Clinical approach and impact. A lab physician answers with the report she already produces and her own ID Austria. She needs no new account and no app. Dr. Hofer gets the clotting values as structured Observations that she can trend and reuse, not a scan. A clinic runs four containers it mostly runs already.
+Clinical approach and impact. A lab physician answers with the report she already produces and her own ID Austria. She needs no new account and no app. Dr. Hofer gets the clotting values as structured Observations that she can trend and reuse, not a scan. A clinic runs one Node.js service and a Postgres database next to the Matrix and FHIR servers it already runs.
 
 Technical quality. Every filed resource passes the HL7 validator. The identity check combines a state ID, a name match, a professional register, and a stored person number, and it costs the outside person about one minute.
 

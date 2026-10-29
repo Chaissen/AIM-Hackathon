@@ -205,7 +205,7 @@ The request service puts `track/scenario/patient.json` on the server with `PUT P
 
 ## Validation
 
-1. After a run, `scripts/validate.sh` reads the ids of the filed resources from the `answer_filed` audit entries.
+1. After a run, `pnpm validate` (`scripts/validate.ts`, planned in T18) reads the ids of the filed resources from the `answer_filed` audit entries.
 2. It fetches each resource from HAPI into `out/filed/`.
 3. It runs the validator on each file, as the scenario README says: `java -jar validator_cli.jar <file> -version 4.0`.
 4. It counts the issues with severity error. The target is 0. Warnings do not count.

@@ -1,0 +1,6 @@
+# Only install versions that have been public for at least 7 days (supply-chain safety).
+minimumReleaseAge: 10080
+
+ignoredBuiltDependencies:
+  - sharp
+  - unrs-resolver

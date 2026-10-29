@@ -40,9 +40,9 @@ The check compares whole words. A substring check would block every message, bec
 
 | Data | Where | Why | How long |
 |---|---|---|---|
-| Requests | SQLite `requests` | Lifecycle and link checks | Until the demo reset |
-| Person number bindings | SQLite `bindings` | Only the person who answered before can answer as that person again | Until the demo reset |
-| Audit log | SQLite `audit_log` | Who did what and when. No document text. | Until the demo reset |
+| Requests | Postgres `requests` | Lifecycle and link checks | Until the demo reset |
+| Person number bindings | Postgres `bindings` | Only the person who answered before can answer as that person again | Until the demo reset |
+| Audit log | Postgres `audit_log` | Who did what and when. No document text. | Until the demo reset |
 | Filed answers | HAPI FHIR | The clinical record | Until the demo reset |
 | ID token of the sender | Provenance `signature.data` | Proof of the identity check that anyone can verify later | With the record |
 | Uploads for the wrong patient | Nowhere. Only the SHA-256 hash and the reason stay in the audit log. | Max Beispiel's data must not end up in Maria's record or anywhere else | Discarded after the check |
@@ -52,7 +52,7 @@ The ID token holds the sender's name, birth date, and person number. That is mor
 
 Application logs hold request ids, timings, check results, and validator outcomes, never document text or patient names.
 
-`make reset` (planned) empties SQLite, HAPI, and Mailpit and reloads `patient.json`. We run it before the pitch.
+`pnpm reset` (`scripts/reset.sh`) empties Postgres, HAPI, and Mailpit and reloads `patient.json`. We run it before the pitch.
 
 ## AI rules
 
