@@ -31,14 +31,15 @@ const DESCRIBE: Record<string, string> = {
 
 export function NewRequestPage() {
   useStore()
-  const ui = state().ui
-  const [d, setD] = useState<Draft>(ui.draft ?? { ...EXAMPLES.r1.d })
-  const set = (patch: Partial<Draft>) => { const next = { ...d, ...patch }; setD(next); ui.draft = next }
+  const [d, setD] = useState<Draft>(() => state().ui.draft ?? { ...EXAMPLES.r1.d })
+  // The preview needs an expiry date; take the time once instead of on every render.
+  const [previewNow] = useState(() => Date.now())
+  const set = (patch: Partial<Draft>) => { const next = { ...d, ...patch }; setD(next); state().ui.draft = next }
 
   const lp = lookupPerson(d.given, d.family, d.org)
   const ac = addressCheck(d)
   const p = patient(d.patientId)
-  const msg = buildMessage({ token: "…", expiresAt: Date.now() + 7 * 864e5, channel: d.channel })
+  const msg = buildMessage({ token: "…", expiresAt: previewNow + 7 * 864e5, channel: d.channel })
   const clean = contentCheck(`${msg.subject ?? ""} ${msg.body}`, p).every((c: any) => c.ok)
   const missing = (["given", "family", "org", "address"] as const).filter((k) => !d[k].trim())
   const knownBefore = state().bindings.some((b: any) => nameKey(b.given) === nameKey(d.given) && nameKey(b.family) === nameKey(d.family) && nameKey(b.org) === nameKey(d.org))
@@ -55,7 +56,7 @@ export function NewRequestPage() {
 
   const send = () => {
     const r = mutate(() => createRequest({ ...d }))
-    ui.draft = null
+    state().ui.draft = null
     toast(r.state === "sent" ? `Sent to ${d.given} ${d.family}` : "Saved. Check the email address before it goes out.")
     go(`r-${r.id}`)
   }

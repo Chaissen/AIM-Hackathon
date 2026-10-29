@@ -44,7 +44,7 @@ const MORE = [
   { h: "metrics", label: "Metrics", icon: BarChart3 },
 ]
 
-export function AppShell({ crumbs, actions, wide, children }: { crumbs: React.ReactNode; actions?: React.ReactNode; wide?: boolean; children: React.ReactNode }) {
+export function AppShell({ crumbs, actions, children }: { crumbs: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode }) {
   const route = useRoute()
   const c = counts()
   const [resetOpen, setResetOpen] = useState(false)
@@ -102,10 +102,25 @@ export function AppShell({ crumbs, actions, wide, children }: { crumbs: React.Re
             <SidebarGroupContent>
               <SidebarMenu>
                 <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={active("outbox")} size="sm">
-                    <a href="#outbox"><Inbox /> <span>Recipient's inbox</span></a>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={active("outbox")}
+                    size="lg"
+                    className="h-auto gap-3 rounded-lg border border-primary/30 bg-primary/10 px-3 py-3 hover:bg-primary/15 data-[active=true]:border-primary data-[active=true]:bg-primary/15"
+                  >
+                    <a href="#outbox">
+                      <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                        <Inbox className="size-5" />
+                      </span>
+                      <span className="grid min-w-0 leading-tight">
+                        <span className="text-sm font-semibold">Recipient's inbox</span>
+                        <span className="truncate text-xs text-muted-foreground">Emails and SMS sent out</span>
+                      </span>
+                    </a>
                   </SidebarMenuButton>
-                  {c.unread > 0 && <SidebarMenuBadge>{c.unread}</SidebarMenuBadge>}
+                  {c.unread > 0 && (
+                    <SidebarMenuBadge className="top-1/2! -translate-y-1/2 bg-primary text-primary-foreground">{c.unread}</SidebarMenuBadge>
+                  )}
                 </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroupContent>
@@ -154,7 +169,7 @@ export function AppShell({ crumbs, actions, wide, children }: { crumbs: React.Re
           <div className="min-w-0 flex-1 truncate text-sm">{crumbs}</div>
           {actions}
         </header>
-        <main className={`mx-auto grid w-full content-start gap-6 p-4 md:p-6 ${wide ? "max-w-[1600px]" : "max-w-6xl"}`}>{children}</main>
+        <main className="mx-auto grid w-full max-w-6xl content-start gap-6 p-4 md:p-6">{children}</main>
         <footer className="mx-auto w-full max-w-6xl px-4 pb-6 text-xs text-muted-foreground md:px-6">
           <FileText className="mr-1 inline size-3" /> Prototype with synthetic data. ID Austria is simulated. Not for clinical use.
         </footer>
