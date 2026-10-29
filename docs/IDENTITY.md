@@ -184,24 +184,35 @@ ID Austria returns the full official name. Dr. Hofer types what she knows. The m
 | Eva Brandl | Eva Maria Brandl | Pass. An extra given name is fine. |
 | Eva Brandl | Eva Brandl-Huber | Pass. A double family name contains Brandl. |
 | Eva Mueller | Eva Müller | Pass. Both spell out to `mueller`. |
-| Dr. Eva Brandl | Eva Brandl | Pass. Titles are ignored. |
+| Dr. Eva Brandl | Eva Brandl | Pass. Titles are ignored, also female forms such as `Dr.in` and `Mag.a`. |
 | Eva Brandl-Huber | Eva Brandl | Hold. The family names share only Brandl. |
 | Eva Brandl | Petra Brandl | Hold. Same family name, different given name. |
 | Eva Brandl | Eva Huber | Fail. A married name change also fails, and Dr. Hofer can send a new request. |
 | Eva Brandl | Thomas Wagner | Fail |
 
 ```ts
-const TITLES = new Set(["dr", "mag", "prof", "med", "univ", "di", "ing"]);
+// Dr., DDr., Dr.in, Mag.a, Univ.-Prof., Dipl.-Ing., Prim. Joined titles need a dot or hyphen between them
+// and the female ending needs its dot, so "Magdi" and "Dia" stay names.
+export const TITLE = /^(?:d?dr|mag|prof|univ|med|di|ing|dipl|prim)(?:\.(?:in|a))?(?:[.-]+(?:d?dr|mag|prof|univ|med|di|ing|dipl|prim)(?:\.(?:in|a))?)*\.?$/i;
 const SPELL_OUT: Record<string, string> = { "ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss" };
 
-export function nameWords(name: string): Set<string> {
-  const plain = name
-    .toLowerCase()
+function plainWords(text: string): string[] {
+  return text
     .replace(/[äöüß]/g, (c) => SPELL_OUT[c])
     .replace(/[-.,]/g, " ")
     .normalize("NFKD")
-    .replace(/[^\x00-\x7f]/g, "");
-  return new Set(plain.split(/\s+/).filter((w) => w && !TITLES.has(w)));
+    .replace(/[^\x00-\x7f]/g, "")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+export function nameWords(name: string): Set<string> {
+  // NFC first: a decomposed "ü" would otherwise lose its umlaut instead of becoming "ue".
+  const tokens = name.normalize("NFC").toLowerCase().split(/\s+/).filter(Boolean);
+  const untitled = tokens.filter((t) => !TITLE.test(t.replace(/,+$/, ""))); // also "Beispiel, Dr.in, Maria"
+  const words = plainWords(untitled.join(" ")).filter((w) => !TITLE.test(w)); // also "Dr.Eva" without a space
+  // A name made only of title-like words, such as the given name "Di", keeps them.
+  return new Set(words.length ? words : plainWords(tokens.join(" ")));
 }
 
 const isSubset = (a: Set<string>, b: Set<string>) => [...a].every((w) => b.has(w));
@@ -215,7 +226,7 @@ export function matchRequestedPerson(reqGiven: string, reqFamily: string, idGive
 }
 ```
 
-`isSubset(a, b)` means every word in `a` is also in `b`. The request procedure refuses requests with an empty given name or family name, because an empty set passes every subset test.
+`isSubset(a, b)` means every word in `a` is also in `b`. The request procedure refuses requests with an empty given name or family name, because an empty set passes every subset test. For the same reason `nameWords` never strips a name down to nothing: a name made only of title-like words, such as the given name "Di", keeps them.
 
 ### Person number binding
 
@@ -329,13 +340,14 @@ Dr. Brandl logs in and uploads `lab-result-max-beispiel.md`, a result for Max Be
 ```ts
 export function samePatient(docName: string, docBirthDate: string, patient: { family: string; given: string[]; birthDate: string }) {
   const family = nameWords(patient.family);
+  if (!family.size || !patient.birthDate) return false;
   const allNames = new Set([...family, ...nameWords(patient.given.join(" "))]);
   const docWords = nameWords(docName);
   return docBirthDate === patient.birthDate && isSubset(family, docWords) && isSubset(docWords, allNames);
 }
 ```
 
-The request service runs this check on the document and on the name and birth date typed into the form. Both must pass.
+The request service runs this check on the document and on the name and birth date typed into the form. Both must pass. The code is in `src/server/documents/patient-check.ts`, and `nameWords` is in `src/server/identity/names.ts`.
 
 ## Sources
 
