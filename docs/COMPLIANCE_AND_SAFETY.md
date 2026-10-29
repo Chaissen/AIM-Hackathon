@@ -74,6 +74,7 @@ AI is optional in this project. If we build the AI fallback parser:
 | GDPR Art. 35, impact assessment | A data protection impact assessment comes before any pilot with real data |
 | eIDAS | ID Austria at level high is the identity source. We record the level in the Provenance. |
 | EHDS, primary use | FHIR R4 output fits the European move toward exchangeable health records |
+| ÄrzteG 1998 §§ 2, 31; MTD-Gesetz 2024 §§ 4, 5; KAKuG §§ 7, 8, 24 | Only the physician responsible for the content releases a document. The release check confirms that person in the eHVD, see [Identity and misdelivery](IDENTITY.md#who-may-release-a-document). |
 | ID Austria terms | Real use needs a registered service provider. [Identity and misdelivery](IDENTITY.md) has the steps. |
 | eHVD terms | Real use needs a registration with the health ministry |
 

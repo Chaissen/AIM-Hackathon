@@ -11,7 +11,7 @@ This page describes what runs, how the parts talk, and what the request service 
 | Request service (ordy) | Outside portal, widget, identity checks, parser, FHIR mapper, audit log, SMS screen | Built | TypeScript: [Next.js](https://nextjs.org/docs) 16 (App Router), [tRPC](https://trpc.io/docs) v11, [zod](https://zod.dev/), [Drizzle](https://orm.drizzle.team/), [openid-client](https://github.com/panva/openid-client) (T07), [markdown-it](https://github.com/markdown-it/markdown-it) (T10), UI with [shadcn/ui](https://ui.shadcn.com/) on Tailwind CSS | 3010 |
 | Matrix bot | Commands and notices in Dr. Hofer's room | Built | TypeScript process in `src/bot/`, small Matrix client on `fetch` in `src/server/matrix/client.ts` | none |
 | Postgres | Requests, bindings, audit log | Reused | [`postgres:17-alpine`](https://hub.docker.com/_/postgres) | 5433, mapped to 5432 in the container |
-| Simulated ID Austria | OpenID Connect login with fake citizens | Configured (T02, not in `docker-compose.yml` yet) | [Keycloak](https://www.keycloak.org/server/containers) | 8080 |
+| Simulated ID Austria | OpenID Connect login with fake citizens | Configured (T02) | [Keycloak](https://www.keycloak.org/server/containers) | 8080 |
 | eHVD mock | Directory of healthcare people and organisations, same SOAP interface as the real eHVD | Built (T23, planned) | TypeScript service in its own container, see [eHVD](EHVD.md) | 8095 |
 | Mailpit | Catches every outgoing email | Reused | [`axllent/mailpit`](https://hub.docker.com/r/axllent/mailpit) | 1025 SMTP, 8025 web |
 | HAPI FHIR | FHIR R4 server | Reused | [`hapiproject/hapi`](https://hub.docker.com/r/hapiproject/hapi) | 8090, mapped to 8080 in the container |
@@ -43,8 +43,8 @@ One table in the request service defines each document type. To add a type, add 
 
 | Key | Bot keyword | Default channel | eHVD check | Mapper | Name in Matrix messages |
 |---|---|---|---|---|---|
-| `lab-result` | `lab-result` | email | Person is active, has the lab medicine specialty, and is a member of the named organisation | Lab mapper: Observations and DiagnosticReport | lab result |
-| `rehab-report` | `rehab-report` | SMS | The named organisation exists and is active | Rehab mapper: DocumentReference | rehab discharge report |
+| `lab-result` | `lab-result` | email | Release check: the physician under `Validated by` is active, has the lab medicine specialty, and is a member of the named organisation | Lab mapper: Observations and DiagnosticReport | lab result |
+| `rehab-report` | `rehab-report` | SMS | Release check: the physician under `Written by` is active and a member of the named organisation, which is an active hospital | Rehab mapper: DocumentReference | rehab discharge report |
 
 ## Request lifecycle
 
@@ -90,7 +90,7 @@ A failed identity check does not change the state, so the real person can still 
 
 ## Matrix bot
 
-The bot listens in rooms it has joined. It accepts commands only from Matrix users listed in `directory.json`, which holds `@lena.hofer:klinikum.example` for the demo. Until the mock eHVD exists (T15), it accepts any user on `klinikum.example`.
+The bot listens in rooms it has joined. It accepts commands from any Matrix user on its own homeserver, `MATRIX_SERVER_NAME`, which is `klinikum.example` in the demo, and ignores everyone else (`src/bot/main.ts`).
 
 Built so far: `!help`, and `!status` without an id, which checks the database, the FHIR server, and Matrix. The commands below are planned (T05).
 
@@ -141,7 +141,7 @@ Before sending, the request service compares the words of the message with the p
 | Route | What it does |
 |---|---|
 | `GET /r/{token}` | Writes `link_opened`. Shows the requesting doctor and clinic and a **Log in with ID Austria** button. |
-| `GET /auth/login` | Redirects to Keycloak with `state` and `nonce`. |
+| `GET /auth/login` | Redirects to Keycloak with `state`, `nonce`, PKCE, and `prompt=login`. |
 | `GET /auth/callback` | Swaps the code for tokens, verifies the ID token, runs the identity checks, and writes `identity_checked`. |
 | `GET /r/{token}/answer` | Shows the patient, the requested document, the upload field, and fields for the patient's name and birth date. Only after the identity check passes. |
 | `POST /r/{token}/answer` | Writes `answer_sent`, parses the document, runs the patient check, files the resources, and writes `answer_filed`. |
@@ -150,7 +150,7 @@ Before sending, the request service compares the words of the message with the p
 
 The pages are Next.js routes. `/auth/login` and `/auth/callback` are route handlers, because they need real redirects and cookies. The answer page loads its data and sends the upload through tRPC (`eidProcedure`, the upload as `FormData`).
 
-A signed session cookie (`ordy_eid_session`, see `src/server/auth/eid-session.ts`) holds the request id and, after login, the person number. It expires after 30 minutes.
+A signed session cookie (`ordy_eid_session`, see `src/server/auth/eid-session.ts`) holds the request id and, after login, the person number (the bPK, never `sub`). It expires after 30 minutes.
 
 ## Document parsing
 
@@ -209,23 +209,24 @@ All variables are read and validated in `src/env.ts`. Each one has a demo defaul
 | `MATRIX_HOFER_USER`, `MATRIX_HOFER_PASSWORD` | `lena.hofer`, demo value (setup scripts only) |
 | `MATRIX_ROOM_ALIAS` | `outside-documents` |
 | `OIDC_METADATA_URL` | `http://localhost:8080/realms/idaustria-sim/.well-known/openid-configuration` |
-| `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | `request-service`, in `.env` only |
+| `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | `request-service`, `request-service-demo-2026` |
+| `KEYCLOAK_ADMIN_USER`, `KEYCLOAK_ADMIN_PASSWORD` | `admin`, demo value (`pnpm citizen` only) |
 | `EHVD_URL` | `http://localhost:8095/` (planned, T15) |
 | `SMTP_HOST`, `SMTP_PORT`, `MAILPIT_API_URL` | `localhost`, `1025`, `http://localhost:8025` |
 | `ANTHROPIC_API_KEY` | unset, only for the optional AI fallback |
 
-To switch to real ID Austria, change `OIDC_METADATA_URL`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET`, and map the claim names in one place. [Identity and misdelivery](IDENTITY.md) lists the claims.
+To switch to real ID Austria, change `OIDC_METADATA_URL`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET`. The simulator already sends the real claim names, which [Identity and misdelivery](IDENTITY.md) lists.
 
 ## Repository layout
 
 Files marked *planned* do not exist yet. The task id says who builds them.
 
 ```
-docker-compose.yml            Synapse, Element, HAPI, Mailpit, Postgres (Keycloak: T02, eHVD mock: T23)
+docker-compose.yml            Synapse, Element, HAPI, Mailpit, Postgres, Keycloak (eHVD mock: T23)
 .env.example                  all variables with demo values
 docker/element/config.json    Element config
 docker/synapse/               generated homeserver.yaml (git ignores it)
-keycloak/realm-idaustria-sim.json   planned, T02
+docker/keycloak/idaustria-sim-realm.json   simulated ID Austria: client, mappers, test citizens
 docs/ehvd/eHVD.wsdl           the real eHVD WSDL, version 2 from BRZ
 services/ehvd-mock/           eHVD mock service and its synthetic directory, planned, T23
 drizzle/                      generated SQL migrations
@@ -249,6 +250,7 @@ src/
     api/routers/              one router per area
     db/                       Drizzle schema and client
     fhir/                     FHIR client, mappers planned (T12 to T14)
+    ehvd/oid.ts               OID check shared by the login and pnpm citizen
     ehvd/                     eHVD SOAP client, planned (T15)
     matrix/client.ts          Matrix client-server API
     auth/eid-session.ts       outside person's session cookie
@@ -259,6 +261,7 @@ scripts/
   reset.sh                    empty Postgres, HAPI, and Mailpit, reload the patient
   bootstrap-matrix.ts         room, invites, widget
   seed-fhir.ts                Maria Beispiel into HAPI
+  citizen.ts                  add a test citizen to the simulated ID Austria
   validate.ts                 planned, T18: HL7 validator on every filed resource
   audit-check.ts              planned, T17: six event types per request
 track/                        track brief, scenario, patient.json, and test documents
