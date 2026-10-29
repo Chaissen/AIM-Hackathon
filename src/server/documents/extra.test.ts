@@ -8,7 +8,8 @@ import { checkAnswerPatient } from "./patient-check";
 import type { LabResult, ParsedDocument, RehabReport } from "./types";
 
 // The extra test set from T16 (track/scenario/extra/index.md). The index is the expectation; this test holds the
-// documents to it. Expectations the parser does not meet yet are `todo`, listed under "Open parser gaps" in the index.
+// documents to it, for the parser and the patient check. Expectations the parser does not meet yet are `todo`, listed
+// under "Open parser gaps" in the index.
 
 const extraDir = new URL("../../../track/scenario/extra/", import.meta.url);
 const extra = (file: string) => readFileSync(new URL(file, extraDir), "utf8");
@@ -53,11 +54,14 @@ for (const entry of indexRows()) {
     assert.deepEqual(doc.patient, { name, birthDate: parseDate(born) });
 
     // The sender copies the name and birth date from the document into the form, as the scenario README says.
+    // Only the patient check is asserted. The release check (T15) and the identity checks are not tested here yet.
     const check = checkAnswerPatient(doc.patient, doc.patient, maria);
     const outcome = entry.expected.match(/^\w+/)?.[0];
-    if (outcome === "Filed") assert.equal(check.pass, true, "the patient check must pass");
+    if (outcome === "Filed" || outcome === "Held") assert.equal(check.pass, true, "the patient check must pass");
     else if (outcome === "Blocked") assert.deepEqual(check, { pass: false, document: false, form: false });
     else assert.fail(`unknown outcome "${entry.expected}"`);
+    // A generic document is always held for Dr. Hofer (docs/ARCHITECTURE.md, "Document parsing"), never filed directly.
+    if (outcome === "Filed") assert.notEqual(doc.type, "other", "a generic document is held, not filed");
   });
 }
 
@@ -159,7 +163,7 @@ test("rehab 2024: a stay across a year, a colon inside a section, and a sender w
   });
 });
 
-test("rehab 2024: Prim. counts as a title", { todo: "parser gap: the title Prim." }, () => {
+test("rehab 2024: Prim. counts as a title", () => {
   const { writtenBy } = rehab("rehab-report-maria-beispiel-2024.md");
   assert.deepEqual([writtenBy?.titles, writtenBy?.given, writtenBy?.family], [["Prim.", "Dr."], "Johanna", "Leitner"]);
 });

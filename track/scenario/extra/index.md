@@ -2,7 +2,9 @@
 
 Our own set, before the jury brings theirs. Every file uses the format of [`../documents/`](../documents/). Everyone in it is made up.
 
-Every request is Dr. Hofer's request about Maria Beispiel, born 12 March 1961. The sender uploads the file as the answer. `src/server/documents/extra.test.ts` runs every file through `parseDocument` and the patient check and asserts the columns Kind, Patient, and Expected, and the parser values named under Trap.
+For every document, Dr. Hofer sends a request about Maria Beispiel, born 12 March 1961, addressed to the person in the Sender column, who then uploads the file as the answer. Do not reuse a request addressed to someone else: Sophie Lindner-Pichler answering scenario request 1, which is addressed to Dr. Brandl, is test M2 and gets blocked, not filed.
+
+`src/server/documents/extra.test.ts` runs every file through `parseDocument` and the patient check. It asserts the columns Kind and Patient and the parser values named under Trap. For Expected, it checks only the patient check for now: `Filed` and `Held` mean the patient check passes, and `Blocked` means it fails. The release check (T15) and the identity checks are not tested here yet, so the parts of Expected about them, such as who the release check must find, wait for T15.
 
 ## Documents
 
@@ -43,10 +45,9 @@ Name traps for the request ([name match](../../../docs/IDENTITY.md#name-match)):
 
 ## Open parser gaps
 
-Run on 30 October 2026 against `parseDocument` from T10. The test marks these expectations as `todo`, so they show up in every run without failing it. Remove the `todo` when the parser is fixed.
+Run on 30 October 2026 against `parseDocument` from `main`, after PR #40, which fixed the title `Prim.`. The test marks these expectations as `todo`, so they show up in every run without failing it. Remove the `todo` when the parser is fixed.
 
 | Gap | Documents | Parser today | Expected |
 |---|---|---|---|
 | One-sided reference ranges | blood count (`< 5`), metabolic (`< 116`, `> 45`) | `low` and `high` null, no interpretation. CRP 14 and LDL 128 are not flagged. | `< x` gives only `high`, `> x` only `low`. `text` keeps the range as written. |
 | Units that are not UCUM | kidney (`µmol/L`), metabolic (`mIU/L`), Maria Anna Beispiel (`µg/dL`) | Passed through unchanged, so the validator reports an error | `umol/L`, `m[IU]/L`, `ug/dL`. `unitText` keeps the unit as written. |
-| The title `Prim.` | rehab 2024 | `titles` empty, `given` `Prim. Dr. Johanna` | `titles` `Prim.` and `Dr.`, `given` `Johanna`. `nameWords` in `src/server/identity/names.ts` does not drop `prim` either. |
