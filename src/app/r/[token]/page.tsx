@@ -1,4 +1,5 @@
 import { ShieldCheck } from "lucide-react";
+import { headers } from "next/headers";
 import { Suspense } from "react";
 
 import { PortalFrame, PortalMessage } from "@/components/portal/portal-frame";
@@ -18,7 +19,10 @@ export default function RequestLanding({ params }: PageProps<"/r/[token]">) {
 
 async function Landing({ params }: { params: PageProps<"/r/[token]">["params"] }) {
   const { token } = await params;
-  const request = await findPublicRequest(token);
+  // X-Forwarded-For as Next.js passes it on. Next.js fills it from the socket only when the client sent none, so without
+  // a proxy in front the client can set it. The hash is a hint for the audit log, not proof. Only the hash is stored.
+  const ip = (await headers()).get("x-forwarded-for")?.split(",").at(-1)?.trim() || null;
+  const request = await findPublicRequest(token, { ip });
 
   if (!request) {
     return (

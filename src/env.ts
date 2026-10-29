@@ -4,6 +4,8 @@ import { z } from "zod";
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PUBLIC_URL: z.url().default("http://localhost:3010"),
+  // The clinic that runs ordy, named in the portal and in every email and SMS.
+  CLINIC_NAME: z.string().min(1).default("Klinikum Beispielstadt"),
   ORDY_SECRET: z.string().min(16).default("ordy-dev-secret-change-me"),
   DATABASE_URL: z.url().default("postgres://ordy:ordy@localhost:5433/ordy"),
   FHIR_BASE_URL: z.url().default("http://localhost:8090/fhir"),

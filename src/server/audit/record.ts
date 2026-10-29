@@ -1,0 +1,76 @@
+import { createHmac } from "node:crypto";
+
+import { env } from "@/env";
+import type { DocumentType } from "@/lib/document-types";
+import type { Actor } from "@/server/api/trpc";
+import type { Db, Tx } from "@/server/db";
+import { auditLog } from "@/server/db/schema";
+import type { RequestState } from "@/server/requests/lifecycle";
+
+// The six audit events with who, what, and when. docs/ARCHITECTURE.md, "Audit log".
+// Each event has its own outcome and detail fields: ids, hashes, and check results. Never document text or patient data.
+
+export type AuditEvent = (typeof auditLog.$inferInsert)["event"];
+export type AuditActor = { kind: (typeof auditLog.$inferInsert)["actorKind"]; id: string };
+export type CheckResult = "pass" | "hold" | "fail";
+// The identity checks from docs/IDENTITY.md, "Identity checks".
+export type IdentityCheck = { check: "level" | "name" | "person_number"; result: CheckResult; reason: string };
+
+type Entries = {
+  request_sent: { outcome: "sent"; detail: { docType: DocumentType; channel: "email" | "sms"; address: string } };
+  link_opened: { outcome: "shown" | "refused"; detail: { state: RequestState } };
+  identity_checked: { outcome: CheckResult; detail: { checks: IdentityCheck[] } };
+  answer_sent: { outcome: "received"; detail: { sha256: string; size: number } };
+  answer_filed: { outcome: "filed"; detail: { resources: string[]; provenance: string } };
+  misdelivery_caught:
+    | { outcome: "address_mismatch"; detail: { domain: string; expectedDomain: string } }
+    // The actor already names the person who failed.
+    | { outcome: "wrong_person"; detail: { checks: IdentityCheck[] } }
+    // Only the upload's hash and which part did not match. The upload itself is discarded.
+    | { outcome: "patient_mismatch"; detail: { sha256: string; size: number; nameMatches: boolean; birthDateMatches: boolean } };
+};
+
+export type MisdeliveryReason = Entries["misdelivery_caught"]["outcome"];
+
+export type AuditEntry = {
+  [E in AuditEvent]: { event: E; requestId: number | null; actor: AuditActor } & Entries[E];
+}[AuditEvent];
+
+/** Writes one audit entry. Pass the transaction when the entry belongs to a state change. */
+export async function recordAudit(db: Db | Tx, entry: AuditEntry) {
+  const [row] = await db
+    .insert(auditLog)
+    .values({
+      event: entry.event,
+      requestId: entry.requestId,
+      actorKind: entry.actor.kind,
+      actor: entry.actor.id,
+      outcome: entry.outcome,
+      detail: entry.detail,
+    })
+    .returning();
+  return row;
+}
+
+export const SERVICE_ACTOR: AuditActor = { kind: "service", id: "ordy" };
+
+/** The audit actor for a tRPC caller. */
+export function auditActor(actor: Actor): AuditActor {
+  switch (actor.kind) {
+    case "clinic":
+      return { kind: "network_member", id: actor.mxid };
+    case "eid":
+      return { kind: "outside_person", id: `${actor.session.givenName} ${actor.session.familyName} (${actor.session.personNumber})` };
+    case "anonymous":
+      return { kind: "anonymous", id: "anonymous" };
+  }
+}
+
+/**
+ * An anonymous browser, named by a keyed hash of its IP address. A plain SHA-256 of an IPv4 address
+ * can be reversed by trying all of them, so the hash is an HMAC with ORDY_SECRET.
+ */
+export function anonymousBrowser(ip: string | null): AuditActor {
+  if (!ip) return { kind: "anonymous", id: "ip unknown" };
+  return { kind: "anonymous", id: `ip ${createHmac("sha256", env.ORDY_SECRET).update(ip).digest("hex").slice(0, 16)}` };
+}
