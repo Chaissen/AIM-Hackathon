@@ -53,6 +53,8 @@ export const requests = pgTable("requests", {
   failedChecks: integer("failed_checks").notNull().default(0),
   // The bPK of the person who passed the identity check, or who was held and then accepted. Only this person may answer.
   personNumber: text("person_number"),
+  // The ID token of the last login, exactly as received, for the Provenance signature (T13).
+  idToken: text("id_token"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   // Dr. Hofer's room and the event that starts the request's thread there (T05).
