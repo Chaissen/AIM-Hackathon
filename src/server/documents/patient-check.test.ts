@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
+import { isSubset, nameWords } from "@/server/identity/names";
 import { parseDocument } from "./parse";
 import { checkAnswerPatient, samePatient, uploadHash } from "./patient-check";
 
@@ -52,6 +53,11 @@ test("samePatient follows the rules in docs/IDENTITY.md", () => {
   for (const [name, birthDate, expected] of cases) assert.equal(samePatient(name, birthDate, maria), expected, `${name} ${birthDate}`);
 });
 
+test("a patient record without a family name or birth date never passes", () => {
+  assert.equal(samePatient("Maria", "1961-03-12", { family: "", given: ["Maria"], birthDate: "1961-03-12" }), false);
+  assert.equal(samePatient("Maria Beispiel", "", { ...maria, birthDate: "" }), false);
+});
+
 test("umlauts and titles do not break the match", () => {
   const mueller = { family: "Müller", given: ["Jürgen"], birthDate: "1950-05-05" };
   assert.equal(samePatient("Juergen Mueller", "1950-05-05", mueller), true);
@@ -61,4 +67,27 @@ test("umlauts and titles do not break the match", () => {
 test("uploadHash is the SHA-256 hex of the upload", () => {
   assert.equal(uploadHash("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
   assert.equal(uploadHash(scenario("lab-result-max-beispiel.md")).length, 64);
+});
+
+test("decomposed umlauts and Austrian female titles still match", () => {
+  const mueller = { family: "Müller", given: ["Jürgen"], birthDate: "1950-05-05" };
+  assert.equal(samePatient("Ju\u0308rgen Mu\u0308ller", "1950-05-05", mueller), true);
+  assert.equal(samePatient("Dr.in Mag.a Jürgen Müller", "1950-05-05", mueller), true);
+});
+
+test("a given name that starts like a title still counts", () => {
+  const magdi = { family: "Hassan", given: ["Magdi"], birthDate: "1970-01-01" };
+  assert.equal(samePatient("Magdi Hassan", "1970-01-01", magdi), true);
+  // Max is not Magdi, even though both share the family name.
+  assert.equal(samePatient("Max Hassan", "1970-01-01", magdi), false);
+  assert.equal(samePatient("Hassan, Dr.in, Magdi", "1970-01-01", magdi), true);
+});
+
+test("nameWords never strips a name down to the empty set, which would pass every subset test", () => {
+  assert.deepEqual([...nameWords("Di")], ["di"]);
+  assert.deepEqual([...nameWords("Prim")], ["prim"]);
+  assert.deepEqual([...nameWords("Dr. Eva Brandl")], ["eva", "brandl"]);
+  assert.deepEqual([...nameWords("Dr.Eva Brandl")], ["eva", "brandl"]);
+  // A requested given name "Di" does not match an ID Austria given name "Anna" (T08).
+  assert.equal(isSubset(nameWords("Di"), nameWords("Anna")), false);
 });

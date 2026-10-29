@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { env } from "@/env";
 import { oid } from "@/server/ehvd/oid";
+import { sessionKey } from "./session-secret";
 
 // Session of an outside person after the ID Austria login (Keycloak in the demo). Bound to exactly one request link.
 export const EID_SESSION_COOKIE = "ordy_eid_session";
@@ -44,15 +45,13 @@ export function gdaOidFromClaim(value: unknown): string | null | Error {
   return parsed.success ? parsed.data.gda.id.id : new Error(`urn:eidgvat:attributes.gda is malformed: ${z.prettifyError(parsed.error)}`);
 }
 
-const key = new TextEncoder().encode(env.ORDY_SECRET);
-
 export const signEidSession = (session: EidSession) =>
-  new SignJWT(session).setProtectedHeader({ alg: "HS256" }).setIssuedAt().setExpirationTime("30m").sign(key);
+  new SignJWT(session).setProtectedHeader({ alg: "HS256" }).setIssuedAt().setExpirationTime("30m").sign(sessionKey(env.ORDY_SECRET));
 
 export async function readEidSession(cookie: string | undefined): Promise<EidSession | null> {
   if (!cookie) return null;
   try {
-    const { payload } = await jwtVerify(cookie, key, { algorithms: ["HS256"] });
+    const { payload } = await jwtVerify(cookie, sessionKey(env.ORDY_SECRET), { algorithms: ["HS256"], requiredClaims: ["exp", "iat"] });
     return eidSession.parse(payload);
   } catch {
     return null;

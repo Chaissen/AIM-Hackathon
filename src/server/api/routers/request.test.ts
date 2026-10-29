@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { after, test } from "node:test";
 
 import { TRPCError } from "@trpc/server";
@@ -8,6 +9,7 @@ import { env, mxid } from "@/env";
 import { createCaller } from "@/server/api/root";
 import { createContext } from "@/server/api/trpc";
 import { db } from "@/server/db";
+import { anonymousBrowser } from "@/server/audit/record";
 import { auditLog, requests } from "@/server/db/schema";
 import { capabilities } from "@/server/fhir/client";
 import { findAnswerContext, findPublicRequest } from "@/server/portal/data";
@@ -113,8 +115,8 @@ test("create refuses a request without a contact or with both", { skip: noDb }, 
   );
 });
 
-test("create refuses a name that is only a title", { skip: noDb }, async () => {
-  for (const name of [{ given: "Dr." }, { family: "Prof. Dr." }, { family: "-" }]) {
+test("create refuses a name without a single name word", { skip: noDb }, async () => {
+  for (const name of [{ given: "-" }, { family: "." }, { family: "–" }]) {
     await assert.rejects(clinic.request.create({ ...request1, ...name }), (e) => e instanceof TRPCError && e.code === "BAD_REQUEST", JSON.stringify(name));
   }
 });
@@ -156,6 +158,7 @@ test("cancel closes an open request and refuses a closed one", { skip: noDb }, a
 });
 
 test("the link shows only the requester and the clinic and writes link_opened", { skip: noDb }, async () => {
+  env.ORDY_SECRET = randomBytes(32).toString("hex");
   const { request, token } = await seed();
   const shown = await findPublicRequest(token, { ip: "127.0.0.1" });
   assert.deepEqual(shown, { requester: "Dr. Lena Hofer", clinic: env.CLINIC_NAME, expiresAt: request.expiresAt });
@@ -167,10 +170,23 @@ test("the link shows only the requester and the clinic and writes link_opened", 
   assert.equal(opened.actorKind, "anonymous");
   assert.equal(opened.outcome, "shown");
   assert.match(opened.actor, /^ip [0-9a-f]{16}$/);
+  assert.equal(opened.actor, anonymousBrowser("127.0.0.1").id);
 
   assert.equal(await findAnswerContext(token, { requestId: request.id, personNumber: "GH:eva" }), null, "no patient before the identity check");
   assert.equal(await findPublicRequest("not-a-token", { ip: null }), null);
   assert.equal(await findPublicRequest("A".repeat(43), { ip: null }), null);
+});
+
+test("without a private ORDY_SECRET the IP address is not recorded", () => {
+  const secret = env.ORDY_SECRET;
+  try {
+    for (const value of ["", "change-me-to-a-long-random-string", "too-short"]) {
+      env.ORDY_SECRET = value;
+      assert.deepEqual(anonymousBrowser("127.0.0.1"), { kind: "anonymous", id: "ip unknown" }, JSON.stringify(value));
+    }
+  } finally {
+    env.ORDY_SECRET = secret;
+  }
 });
 
 test("an expired link is refused and the request becomes expired", { skip: noDb }, async () => {

@@ -26,7 +26,8 @@ await bot.setState(roomId, "im.vector.modular.widgets", WIDGET_ID, {
   id: WIDGET_ID,
   type: "m.custom",
   name: "Request a document",
-  url: `${env.PUBLIC_URL}/widget?room=$matrix_room_id&user=$matrix_user_id`,
+  url: `${env.PUBLIC_URL}/widget?widgetId=${WIDGET_ID}&room=$matrix_room_id&user=$matrix_user_id`,
+  waitForIframeLoad: false,
   creatorUserId: bot.userId,
   data: {},
 });

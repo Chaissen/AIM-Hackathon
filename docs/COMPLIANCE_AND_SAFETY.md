@@ -47,7 +47,7 @@ The check compares whole words. A substring check would block every message, bec
 | ID token of the sender | Provenance `signature.data` | Proof of the identity check that anyone can verify later | With the record |
 | Uploads for the wrong patient | Nowhere. Only the SHA-256 hash and the reason stay in the audit log. | Max Beispiel's data must not end up in Maria's record or anywhere else | Discarded after the check |
 | Name and person number of someone who failed the check | Audit log | The audit needs to say who tried | Until the demo reset |
-| IP address of whoever opens a link | Audit log, only as an HMAC with a key derived from `ORDY_SECRET`, cut to 16 hex characters | Hints which opens came from the same address without storing it. The client can forge the header it comes from, so it is no proof. | Until the demo reset |
+| IP address of whoever opens a link | Audit log, only as an HMAC with a key derived from `ORDY_SECRET`, cut to 16 hex characters. Nothing without a private `ORDY_SECRET`. | Hints which opens came from the same address without storing it. The client can forge the header it comes from, so it is no proof. | Until the demo reset |
 
 The ID token holds the sender's name, birth date, and person number. That is more than the record strictly needs. We keep it because it is the only proof of the identity check that does not depend on trusting our own database. A production version could keep only a hash of the token and keep the token itself in a separate archive with stricter access.
 
