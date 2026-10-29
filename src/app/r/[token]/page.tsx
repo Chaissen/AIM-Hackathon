@@ -7,7 +7,7 @@ import { findPublicRequest } from "@/server/portal/data";
 
 const formatDate = (d: Date) => d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
 
-// GET /r/{token}: shows only the requesting doctor and clinic and the login button (organisations/ARCHITECTURE.md).
+// GET /r/{token}: shows only the requesting doctor and clinic and the login button (docs/ARCHITECTURE.md).
 export default function RequestLanding({ params }: PageProps<"/r/[token]">) {
   return (
     <Suspense fallback={<PortalFrame>{null}</PortalFrame>}>

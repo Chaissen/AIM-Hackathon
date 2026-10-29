@@ -19,7 +19,7 @@ const EVENT_LABEL: Record<(typeof auditLog.$inferSelect)["event"], string> = {
 
 const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
-// GET /audit: the audit log for the demo, bound to localhost (organisations/ARCHITECTURE.md, "Outside portal").
+// GET /audit: the audit log for the demo, bound to localhost (docs/ARCHITECTURE.md, "Outside portal").
 export default function AuditPage() {
   return (
     <main className="mx-auto grid w-full max-w-6xl gap-4 px-4 py-8">

@@ -16,7 +16,7 @@ const linkify = (text: string) =>
     ),
   );
 
-// GET /sms: every SMS the request service would have sent, like a phone screen (organisations/ARCHITECTURE.md).
+// GET /sms: every SMS the request service would have sent, like a phone screen (docs/ARCHITECTURE.md).
 export default function SmsScreen() {
   return (
     <main className="grid justify-items-center gap-4 px-4 py-8">
