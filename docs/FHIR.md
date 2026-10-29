@@ -17,6 +17,17 @@ This page lists the FHIR R4 resources the request service files, how they refere
 
 We file all resources of one answer in one [transaction Bundle](https://hl7.org/fhir/R4/http.html#transaction), so an answer is filed completely or not at all.
 
+## Filing an answer
+
+The filing (T13) lives in `src/server/fhir/`. `filing.ts` is pure and builds the Bundle, and `file-answer.ts` sends it and writes the audit entry.
+
+1. `prepareParties()` builds the Practitioner and Organization entries: Dr. Hofer, the sender, the author when it is someone else, the outside organisation, and the identity provider. It returns their `urn:uuid:` references.
+2. The mapper (T12, T14) builds the clinical resources with those references.
+3. `buildFilingBundle()` adds the Provenance and the completed Task and returns the Bundle with the references the audit entry needs.
+4. `fileAnswer()` POSTs the Bundle to the server base, reads the server ids from the `transaction-response`, and writes `answer_filed`. If HAPI rejects the Bundle, nothing is filed, nothing is audited, and the error goes to the caller.
+
+Order of the entries: Practitioners, Organizations, the DiagnosticReport or DocumentReference, the Observations, the Provenance, the Task.
+
 ## How the resources reference each other
 
 ```
@@ -135,10 +146,10 @@ The medication list stays inside the attached text. One MedicationStatement per 
 | `target` | Every clinical resource filed for this answer |
 | `occurredDateTime` | When the outside person pressed send |
 | `recorded` | When the request service filed the answer |
-| `policy` | The identity policy that applied, for example `urn:aim-t2:identity-policy:lab-result:v1`. When Dr. Hofer accepted a held answer, also `urn:aim-t2:identity-policy:accepted-by-requester:v1`. |
+| `policy` | The identity policy of the document type: `urn:aim-t2:identity-policy:lab-result:v1` or `urn:aim-t2:identity-policy:rehab-report:v1`. When Dr. Hofer accepted a held answer, also `urn:aim-t2:identity-policy:accepted-by-requester:v1`. |
 | `agent` | `author` for the document author. `informant` for the sender when the sender is someone else. `onBehalfOf` for the organisation. |
-| `signature` | Type `1.2.840.10065.1.12.1.10` (Identity Witness Signature) from `urn:iso-astm:E1762-95:2013`. `when` is the login time, `who` is the Organization "ID Austria (simulation)", `sigFormat` is `application/jose`, and `data` holds the ID token in base64. |
-| `text` | A short narrative for people who open the resource |
+| `signature` | Type `1.2.840.10065.1.12.1.10` (Identity Witness Signature) from `urn:iso-astm:E1762-95:2013`. `when` is the login time, from the ID token's `auth_time`, or `iat` when it has none. `who` is the Organization "ID Austria (simulation)", `sigFormat` is `application/jose`, and `data` holds the ID token in base64. |
+| `text` | A short narrative for people who open the resource: who sent it and when, who wrote it when that is someone else, the ID Austria levels from the token, whether Dr. Hofer accepted a held answer, and any sentences the caller adds, such as the release check result |
 
 The ID token is the proof of the identity check. Anyone can verify its signature later with the identity provider's public key. It contains the sender's name, birth date, and person number. [Compliance and safety](COMPLIANCE_AND_SAFETY.md) covers that trade-off.
 
@@ -188,7 +199,9 @@ The ID token is the proof of the identity check. Anyone can verify its signature
 | `requester` | Dr. Hofer's Practitioner |
 | `owner` | The outside person's Practitioner |
 | `restriction.period.end` | The link expiry |
-| `output` | The DiagnosticReport or the DocumentReference, once filed |
+| `output` | The DiagnosticReport or the DocumentReference, once filed, with `type.text` "Lab result" or "Rehab discharge report" |
+
+The Task id is `ordy-request-<request id>`, and every write is a `PUT`, so the same Task follows the request from sent to filed. The filing Bundle PUTs it with status `completed` and the output. For the other state changes, `syncTask()` in `src/server/fhir/file-answer.ts` PUTs it; until the outside person has a Practitioner, `owner` is a reference with only `display`. Wiring `syncTask()` into the state changes belongs to the request core (T04).
 
 The Task stays on the clinic's FHIR server. It is the only place outside the request service database where the request appears with its document type.
 
@@ -197,7 +210,10 @@ The Task stays on the clinic's FHIR server. It is the only place outside the req
 - A Practitioner holds the name from the request, confirmed by ID Austria. When the eHVD lists the person, the Practitioner gets the eHVD OID as `identifier`, with `system` `urn:ietf:rfc:3986` and `value` `urn:oid:1.2.40.0.34.3.2.99.1.2` for Dr. Brandl. [eHVD](EHVD.md#directory-content) lists all OIDs.
 - We do not store the outside person's birth date in the Practitioner.
 - An Organization holds the name and the eHVD OID, for example `urn:oid:1.2.40.0.34.3.1.99.1.2` for Labor Kanalstraße.
-- The transaction uses conditional create with `ifNoneExist` on the identifier, so a second answer from Dr. Brandl reuses her Practitioner. For people without an eHVD entry, the `bindings` table remembers the Practitioner id.
+- The transaction uses conditional create with `ifNoneExist` on the identifier, for example `identifier=urn:ietf:rfc:3986|urn:oid:1.2.40.0.34.3.2.99.1.2`, so a second answer from Dr. Brandl reuses her Practitioner.
+- For people without an eHVD entry, such as Stefan Kern, the `bindings` table remembers the Practitioner id. The filing then references `Practitioner/<id>` and creates nothing. Without a binding, it creates a new Practitioner without identifier, and `answer_filed` names its id in `sender` so the binding can store it.
+- An organisation without an eHVD entry gets a new Organization without identifier. We do not match organisations by name.
+- The Organization "ID Austria (simulation)" has the issuer URL from the ID token as identifier, `http://localhost:8080/realms/idaustria-sim` in the demo, and is created once the same way. Real ID Austria has its own issuer, so it becomes a separate Organization.
 
 ## Patient
 
@@ -205,7 +221,7 @@ The request service puts `track/scenario/patient.json` on the server with `PUT P
 
 ## Validation
 
-1. After a run, `pnpm validate` (`scripts/validate.ts`, planned in T18) reads the ids of the filed resources from the `answer_filed` audit entries.
+1. After a run, `pnpm validate` (`scripts/validate.ts`, planned in T18) reads the ids of the filed resources from the `answer_filed` audit entries. `detail.resources` lists every resource the transaction created or reused, the Task included. `detail` also names `output`, `targets`, `provenance`, `task`, `sender`, `author`, and `organization`.
 2. It fetches each resource from HAPI into `out/filed/`.
 3. It runs the validator on each file, as the scenario README says: `java -jar validator_cli.jar <file> -version 4.0`.
 4. It counts the issues with severity error. The target is 0. Warnings do not count.
