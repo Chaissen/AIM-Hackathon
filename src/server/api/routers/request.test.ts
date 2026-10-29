@@ -113,6 +113,12 @@ test("create refuses a request without a contact or with both", { skip: noDb }, 
   );
 });
 
+test("create refuses a name that is only a title", { skip: noDb }, async () => {
+  for (const name of [{ given: "Dr." }, { family: "Prof. Dr." }, { family: "-" }]) {
+    await assert.rejects(clinic.request.create({ ...request1, ...name }), (e) => e instanceof TRPCError && e.code === "BAD_REQUEST", JSON.stringify(name));
+  }
+});
+
 test("only network members reach the request procedures", { skip: noDb }, async () => {
   const anonymous = createCaller(createContext({ kind: "anonymous" }));
   await assert.rejects(anonymous.request.create(request1), (e) => e instanceof TRPCError && e.code === "UNAUTHORIZED");
