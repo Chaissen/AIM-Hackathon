@@ -1,11 +1,11 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 import type { LabResult, LabRow, PersonLine, RehabReport } from "./types";
 
-// The scenario documents in track/scenario/documents as the parser should return them. For tests only.
+// The scenario documents in track/scenario/documents as the parser returns them. For tests only;
+// scenario-fixtures.test.ts keeps them equal to the parser output.
 
-const markdown = (name: string) => readFileSync(join(process.cwd(), "track/scenario/documents", name), "utf8");
+const markdown = (name: string) => readFileSync(new URL(`../../../track/scenario/documents/${name}`, import.meta.url), "utf8");
 
 const evaBrandl: PersonLine = {
   raw: "Dr. Eva Brandl, lab physician",
@@ -15,59 +15,59 @@ const evaBrandl: PersonLine = {
   details: ["lab physician"],
 };
 
-const labRows = (inr: [number, string], aptt: number, platelets: number, fibrinogen: [number, string]): LabRow[] => {
-  const interpretation = (value: number, low: number, high: number) => (value < low ? "L" : value > high ? "H" : "N");
-  return [
-    {
-      test: "INR (prothrombin time)",
-      value: inr[0],
-      valueText: inr[1],
-      ucum: null,
-      unitText: "",
-      low: 0.8,
-      high: 1.2,
-      rangeText: "0.8 to 1.2",
-      loinc: "6301-6",
-      interpretation: interpretation(inr[0], 0.8, 1.2),
-    },
-    {
-      test: "aPTT",
-      value: aptt,
-      valueText: String(aptt),
-      ucum: "s",
-      unitText: "s",
-      low: 25,
-      high: 37,
-      rangeText: "25 to 37",
-      loinc: "14979-9",
-      interpretation: interpretation(aptt, 25, 37),
-    },
-    {
-      test: "Platelets",
-      value: platelets,
-      valueText: String(platelets),
-      ucum: "10*9/L",
-      unitText: "10^9/L",
-      low: 150,
-      high: 400,
-      rangeText: "150 to 400",
-      loinc: "777-3",
-      interpretation: interpretation(platelets, 150, 400),
-    },
-    {
-      test: "Fibrinogen",
-      value: fibrinogen[0],
-      valueText: fibrinogen[1],
-      ucum: "g/L",
-      unitText: "g/L",
-      low: 2,
-      high: 4,
-      rangeText: "2.0 to 4.0",
-      loinc: "3255-7",
-      interpretation: interpretation(fibrinogen[0], 2, 4),
-    },
-  ];
-};
+/** Each result as written in the document, with the flag the parser gives it. */
+type Result = [valueText: string, interpretation: LabRow["interpretation"]];
+
+const labRows = (inr: Result, aptt: Result, platelets: Result, fibrinogen: Result): LabRow[] => [
+  {
+    test: "INR (prothrombin time)",
+    value: Number(inr[0]),
+    valueText: inr[0],
+    ucum: null,
+    unitText: "",
+    low: 0.8,
+    high: 1.2,
+    rangeText: "0.8 to 1.2",
+    loinc: "6301-6",
+    interpretation: inr[1],
+  },
+  {
+    test: "aPTT",
+    value: Number(aptt[0]),
+    valueText: aptt[0],
+    ucum: "s",
+    unitText: "s",
+    low: 25,
+    high: 37,
+    rangeText: "25 to 37",
+    loinc: "14979-9",
+    interpretation: aptt[1],
+  },
+  {
+    test: "Platelets",
+    value: Number(platelets[0]),
+    valueText: platelets[0],
+    ucum: "10*9/L",
+    unitText: "10^9/L",
+    low: 150,
+    high: 400,
+    rangeText: "150 to 400",
+    loinc: "777-3",
+    interpretation: platelets[1],
+  },
+  {
+    test: "Fibrinogen",
+    value: Number(fibrinogen[0]),
+    valueText: fibrinogen[0],
+    ucum: "g/L",
+    unitText: "g/L",
+    low: 2,
+    high: 4,
+    rangeText: "2.0 to 4.0",
+    loinc: "3255-7",
+    interpretation: fibrinogen[1],
+  },
+];
 
 export const labResultMaria: LabResult = {
   type: "lab-result",
@@ -85,7 +85,7 @@ export const labResultMaria: LabResult = {
   markdown: markdown("lab-result-maria-beispiel.md"),
   sampleTaken: "2026-10-22T08:10:00+02:00",
   reported: "2026-10-22T11:40:00+02:00",
-  rows: labRows([1, "1.0"], 31, 245, [3.1, "3.1"]),
+  rows: labRows(["1.0", "N"], ["31", "N"], ["245", "N"], ["3.1", "N"]),
   conclusion: "All values are within the reference range.",
   validatedBy: evaBrandl,
 };
@@ -102,7 +102,7 @@ export const labResultMax: LabResult = {
   markdown: markdown("lab-result-max-beispiel.md"),
   sampleTaken: "2026-10-22T08:25:00+02:00",
   reported: "2026-10-22T11:45:00+02:00",
-  rows: labRows([2.6, "2.6"], 44, 198, [3.4, "3.4"]),
+  rows: labRows(["2.6", "H"], ["44", "H"], ["198", "N"], ["3.4", "N"]),
   conclusion: "INR and aPTT are raised, as expected under anticoagulation with phenprocoumon.",
 };
 

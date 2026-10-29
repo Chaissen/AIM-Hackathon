@@ -71,7 +71,7 @@ The report and the people who handle it are different. Dr. Leitner wrote the reh
 | Free text such as `All values are within the reference range.` | `DiagnosticReport.conclusion` |
 | `Validated by: Dr. Eva Brandl, lab physician` | `DiagnosticReport.resultsInterpreter` and `Observation.performer`, both the Practitioner |
 | Heading `# Labor Kanalstraße: lab report` | `DiagnosticReport.performer`, the Organization |
-| The whole file | `DiagnosticReport.presentedForm`, `contentType` `text/markdown`, data in base64 |
+| The whole file | `DiagnosticReport.presentedForm`, `contentType` `text/markdown; charset=utf-8`, data in base64 |
 
 The DiagnosticReport has `status` `final`, `category` `LAB` from `http://terminology.hl7.org/CodeSystem/v2-0074`, and `code` LOINC `11502-2` (Laboratory report) with the document title in `code.text`. Each Observation has `status` `final` and `category` `laboratory` from `http://terminology.hl7.org/CodeSystem/observation-category`.
 
@@ -85,6 +85,8 @@ The DiagnosticReport has `status` `final`, `category` `LAB` from `http://termino
 | Fibrinogen | 3255-7 | Fibrinogen [Mass/volume] in Platelet poor plasma by Coagulation assay | 3.1 | `g/L` | 2.0 to 4.0 |
 
 The document writes the platelet unit as `10^9/L`, which is not valid UCUM. The parser replaces `^` with `*`, so the mapper gets `10*9/L`. INR has no unit, so its `valueQuantity` and its range carry only values.
+
+JSON numbers have no trailing zeros, so INR `1.0` is filed as `1` and the fibrinogen bounds as `2` and `4`. The attached document and `referenceRange.text` keep the values as written.
 
 For Max Beispiel's result, INR 2.6 and aPTT 44 are above the range and get `H`. That result is never filed for Maria, because the patient check stops it first.
 
@@ -122,7 +124,7 @@ The `urn:uuid:` references point at other entries of the transaction Bundle, and
 | `Reason: rehabilitation after a total hip replacement...` | `DocumentReference.description` |
 | `Written by: Dr. Johanna Leitner, medical director, Reha Waldblick` | `DocumentReference.author`, the Practitioner and the Organization. Provenance agent `author`. |
 | `Sent by: Stefan Kern, discharge management` | Provenance agent `informant` |
-| The whole file | `DocumentReference.content.attachment`, `contentType` `text/markdown`, data in base64, `title` from the heading |
+| The whole file | `DocumentReference.content.attachment`, `contentType` `text/markdown; charset=utf-8`, data in base64, `title` from the heading |
 
 The DocumentReference has `status` `current`, `docStatus` `final`, and `date` set to the filing time.
 
@@ -212,7 +214,7 @@ The request service puts `track/scenario/patient.json` on the server with `PUT P
 3. It runs the validator on each file, as the scenario README says: `java -jar validator_cli.jar <file> -version 4.0`.
 4. It counts the issues with severity error. The target is 0. Warnings do not count.
 
-The mapper output for the three scenario documents (fixtures in `src/server/documents/scenario-fixtures.ts`) has 0 errors and only the `dom-6` warning.
+Until `pnpm validate` exists, the mappers were checked by hand: their output for the three scenario documents (fixtures in `src/server/documents/scenario-fixtures.ts`), on its own and inside a transaction Bundle, has 0 errors and only the `dom-6` warning.
 
 The validator checks LOINC codes against tx.fhir.org, so it needs internet access.
 
@@ -222,6 +224,7 @@ Traps we know about:
 - A `dateTime` with a time needs a time zone. `Europe/Vienna` is `+02:00` until 25 October 2026 and `+01:00` after that. The sample times are `+02:00`, and the filing times are `+01:00`.
 - An `instant`, such as `issued` and `recorded`, needs seconds and a time zone.
 - A Quantity with a `code` needs a `system` (invariant `qty-3`).
+- FHIR JSON allows no empty strings (`ele-1`). The mappers leave an element out when its cell is empty, and leave out `referenceRange` when a row has neither bounds nor range text.
 - The validator reports a `display` that differs from LOINC's. We leave `display` out and put the document's label into `code.text`, because jury documents may carry codes we have not looked up.
 - A resource without narrative gets a warning (`dom-6`), not an error. Only the Provenance gets a narrative.
 
