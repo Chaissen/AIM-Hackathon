@@ -53,7 +53,7 @@ These answers go into the repository README for the submission.
 
 They log in with ID Austria, the Austrian state electronic ID. ID Austria gives our service their verified name, their birth date, and a person number that stays the same for our service. We compare the name with the name Dr. Hofer typed. The person needs no account with us and does not need to be in any directory beforehand.
 
-Two more facts back up the name. First, the link went only to the address or phone number Dr. Hofer gave, so the person has access to that inbox or phone. Second, healthcare professionals are listed in the Austrian eHealth directory (eHVD) with name, specialty, practice address, and whether they may currently practise. We check the eHVD where the role matters.
+Two more facts back up the name. First, the link went only to the address or phone number Dr. Hofer gave, so the person has access to that inbox or phone. Second, healthcare professionals are listed in the Austrian eHealth directory (eHVD) with name, specialty, practice address, and whether they may currently practise. We check the eHVD where the role matters. For healthcare professionals, ID Austria can also send their eHVD entry at login, which ties the login to the directory entry through the state and not only through the name.
 
 After the first verified answer, we store the person number. From then on, only that exact person can answer as "Eva Brandl", even if a second Eva Brandl exists.
 
@@ -65,7 +65,7 @@ Every outside person sees the patient's name once the identity check passes. So 
 
 | Document | Who answers | Checks | Why |
 |---|---|---|---|
-| Lab result | The named lab physician | ID Austria full, name match, eHVD lists the person as an active physician at the named lab, person number if known | Lab values feed straight into a clinical decision, here the clearance for a procedure. A qualified physician must stand behind them. |
+| Lab result | The named lab physician | ID Austria full, name match, eHVD lists the person as an active specialist in lab medicine who is a member of the named lab (found through the eHVD entry from the login, or by name), person number if known | Lab values feed straight into a clinical decision, here the clearance for a procedure. A qualified physician must stand behind them. |
 | Rehab discharge report | The named discharge manager | ID Austria full, name match, the link went to the phone number Dr. Hofer gave, eHVD lists the rehab clinic | The sender is administrative staff and is not in a professional register. The report names its medical author, and we file that physician as the author. |
 | Any document from a person the eHVD cannot confirm | The named person | ID Austria full, name match. The answer waits until Dr. Hofer accepts it in Matrix. | We cannot confirm the role, so a human decides. |
 
@@ -100,8 +100,8 @@ A third party, such as the PGK network operator, could later run one shared inst
 | Part | In the demo | In production |
 |---|---|---|
 | Matrix | Synapse and Element Web, server name `klinikum.example` | The PGK homeserver |
-| ID Austria | Keycloak over OpenID Connect, with the claim names of a real ID Austria response | The ID Austria reference environment, then production. Both need a registered service provider, which private companies register through Mein USP. |
-| eHVD | A JSON file with the same fields as the real directory | The eHVD web service, after registration with the health ministry |
+| ID Austria | Keycloak over OpenID Connect, with the claim names of a real ID Austria response, including the eHVD entry for healthcare professionals | The ID Austria reference environment, then production. Both need a registered service provider, which private companies register through Mein USP. |
+| eHVD | A mock SOAP service in its own container with the real interface (WSDL version 2 from BRZ) and synthetic entries | The eHVD web service, after registration with the health ministry |
 | Email | Mailpit catches every message | The clinic's mail server |
 | SMS | A page in the request service shows each SMS | An SMS gateway |
 | FHIR server | Local HAPI FHIR | The clinic's FHIR server |
@@ -130,7 +130,7 @@ Execution. The whole flow runs on both scenario requests. New documents in the s
 ## Limitations
 
 - ID Austria is simulated. Real use needs a registered service provider and the phone-app step.
-- The name is the only link between an ID Austria login and an eHVD entry, because the eHVD has no birth date.
+- For people without an eHVD entry from ID Austria, the name is the only link between the login and the eHVD, because the eHVD has no birth date. It is not documented whether a private service provider like us would receive the eHVD attribute from ID Austria.
 - A second person with the same name and the same role who receives the link would pass the first time. The stored person number closes this gap from the second request on.
 - The parser expects the scenario's Markdown format and English dates. Other documents go to Dr. Hofer as held answers.
 
@@ -140,6 +140,7 @@ Execution. The whole flow runs on both scenario requests. New documents in the s
 - [ID Austria predefined test identities](https://www.id-austria.gv.at/de/developer/testen/vordefinierte-testidentit%C3%A4ten)
 - [USP: registering as an ID Austria service provider](https://www.usp.gv.at/hilfe-und-support/verfahrensrechte/registrierung-als-ida-sp.html)
 - [eHVD web service handbook v2.4](https://www.gesundheit.gv.at/dam/gesundheitgvat/professional/it-services/ehvd/eHVD-ServicehandbuchV2.4.pdf)
+- [ID Austria: attribute "Gesundheitsdiensteanbieter"](https://www.id-austria.gv.at/de/developer/registrieren/personenmerkmale/Gesundheitsdiensteanbieter)
 - [Signicat: ID Austria OIDC attributes](https://developer.signicat.com/identity-methods/id-austria/attributes-reference/id-austria-attributes-oidc/)
 
-[Identity and misdelivery](IDENTITY.md) lists all sources on ID Austria and eHVD.
+[Identity and misdelivery](IDENTITY.md) lists all sources on ID Austria, and [eHVD](EHVD.md) all sources on the eHVD.

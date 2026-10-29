@@ -194,9 +194,9 @@ The Task stays on the clinic's FHIR server. It is the only place outside the req
 
 ## Practitioner and Organization
 
-- A Practitioner holds the name from the request, confirmed by ID Austria. When the eHVD lists the person, the Practitioner gets the eHVD OID as `identifier`, with `system` `urn:ietf:rfc:3986` and `value` `urn:oid:2.999.2.1`.
+- A Practitioner holds the name from the request, confirmed by ID Austria. When the eHVD lists the person, the Practitioner gets the eHVD OID as `identifier`, with `system` `urn:ietf:rfc:3986` and `value` `urn:oid:1.2.40.0.34.3.2.99.1.2` for Dr. Brandl. [eHVD](EHVD.md#directory-content) lists all OIDs.
 - We do not store the outside person's birth date in the Practitioner.
-- An Organization holds the name and the eHVD OID.
+- An Organization holds the name and the eHVD OID, for example `urn:oid:1.2.40.0.34.3.1.99.1.2` for Labor Kanalstraße.
 - The transaction uses conditional create with `ifNoneExist` on the identifier, so a second answer from Dr. Brandl reuses her Practitioner. For people without an eHVD entry, the `bindings` table remembers the Practitioner id.
 
 ## Patient

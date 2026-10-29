@@ -18,7 +18,7 @@ How to set up, start, reset, and extend ordy. [Architecture](ARCHITECTURE.md) ex
 | pnpm | 10 (pinned in `package.json`) | `corepack enable`, then `pnpm -v` |
 | Java | 17 or newer, only for the HL7 validator | `java -version` |
 
-These ports must be free: 3010 (ordy), 5433 (Postgres), 8008 (Synapse), 8081 (Element), 8090 (HAPI), 8025 and 1025 (Mailpit). Keycloak will use 8080 (T02).
+These ports must be free: 3010 (ordy), 5433 (Postgres), 8008 (Synapse), 8081 (Element), 8090 (HAPI), 8025 and 1025 (Mailpit). Keycloak will use 8080 (T02) and the eHVD mock 8095 (T23).
 
 ## First-time setup
 
@@ -66,6 +66,7 @@ Check that everything works:
 | Synapse | http://localhost:8008 | bot: `ordy` / `ordy-demo-2026` |
 | Postgres | `postgres://ordy:ordy@localhost:5433/ordy` | `ordy` / `ordy` |
 | Keycloak (T02) | http://localhost:8080 | test citizens in [Identity and misdelivery](IDENTITY.md) |
+| eHVD mock (T23) | http://localhost:8095/ehvd.wsdl | none, IP allowlist as in [eHVD](EHVD.md) |
 
 ## Commands
 
