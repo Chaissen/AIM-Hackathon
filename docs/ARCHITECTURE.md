@@ -39,7 +39,7 @@ Every reused part can be replaced. Synapse can be any Matrix homeserver, Keycloa
 
 ## Document types
 
-One table in the request service defines each document type. To add a type, add a row.
+One table in the request service, `DOCUMENT_TYPES` in `src/lib/document-types.ts`, defines each document type. To add a type, add a row there and here. The database stores the key as text, so a new type needs no migration.
 
 | Key | Default channel | eHVD check | Mapper | Name in Matrix messages |
 |---|---|---|---|---|
@@ -48,7 +48,7 @@ One table in the request service defines each document type. To add a type, add 
 
 ## Request lifecycle
 
-The request service stores each request with one state. The FHIR Task for the request mirrors the state.
+The request service stores each request with one state. The FHIR Task for the request mirrors the state. `src/server/requests/lifecycle.ts` holds both tables below as code, and `lifecycle.test.ts` tests every row.
 
 | State | Meaning | Task status |
 |---|---|---|
@@ -62,24 +62,32 @@ The request service stores each request with one state. The FHIR Task for the re
 | `expired` | Nobody answered within 7 days | `failed` |
 | `locked` | Three identity checks failed on this link | `failed` |
 
-| Event | From | To |
-|---|---|---|
-| Dr. Hofer sends the request form and the address check passes | none | `sent` |
-| Dr. Hofer sends the request form and the address check fails | none | `awaiting_confirmation` |
-| Dr. Hofer clicks **Send anyway** | `awaiting_confirmation` | `sent` |
-| Identity check passes | `sent` | `verified` |
-| Identity check matches the name partly | `sent` | `identity_held` |
-| Identity check fails for the third time | `sent` | `locked` |
-| Dr. Hofer clicks **Accept** | `identity_held` | `verified` |
-| Answer passes the patient check and the role is confirmed | `verified` | `filed` |
-| Answer passes the patient check and the role is not confirmed | `verified` | `answer_held` |
-| Answer fails the patient check | `verified` | `verified` |
-| Dr. Hofer clicks **Accept** | `answer_held` | `filed` |
-| Dr. Hofer clicks **Reject** | `identity_held` or `answer_held` | `cancelled` |
-| Dr. Hofer clicks **Cancel** | any open state | `cancelled` |
-| 7 days pass | any open state | `expired` |
+| Event | In code | From | To |
+|---|---|---|---|
+| Dr. Hofer sends the request form and the address check passes | `initialState(true)` | none | `sent` |
+| Dr. Hofer sends the request form and the address check fails | `initialState(false)` | none | `awaiting_confirmation` |
+| Dr. Hofer clicks **Send anyway** | `send_anyway` | `awaiting_confirmation` | `sent` |
+| Identity check passes | `identity_pass` | `sent` | `verified` |
+| The verified person logs in again, for example after the session expired | `identity_pass` | `verified` | `verified` |
+| Identity check matches the name partly | `identity_hold` | `sent` | `identity_held` |
+| Identity check fails for the first or second time | `identity_fail` | `sent` or `verified` | unchanged |
+| Identity check fails for the third time | `identity_fail` | `sent` or `verified` | `locked` |
+| Dr. Hofer clicks **Accept** | `accept` | `identity_held` | `verified` |
+| Answer passes the patient check and the role is confirmed | `answer_confirmed` | `verified` | `filed` |
+| Answer passes the patient check and the role is not confirmed | `answer_unconfirmed` | `verified` | `answer_held` |
+| Answer fails the patient check | `patient_mismatch` | `verified` | `verified` |
+| Dr. Hofer clicks **Accept** | `accept` | `answer_held` | `filed` |
+| Dr. Hofer clicks **Reject** | `reject` | `identity_held` or `answer_held` | `cancelled` |
+| Dr. Hofer clicks **Cancel** | `cancel` | any open state | `cancelled` |
+| 7 days pass | `expire` | any open state | `expired` |
 
-A failed identity check does not change the state, so the real person can still answer a forwarded link. The failure goes to the audit log and to Dr. Hofer.
+The open states are `awaiting_confirmation`, `sent`, `identity_held`, `verified`, and `answer_held`. Any other pair of state and event is refused. So a login while Dr. Hofer decides on a held identity or a held answer changes nothing.
+
+A failed identity check does not change the state, so the real person can still answer a forwarded link. The failure goes to the audit log and to Dr. Hofer. `failed_checks` counts the failures.
+
+No job watches the expiry. Before the request service reads a request, it sets that request to `expired` if it is open and past `expires_at`. Before it lists requests, it does the same for all of them (`expireDueRequests` in `src/server/requests/service.ts`). `applyEvent` in the same file locks the request row while it changes the state, so two events on one request never overlap. Its callback writes the audit entry for the change in the same transaction.
+
+The link token and the 7 days start when the request goes out. **Send anyway** (`sendAnyway`) gives the request a new token and a new expiry and writes `request_sent` then, not when the request was created.
 
 ## Link rules
 
@@ -87,6 +95,7 @@ A failed identity check does not change the state, so the real person can still 
 - The link is valid for 7 days. It accepts one filed answer.
 - Three failed identity checks lock the link. Dr. Hofer can send a new request.
 - Until the identity check passes, the page shows only the requesting doctor and clinic.
+- The link works in `sent`, `identity_held`, `verified`, and `answer_held`. An unknown, malformed, expired, cancelled, locked, or filed link shows the same "This link does not work" page.
 
 ## Widget
 
@@ -183,28 +192,36 @@ If the parser cannot read a document, a language model may extract the same fiel
 
 ## Storage
 
-The request service keeps three Postgres tables, defined with Drizzle in `src/server/db/schema.ts`. Migrations live in `drizzle/`. `audit_log` exists already. `requests` and `bindings` come with T04.
+The request service keeps three Postgres tables, defined with Drizzle in `src/server/db/schema.ts`. Migrations live in `drizzle/`.
 
 | Table | Columns |
 |---|---|
-| `requests` | `id`, `doc_type`, `patient_id`, `given`, `family`, `org`, `channel`, `address`, `state`, `link_hash`, `failed_checks`, `created_at`, `expires_at`, `matrix_room`, `matrix_event` |
+| `requests` | `id`, `doc_type`, `patient_id`, `given`, `family`, `org`, `channel`, `address`, `requester`, `requester_name`, `state`, `link_hash`, `failed_checks`, `created_at`, `expires_at`, `matrix_room`, `matrix_event` |
 | `bindings` | `given`, `family`, `org`, `person_number`, `practitioner_id`, `first_verified_at` |
 | `audit_log` | `id`, `at`, `event`, `request_id`, `actor_kind`, `actor`, `outcome`, `detail` |
 
-`bindings` remembers which ID Austria person number answered as a given person at a given organisation. The audit log never holds document text.
+In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `org` are the person as Dr. Hofer typed them. `requester` is the Matrix ID of the network member who sent the request, and `requester_name` is their Matrix display name at that time, for example "Dr. Lena Hofer". The portal and the messages use it. `link_hash` is the hex SHA-256 of the link token. `matrix_room` and `matrix_event` hold the room and the first notice of the request's thread (T05).
+
+`bindings` remembers which ID Austria person number answered as a given person at a given organisation. Its key is `given`, `family`, and `org`, so each person at an organisation has one person number. The audit log never holds document text.
+
+`src/server/requests/service.ts` is the only code that writes `requests`: `createRequest`, `sendAnyway`, `applyEvent`, and `expireDueRequests`. The tRPC router `request` (`create`, `get`, `list`, `cancel`, all `clinicProcedure`) and the portal pages use it.
 
 ## Audit log
 
-| Event | Who | What |
-|---|---|---|
-| `request_sent` | Dr. Hofer's Matrix ID | Document type, channel, recipient address |
-| `link_opened` | An anonymous browser session, with a hash of the IP address | Request id |
-| `identity_checked` | The ID Austria name and person number | `pass`, `hold`, or `fail`, with the reason for each check |
-| `answer_sent` | The verified person | SHA-256 and size of the upload |
-| `answer_filed` | The request service | FHIR resource ids and the Provenance id |
-| `misdelivery_caught` | Whoever triggered it | `address_mismatch`, `wrong_person`, or `patient_mismatch` |
+| Event | Who | Outcome | What |
+|---|---|---|---|
+| `request_sent` | Dr. Hofer's Matrix ID | `sent` | Document type, channel, recipient address |
+| `link_opened` | An anonymous browser, named by a keyed hash of its IP address from `X-Forwarded-For` | `shown`, or `refused` when the link no longer works | Request id and its state |
+| `identity_checked` | The ID Austria name and person number | `pass`, `hold`, or `fail` | The reason for each check |
+| `answer_sent` | The verified person | `received` | SHA-256 and size of the upload |
+| `answer_filed` | The request service | `filed` | FHIR resource ids and the Provenance id |
+| `misdelivery_caught` | Whoever triggered it | `address_mismatch`, `wrong_person`, or `patient_mismatch` | The two domains, the failed checks, or the upload's SHA-256 and which part of the patient did not match |
 
 Every entry has a UTC timestamp in `at`. The widget and `GET /audit` show the entries.
+
+`recordAudit()` in `src/server/audit/record.ts` writes every entry. Its types fix the outcome and the detail fields for each event and each misdelivery reason, and they hold ids, hashes, and check results only, never document text or the data of a wrong patient. An entry that belongs to a state change goes into the same transaction.
+
+The IP hash is an HMAC-SHA256 with `ORDY_SECRET`, cut to 16 hex characters, because a plain hash of an IPv4 address can be reversed by trying all of them. Next.js fills `X-Forwarded-For` from the connection only when the client sent none. Without a proxy in front, the client can set it, so the hash is a hint, not proof.
 
 ## Configuration
 
@@ -213,6 +230,7 @@ All variables are read and validated in `src/env.ts`. Each one has a demo defaul
 | Variable | Default |
 |---|---|
 | `PUBLIC_URL` | `http://localhost:3010` |
+| `CLINIC_NAME` | `Klinikum Beispielstadt`, named in the portal and in every email and SMS |
 | `ORDY_SECRET` | demo value, set your own in `.env` |
 | `DATABASE_URL` | `postgres://ordy:ordy@localhost:5433/ordy` |
 | `FHIR_BASE_URL` | `http://localhost:8090/fhir` |
@@ -247,8 +265,8 @@ src/
   app/                        Next.js pages and route handlers
     api/trpc/[trpc]/route.ts  tRPC endpoint
     api/healthz/route.ts      health check for scripts and containers
-    widget/                   request form inside Element. Sending is planned, T04 and T05
-    r/[token]/                outside portal: landing page and answer form. Data loading planned, T04, T07, T09
+    widget/                   request form inside Element. Sending is planned, T05
+    r/[token]/                outside portal: landing page and answer form. Login and answer planned, T07, T09
     auth/                     ID Austria login, planned, T07
     sms/page.tsx              SMS screen. Reading the SMS log planned, T06
     audit/page.tsx            audit log for the demo, localhost only
@@ -261,12 +279,14 @@ src/
     api/root.ts               app router and createCaller
     api/routers/              one router per area
     db/                       Drizzle schema and client
+    requests/                 request lifecycle, link tokens, and the request service
+    audit/record.ts           recordAudit() for the six audit events
     fhir/                     FHIR client, mappers planned (T12 to T14)
     ehvd/oid.ts               OID check shared by the login and pnpm citizen
     ehvd/                     eHVD SOAP client, planned (T15)
     matrix/client.ts          Matrix client-server API
     auth/eid-session.ts       outside person's session cookie
-    portal/data.ts            data loaders for the portal and SMS pages, stubs until T04, T06, T07
+    portal/data.ts            data loaders for the portal and SMS pages, the SMS log is a stub until T06
   bot/                        Matrix bot process and commands
 scripts/
   setup.sh                    one-time setup

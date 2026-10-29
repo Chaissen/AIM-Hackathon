@@ -36,7 +36,7 @@ cd AIM-Hackathon
 4. registers the Matrix users `@lena.hofer` (Dr. Hofer) and `@ordy` (the bot)
 5. runs `pnpm install`, then the database migrations (`pnpm db:migrate`)
 6. loads Maria Beispiel from `track/scenario/patient.json` into HAPI (`pnpm fhir:seed`)
-7. creates the room `#outside-documents:klinikum.example`, joins Dr. Hofer and the bot, and pins the widget (`pnpm matrix:bootstrap`)
+7. creates the room `#outside-documents:klinikum.example`, joins Dr. Hofer and the bot, sets her display name to "Dr. Lena Hofer", and pins the widget (`pnpm matrix:bootstrap`)
 
 ## Start
 
@@ -80,13 +80,13 @@ Test citizens for the ID Austria login: `eva.brandl` / `demo-eva`, `stefan.kern`
 | `pnpm build`, then `pnpm start` | Production build, then both processes without reload |
 | `pnpm typecheck` | Generates the Next.js route types, then runs `tsc` |
 | `pnpm lint` | ESLint |
-| `pnpm test` | The `*.test.ts` files under `src/`, with Node's test runner through tsx |
+| `pnpm test` | The `*.test.ts` files under `src/`, with Node's test runner through tsx. The request tests use the Postgres and FHIR server from `.env`, delete their rows afterwards, and are skipped when the servers are not running. Request ids still move on, so run `pnpm reset` before a demo. |
 | `pnpm reset` | Empties Postgres, HAPI, and Mailpit, and reloads the patient. Matrix users and the room stay. Run it before every demo. |
 | `pnpm db:generate --name <name>` | Writes a SQL migration to `drizzle/` from the schema |
 | `pnpm db:migrate` | Applies pending migrations |
 | `pnpm db:studio` | Opens Drizzle Studio to browse the database |
 | `pnpm fhir:seed` | Puts `Patient/maria-beispiel` on HAPI |
-| `pnpm matrix:bootstrap` | Creates the room if needed, joins Dr. Hofer and the bot, and pins the widget |
+| `pnpm matrix:bootstrap` | Creates the room if needed, joins Dr. Hofer and the bot, sets her display name, and pins the widget |
 | `pnpm citizen --given Peter --family Muster --birthdate 1970-01-01` | Adds a test citizen to the simulated ID Austria and prints the username, password, bPK, and eHVD OID. [Identity and misdelivery](IDENTITY.md#add-a-test-citizen) lists the options. |
 | `./scripts/setup.sh` | Full one-time setup, see above |
 
