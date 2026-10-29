@@ -169,11 +169,17 @@ The request service runs three checks after login. They make sure the right pers
 |---|---|---|---|
 | Level | `urn:pvpgvat:oidc.eid_ida_level` is `urn:eidgvat:eid.status.full` | | Basic or missing |
 | Name | All requested name words are in the ID Austria name | The family names share a word but do not match fully | No shared family name word |
-| Person number | No binding yet, or the binding matches `urn:pvpgvat:oidc.bpk` | | A binding exists for this person and organisation with a different bPK |
+| Person number | No binding yet, or the binding matches `urn:pvpgvat:oidc.bpk` | | A binding exists for this person and organisation with a different bPK, or the token has no bPK |
+| eHVD claim | No `urn:eidgvat:attributes.gda`, or one that `gdaOidFromClaim` reads | | The claim is present but malformed |
 
 Any fail blocks the person, writes `identity_checked` with `fail` and `misdelivery_caught` with `wrong_person`, and tells Dr. Hofer. A hold on the name sets the request to `identity_held`, and Dr. Hofer accepts or rejects it in the widget.
 
-If Keycloak or the eHVD cannot be reached, the request service treats it as a hold, never as a pass.
+If Keycloak or the eHVD cannot be reached, the request service treats it as a hold, never as a pass. A fail still wins over an outage.
+
+- **Keycloak unreachable.** There is no verified person, so there is nobody for Dr. Hofer to accept. The request service writes `identity_checked` with `hold` and the reason `keycloak_unreachable`, keeps the state, and asks the person to try again later. The attempt does not count toward the lock.
+- **eHVD unreachable.** The person logged in, so the request goes to `identity_held`, and Dr. Hofer gets "Request 1 is on hold. The eHVD could not be reached to confirm Eva Brandl. Accept or reject the person in the widget."
+
+The checks live in `src/server/identity/checks.ts`. Each returns `pass`, `hold`, or `fail` with a reason code, and `identity_checked` stores the list of checks with their verdicts and reasons in `detail`. `misdelivery_caught` stores only the failed checks and the new `failed_checks` count. `src/server/identity/login.ts` turns the result into the state the lifecycle should move to, the audit entries, the page the person sees, and the notice. The callback calls `runIdentityChecks` from there right after it ends the Keycloak session. The request core passes in the binding lookup, the audit writer, the state change, and `notifyRoom` as ports (`IdentityCheckPorts`).
 
 ### Name match
 
@@ -215,7 +221,9 @@ export function matchRequestedPerson(reqGiven: string, reqFamily: string, idGive
 }
 ```
 
-`isSubset(a, b)` means every word in `a` is also in `b`. The request procedure refuses requests with an empty given name or family name, because an empty set passes every subset test.
+`isSubset(a, b)` means every word in `a` is also in `b`. The request procedure refuses requests with an empty given name or family name, because an empty set passes every subset test. A name that is only a title, such as "Dr.", is empty after the titles are dropped, so the name check holds it instead of passing it.
+
+`nameWords`, `isSubset`, and `shares` live in `src/server/identity/names.ts`, and `matchRequestedPerson` in `src/server/identity/checks.ts`. `checks.test.ts` reads the table above from this file and runs every row, so keep its three columns and the "Pass", "Hold", or "Fail" at the start of the result.
 
 ### Person number binding
 

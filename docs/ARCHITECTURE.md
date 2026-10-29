@@ -79,7 +79,7 @@ The request service stores each request with one state. The FHIR Task for the re
 | Dr. Hofer clicks **Cancel** | any open state | `cancelled` |
 | 7 days pass | any open state | `expired` |
 
-A failed identity check does not change the state, so the real person can still answer a forwarded link. The failure goes to the audit log and to Dr. Hofer.
+A failed identity check does not change the state, so the real person can still answer a forwarded link. The failure goes to the audit log and to Dr. Hofer. If Keycloak cannot be reached, the check holds without a state change and does not count toward the lock. [Identity checks](IDENTITY.md#identity-checks) has the details.
 
 ## Link rules
 
@@ -271,7 +271,9 @@ src/
     db/                       Drizzle schema and client
     fhir/                     FHIR client, mappers planned (T12 to T14)
     documents/                parser and patient check (T10, T11), typed records in types.ts
-    identity/names.ts         name words and subset test from Identity, shared by the patient check and T08
+    identity/names.ts         name words, subset and shared-word tests from Identity, shared by the patient check and T08
+    identity/checks.ts        identity checks at login: level, name, person number, eHVD claim (T08)
+    identity/login.ts         what a check result does: state, audit entries, page, notice, and runIdentityChecks for the callback (T08)
     ehvd/oid.ts               OID check shared by the login and pnpm citizen
     ehvd/                     eHVD SOAP client, planned (T15)
     matrix/client.ts          Matrix client-server API
