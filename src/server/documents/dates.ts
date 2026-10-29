@@ -29,9 +29,11 @@ export function parseDate(text: string): IsoDate | null {
   return isRealDate(parts) ? toIso(parts) : null;
 }
 
+const viennaOffsetFormat = new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Vienna", timeZoneName: "longOffset" });
+
 /** The Europe/Vienna UTC offset in minutes at an instant, for example 120 in summer. */
 function viennaOffsetMinutes(instant: number): number {
-  const name = new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Vienna", timeZoneName: "longOffset" })
+  const name = viennaOffsetFormat
     .formatToParts(new Date(instant))
     .find((p) => p.type === "timeZoneName")?.value;
   const m = name?.match(/GMT([+-])(\d{2}):(\d{2})/);
