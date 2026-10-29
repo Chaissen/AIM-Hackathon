@@ -30,13 +30,15 @@ cd AIM-Hackathon
 
 `setup.sh` is safe to run again. It:
 
-1. copies `.env.example` to `.env` if there is no `.env`
+1. installs dependencies, creates `.env` if needed, and generates a private 32-byte random `ORDY_SECRET`; reruns preserve a valid key and replace missing, short, or old demo keys. `.env` is restricted to its owner (mode 0600)
 2. generates the Synapse config in `docker/synapse/` once, for the closed server `klinikum.example`
 3. starts the containers from `docker-compose.yml` and waits for Synapse, Postgres, HAPI, and Keycloak with the `idaustria-sim` realm (HAPI needs about a minute the first time)
 4. registers the Matrix users `@lena.hofer` (Dr. Hofer) and `@ordy` (the bot)
-5. runs `pnpm install`, then the database migrations (`pnpm db:migrate`)
+5. runs the database migrations (`pnpm db:migrate`)
 6. loads Maria Beispiel from `track/scenario/patient.json` into HAPI (`pnpm fhir:seed`)
-7. creates the room `#outside-documents:klinikum.example`, joins Dr. Hofer and the bot, and pins the widget (`pnpm matrix:bootstrap`)
+7. creates the room `#outside-documents:klinikum.example`, joins Dr. Hofer and the bot, and pins the widget (`pnpm matrix:bootstrap`). Its URL includes the widget ID and its registration sets `waitForIframeLoad: false`, so Element waits for the widget API to be ready before negotiating capabilities
+
+When upgrading an existing installation, run `pnpm matrix:bootstrap` and reload Element to update the pinned widget's authentication handshake.
 
 ## Start
 
@@ -56,7 +58,8 @@ Check that everything works:
 1. http://localhost:3010 shows three green dots for database, FHIR server, and Matrix.
 2. Open Element at http://localhost:8081, log in as `lena.hofer` / `hofer-demo-2026`, and open "Dr. Hofer · Outside documents".
 3. Send `!status`. The bot answers with the same three checks.
-4. Open http://localhost:8080/realms/idaustria-sim/.well-known/openid-configuration. It shows the issuer `http://localhost:8080/realms/idaustria-sim`. This is the simulated ID Austria. Its test logins, such as `eva.brandl` / `demo-eva`, work once the answer portal (T07) exists. Keycloak's account page does not work in this realm, on purpose.
+4. Open the ordy widget and approve Element's identity request. The patient list and **Audit log** tab require this Matrix sign-in. Opening `/widget` or `/audit` directly shows sign-in guidance without patient or audit data.
+5. Open http://localhost:8080/realms/idaustria-sim/.well-known/openid-configuration. It shows the issuer `http://localhost:8080/realms/idaustria-sim`. This is the simulated ID Austria. Its test logins, such as `eva.brandl` / `demo-eva`, work once the answer portal (T07) exists. Keycloak's account page does not work in this realm, on purpose.
 
 | Service | URL | Login |
 |---|---|---|
@@ -147,13 +150,15 @@ pnpm dlx shadcn@4.22.1 add dialog
 
 Pin the CLI version, so it fits the 7-day rule. The UI uses the system font and one accent colour, both set in `src/app/globals.css`. Every page shows the disclaimer from [Compliance and safety](COMPLIANCE_AND_SAFETY.md) through `src/app/layout.tsx`.
 
+Tailwind's class scan is scoped to `src/` with [`source()`](https://tailwindcss.com/docs/detecting-classes-in-source-files#setting-your-base-path) in `globals.css`. Keep UI source files there so Turbopack does not scan generated container data such as Synapse's private signing key.
+
 ## Add a bot command
 
 Add an entry to `src/bot/commands.ts`. The command gets a caller that acts as the sender and the text after the command name. Keep the logic in a tRPC procedure. Requests and the decisions about them belong in the widget, not in bot commands. `!help` lists every command automatically.
 
 ## Configuration
 
-`src/env.ts` reads and validates every variable with zod. Each one has a demo default, so the stack runs without `.env`. To add a variable, add it to `src/env.ts` with a default and to `.env.example`. [Architecture](ARCHITECTURE.md#configuration) lists all variables.
+`src/env.ts` reads configuration with zod. Service addresses and demo accounts have defaults. `ORDY_SECRET` defaults to empty, which disables outside-person session authentication; setup generates a unique private key. Existing installations can run `pnpm exec tsx scripts/init-env.ts` and restart the app to upgrade their key without restarting containers. Changing the key invalidates old outside-person cookies. To add a variable, add it to `src/env.ts` and `.env.example`. [Architecture](ARCHITECTURE.md#configuration) lists all variables.
 
 To open answer links on a phone in the same network, set `PUBLIC_URL` to your computer's LAN address, for example `http://192.168.1.20:3010`, restart `pnpm dev`, and run `pnpm matrix:bootstrap` so the widget uses the new address.
 
