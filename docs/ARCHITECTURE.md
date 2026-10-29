@@ -43,8 +43,8 @@ One table in the request service defines each document type. To add a type, add 
 
 | Key | Bot keyword | Default channel | eHVD check | Mapper | Name in Matrix messages |
 |---|---|---|---|---|---|
-| `lab-result` | `lab-result` | email | Person is active, has the lab medicine specialty, and is a member of the named organisation | Lab mapper: Observations and DiagnosticReport | lab result |
-| `rehab-report` | `rehab-report` | SMS | The named organisation exists and is active | Rehab mapper: DocumentReference | rehab discharge report |
+| `lab-result` | `lab-result` | email | Release check: the physician under `Validated by` is active, has the lab medicine specialty, and is a member of the named organisation | Lab mapper: Observations and DiagnosticReport | lab result |
+| `rehab-report` | `rehab-report` | SMS | Release check: the physician under `Written by` is active and a member of the named organisation, which is an active hospital | Rehab mapper: DocumentReference | rehab discharge report |
 
 ## Request lifecycle
 
