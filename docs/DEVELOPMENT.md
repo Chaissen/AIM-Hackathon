@@ -139,7 +139,7 @@ Do not import `server-only` in modules that the bot or the scripts use. It throw
 
 ## Add a bot command
 
-Add an entry to `src/bot/commands.ts`. The command gets a caller that acts as the sender and the text after the command name. Keep the logic in a tRPC procedure, so the widget and the bot share it. `!help` lists every command automatically.
+Add an entry to `src/bot/commands.ts`. The command gets a caller that acts as the sender and the text after the command name. Keep the logic in a tRPC procedure. Requests and the decisions about them belong in the widget, not in bot commands. `!help` lists every command automatically.
 
 ## Configuration
 

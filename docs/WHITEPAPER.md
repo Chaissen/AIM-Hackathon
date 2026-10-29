@@ -17,7 +17,7 @@ Neither person is in the directory. Dr. Hofer knows only their name, their role,
 
 We build a request service that runs at the clinic, next to its Matrix server and its FHIR server.
 
-1. Dr. Hofer types a request into her Matrix room. The bot inside the request service picks it up.
+1. Dr. Hofer fills in a request form in a widget inside her Matrix room.
 2. The request service sends the outside person a link by email or SMS. The message contains no patient name, no birth date, and no document type.
 3. The outside person opens the link and logs in with ID Austria. In the demo, Keycloak plays ID Austria.
 4. The request service checks that the login belongs to the person Dr. Hofer asked for. Only then does the page show the patient and the requested document.
@@ -30,7 +30,7 @@ The request service writes an audit entry at each step.
 ```
 Dr. Hofer (Element)          Request service              Outside person            ID Austria
        |                            |                            |                        |
-       |-- !request ...  ---------->|                            |                        |
+       |-- request form (widget) -->|                            |                        |
        |                            |-- email or SMS, link ----->|                        |
        |                            |<-- opens link -------------|                        |
        |                            |                            |-- logs in ------------>|
