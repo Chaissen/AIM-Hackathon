@@ -5,7 +5,7 @@ This page sets the team rules for data, messages, identity, and AI, and it holds
 ## Synthetic data only
 
 1. No real patient data enters the project. That covers the repository, the databases, Keycloak, Mailpit, logs, screenshots, slides, and the video.
-2. Every person, organisation, phone number, email address, and document is made up. The scenario's `.example` addresses cannot receive mail, and the phone number is made up.
+2. Every person, organisation, phone number, email address, eHVD entry, and document is made up. The eHVD mock uses the real OID structure under `1.2.40.0.34.3.1.99.1` and `1.2.40.0.34.3.2.99.1`, but no entry is copied from the real directory. The scenario's `.example` addresses cannot receive mail, and the phone number is made up.
 3. The request service sends email only to Mailpit and SMS only to its own SMS screen. It never sends to a real address or number.
 4. If anyone suspects real data somewhere, they post `PRIVACY:` in the team chat. We delete it from the working tree, purge it from git history if it was committed, and note the incident in `docs/privacy_log.md`.
 

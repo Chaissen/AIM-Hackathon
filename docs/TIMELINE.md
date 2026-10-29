@@ -49,7 +49,7 @@ The task ids go into branch names and commit messages.
 | T12 | Lab mapper: Observations and DiagnosticReport | Dev 2 | T10 | 3 |
 | T13 | Provenance, Task, Practitioner, Organization, transaction Bundle | Dev 2 | T12 | 3 |
 | T14 | Rehab mapper: DocumentReference | Dev 2 | T10, T13 | 4 |
-| T15 | Mock eHVD, role check, address check before sending | Dev 3, data by Doc 1 | T05 | 4 |
+| T15 | eHVD client in ordy: role check, address check before sending ([eHVD](EHVD.md#how-ordy-uses-the-ehvd-t15)) | Dev 3, data by Doc 1 | T05, T23 | 4 |
 | T16 | Test documents: new outside people, wrong patients, odd names | Doc 1 | none | 4 |
 | T17 | Misdelivery runs M1, M2, M3 and the audit check | Doc 1, Dev 2 | T08, T11, T15 | 4 |
 | T18 | `scripts/validate.ts` (`pnpm validate`) and 0 validator errors | Dev 2 | T13, T14 | 5 |
@@ -57,6 +57,7 @@ The task ids go into branch names and commit messages.
 | T20 | README: run instructions, architecture, design answers, metric results | Doc 2, Dev 1 | T17, T18, T19 | 5 |
 | T21 | Demo script and video | Doc 2 | Milestone 5 | 6 |
 | T22 | AI fallback parser (optional) | Dev 3 | T10 | none |
+| T23 | eHVD mock service: own container, real WSDL, synthetic directory ([eHVD](EHVD.md#our-mock-t23)) | Dev 3 | T01 | 3 |
 
 The critical path runs T01, T02, T07, T08, T09, T13, T18, T21. When two tasks compete for one person, the task on the critical path wins.
 
@@ -78,7 +79,7 @@ Cut in this order when a milestone slips more than 30 minutes:
 2. MedicationStatements from the rehab report. They are already only a stretch goal.
 3. The Keycloak login theme. Keep the "simulation" text.
 4. The Task resource. Keep the request state in Postgres.
-5. The eHVD role check and the address check. Keep the name match and the person number.
+5. The eHVD role check, the address check, and the eHVD mock. Keep the name match and the person number.
 
 Never cut the identity check before the patient is shown, the patient check, the six audit events, the message content rule, 0 validator errors, or the video.
 

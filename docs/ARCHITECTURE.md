@@ -12,14 +12,14 @@ This page describes what runs, how the parts talk, and what the request service 
 | Matrix bot | Commands and notices in Dr. Hofer's room | Built | TypeScript process in `src/bot/`, small Matrix client on `fetch` in `src/server/matrix/client.ts` | none |
 | Postgres | Requests, bindings, audit log | Reused | [`postgres:17-alpine`](https://hub.docker.com/_/postgres) | 5433, mapped to 5432 in the container |
 | Simulated ID Austria | OpenID Connect login with fake citizens | Configured (T02, not in `docker-compose.yml` yet) | [Keycloak](https://www.keycloak.org/server/containers) | 8080 |
-| Mock eHVD | Directory of healthcare people and organisations | Built | `ehvd/directory.json` | none |
+| eHVD mock | Directory of healthcare people and organisations, same SOAP interface as the real eHVD | Built (T23, planned) | TypeScript service in its own container, see [eHVD](EHVD.md) | 8095 |
 | Mailpit | Catches every outgoing email | Reused | [`axllent/mailpit`](https://hub.docker.com/r/axllent/mailpit) | 1025 SMTP, 8025 web |
 | HAPI FHIR | FHIR R4 server | Reused | [`hapiproject/hapi`](https://hub.docker.com/r/hapiproject/hapi) | 8090, mapped to 8080 in the container |
 | HL7 validator | Validates every filed resource | Reused | [`validator_cli.jar`](https://github.com/hapifhir/org.hl7.fhir.core/releases) | none |
 
 The Matrix bot runs as a second Node.js process next to Next.js, because Next.js does not keep a long-running sync loop. `pnpm dev` starts both. The bot calls the same tRPC procedures as the widget and the portal through `createCaller`, inside its own process, so there is no internal HTTP API and every rule exists once. Both processes share the Postgres database.
 
-Every reused part can be replaced. Synapse can be any Matrix homeserver, Keycloak can be real ID Austria or another OpenID Connect provider, Mailpit can be any SMTP server, and HAPI can be any FHIR R4 server.
+Every reused part can be replaced. Synapse can be any Matrix homeserver, Keycloak can be real ID Austria or another OpenID Connect provider, the eHVD mock can be the real eHVD web service, Mailpit can be any SMTP server, and HAPI can be any FHIR R4 server.
 
 ```
  Dr. Hofer                                               Outside person
@@ -33,7 +33,7 @@ Every reused part can be replaced. Synapse can be any Matrix homeserver, Keycloa
                                |   |   |   |   <-- signed token-+
                                |   |   |   +--> HAPI FHIR
                                |   |   +------> Postgres: requests, bindings, audit log
-                               |   +----------> mock eHVD (JSON)
+                               |   +----------> eHVD mock (SOAP 1.2)
                                +--------------> Mailpit (email), /sms page (SMS)
 ```
 
@@ -210,6 +210,7 @@ All variables are read and validated in `src/env.ts`. Each one has a demo defaul
 | `MATRIX_ROOM_ALIAS` | `outside-documents` |
 | `OIDC_METADATA_URL` | `http://localhost:8080/realms/idaustria-sim/.well-known/openid-configuration` |
 | `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | `request-service`, in `.env` only |
+| `EHVD_URL` | `http://localhost:8095/` (planned, T15) |
 | `SMTP_HOST`, `SMTP_PORT`, `MAILPIT_API_URL` | `localhost`, `1025`, `http://localhost:8025` |
 | `ANTHROPIC_API_KEY` | unset, only for the optional AI fallback |
 
@@ -220,12 +221,13 @@ To switch to real ID Austria, change `OIDC_METADATA_URL`, `OIDC_CLIENT_ID`, and 
 Files marked *planned* do not exist yet. The task id says who builds them.
 
 ```
-docker-compose.yml            Synapse, Element, HAPI, Mailpit, Postgres (Keycloak: T02)
+docker-compose.yml            Synapse, Element, HAPI, Mailpit, Postgres (Keycloak: T02, eHVD mock: T23)
 .env.example                  all variables with demo values
 docker/element/config.json    Element config
 docker/synapse/               generated homeserver.yaml (git ignores it)
 keycloak/realm-idaustria-sim.json   planned, T02
-ehvd/directory.json           planned, T15
+docs/ehvd/eHVD.wsdl           the real eHVD WSDL, version 2 from BRZ
+services/ehvd-mock/           eHVD mock service and its synthetic directory, planned, T23
 drizzle/                      generated SQL migrations
 src/
   env.ts                      zod-validated configuration
@@ -241,6 +243,7 @@ src/
     api/routers/              one router per area
     db/                       Drizzle schema and client
     fhir/                     FHIR client, mappers planned (T12 to T14)
+    ehvd/                     eHVD SOAP client, planned (T15)
     matrix/client.ts          Matrix client-server API
     auth/eid-session.ts       outside person's session cookie
   bot/                        Matrix bot process and commands

@@ -26,6 +26,7 @@ Signicat's example of an ID Austria login in the reference environment returns t
 | `idaustria_authentication_level` | `http://eidas.europa.eu/LoA/high` | eIDAS level of assurance |
 | `idaustria_type_of_identity` | `http://eid.gv.at/eID/status/testidentity` | Marks a test identity |
 | `idp_issuer` | `https://idp.ref.id-austria.gv.at` | The reference environment |
+| `urn:eidgvat:attributes.gda` | Base64-encoded JSON | The person's eHVD entry, only for healthcare professionals acting for themselves. [eHVD](EHVD.md#id-austria-sends-the-ehvd-entry-at-login) has the details. |
 
 Signicat is a broker, so other brokers or a direct connection may name the claims differently. The request service maps claim names in one function.
 
@@ -42,6 +43,7 @@ Keycloak speaks the same protocol, OpenID Connect. Switching to real ID Austria 
 | Person number | Keycloak's `sub` claim, which is stable per user and realm |
 | Full or basis function | A user attribute `ida_level`, sent as `idaustria_level` |
 | Level of assurance | A hardcoded claim `idaustria_authentication_level` with `http://eidas.europa.eu/LoA/high` |
+| eHVD entry of a healthcare professional | A user attribute `gda`, sent as the claim `urn:eidgvat:attributes.gda` |
 | Look | A login theme with the label "ID Austria (simulation)" |
 | Phone-app confirmation | Not simulated. Keycloak would need a custom Java authenticator. |
 | Qualified electronic signature | Not simulated. The task does not need it. |
@@ -54,6 +56,8 @@ The realm `idaustria-sim` lives in `keycloak/realm-idaustria-sim.json`. Keycloak
 - The client `request-service` is confidential and uses the standard flow. Its redirect URI is `http://localhost:3010/auth/callback`.
 - The user profile declares `birthdate`, required at registration, and `ida_level`, which only admins can edit and which defaults to `urn:eidgvat:eid.status.full`.
 - The `profile` client scope already maps `birthdate`. Two more mappers add `idaustria_level` and `idaustria_authentication_level`.
+- The user profile also declares `gda`, which only admins can edit and which has no default. Keycloak drops attributes that the user profile does not declare.
+- A mapper of type User Attribute sends `gda` as the claim `urn:eidgvat:attributes\.gda` in the ID token and in userinfo. The backslashes keep the dots in the claim name; without them, Keycloak builds nested objects.
 - Self-registration is on. A jury member creates a new outside person in about 20 seconds. The registration page says that real ID Austria identities come from the state.
 
 ### Test citizens
@@ -66,7 +70,13 @@ The realm `idaustria-sim` lives in `keycloak/realm-idaustria-sim.json`. Keycloak
 | `anna.huber` | `demo-anna` | Anna Huber | 1990-11-30 | The owner of the mistyped address in test M1 |
 | `eva.brandl2` | `demo-eva2` | Eva Brandl | 1968-09-09 | A second Eva Brandl who is not in the eHVD |
 
-All names, dates, and passwords are synthetic.
+Only `eva.brandl` has the `gda` attribute, because only she is in the eHVD. Its value is the Base64 encoding of this JSON, which matches her entry `1.2.40.0.34.3.2.99.1.2` in the [eHVD mock](EHVD.md#directory-content):
+
+```json
+{"gda":{"id":{"oidIssuingAuthority":"1.2.40.0.34","id":"1.2.40.0.34.3.2.99.1.2"},"status":{"ehvdstatus":"Aktiv","elgastatus":"Aktiv"},"firstname":"Eva","surname":"Brandl","title":"Dr.","description":["Registrierungsstelle:Österreichische Ärztekammer"],"roles":{"role":["1.2.40.0.34.5.2:159"],"elgaRole":["1.2.40.0.34.5.3:700"],"specialisation":["1.2.40.0.34.3.1.10.20:19"]},"timestamps":{"add":"2019-03-01","modify":"2026-01-15"}}}
+```
+
+All names, dates, OIDs, and passwords are synthetic.
 
 ## How the login connects to the request service
 
@@ -88,6 +98,8 @@ All names, dates, and passwords are synthetic.
 
 The request service never sees the password. Keycloak signs the ID token with its private key, and the request service checks it with Keycloak's public key, so the person cannot change their own name. The code swap runs server to server with a secret the browser never sees. The library `openid-client` does the redirects, the code swap, and the signature check inside two Next.js route handlers.
 
+The request service keeps the raw ID token, because the Provenance carries it as proof of the identity check ([FHIR model](FHIR.md#provenance)). It also keeps the decoded `urn:eidgvat:attributes.gda` claim, if there is one, for the eHVD check.
+
 ## Identity checks
 
 The request service runs four checks after login. It shows the patient and the document type only if the result is pass.
@@ -97,7 +109,7 @@ The request service runs four checks after login. It shows the patient and the d
 | Level | `idaustria_level` is full | | Basis or missing |
 | Name | All requested name words are in the ID Austria name | The family names share a word but do not match fully | No shared family name word |
 | Person number | No binding yet, or the binding matches `sub` | | A binding exists for this person and organisation with a different `sub` |
-| eHVD role | The role check of the document type passes | Not found or not active. This does not block the login. The answer waits for Dr. Hofer. | |
+| eHVD role | The role check of the document type passes. With the GDA claim, the check uses the eHVD entry named in the claim. Without it, the only active eHVD entry with the requested name. | Not found, not active, or several entries with that name. This does not block the login. The answer waits for Dr. Hofer. | |
 
 Any fail blocks the person, writes `identity_checked` with `fail` and `misdelivery_caught` with `wrong_person`, and tells Dr. Hofer. A hold on the name sets the request to `identity_held`, and Dr. Hofer decides with `!accept` or `!reject`.
 
@@ -162,40 +174,17 @@ We do not need the person's birth date, their ID Austria number, or an account i
 
 ## The eHVD
 
-The eHealth directory (eHVD, eHealth Verzeichnisdienst) lists every person and organisation in Austria that works as a healthcare provider, whether or not they take part in ELGA. Registration bodies such as the medical chamber and the pharmacists' chamber keep it current. The ELGA healthcare provider index (GDA-Index) is technically similar and covers ELGA participants.
+The eHealth directory (eHVD) lists every person and organisation in Austria that works as a healthcare provider, with name, roles, specialties, practice addresses, membership in organisations, and whether they may currently practise (`Aktiv` or `Inaktiv`). [eHVD](EHVD.md) describes the real SOAP interface and our mock in detail.
 
-Fields the public web service returns per entry:
+What matters for identity:
 
-| Field | Example |
-|---|---|
-| `id` | OID of the entry |
-| `firstname`, `surname` | A person's name, or the organisation's name in `surname` |
-| `title` | Dr. |
-| `roles`, `specialisation` | Role and specialty codes, such as the medical chamber's specialty list |
-| `address` | One or more practice addresses |
-| `tel`, `web`, `mail` | Optional contact data |
-| `status` | `Aktiv` if the person may currently practise, `Inaktiv` otherwise |
-| `relations` | `memberof` and `ownerof` links to other entries, such as a doctor and her lab |
+- For healthcare professionals, ID Austria can send the eHVD entry at login (`urn:eidgvat:attributes.gda`). The eHVD OID in the claim then links the login to the directory entry through the state. Keycloak sends it for `eva.brandl`.
+- Without the claim, the name is the only link, because the eHVD has no birth date and no person number.
+- People who are not healthcare professionals, such as a discharge manager, are not listed as persons. Their organisation is.
+- The claim has no organisation membership. The request service asks the eHVD for the entry's `memberof`.
+- The real web service needs a registration with the health ministry and an IP allowlist entry at BRZ. That does not fit into a hackathon, so we run a mock with the same interface in its own container.
 
-Limits that matter for us:
-
-- The eHVD has no birth date and no ID Austria person number. The name is the only link to a login.
-- People who are not healthcare professionals, such as a discharge manager, are probably not listed as persons. Their organisation probably is.
-- The web service needs a registration with the health ministry and a firewall opening by the operator, requested with a signed form. That does not fit into a hackathon.
-- The quality assurance environment holds three test entries: an outpatient clinic, a group practice, and a test doctor.
-
-### Mock eHVD
-
-`ehvd/directory.json` uses the same field names. The OIDs sit under `2.999`, the arc reserved for examples, so they cannot collide with real entries.
-
-| id | Name | Kind | Details |
-|---|---|---|---|
-| `2.999.1.1` | Labor Kanalstraße | Organisation | `mail` office@labor-kanal.example, status `Aktiv` |
-| `2.999.2.1` | Dr. Eva Brandl | Person | Specialty lab medicine, `memberof` 2.999.1.1, status `Aktiv` |
-| `2.999.1.2` | Reha Waldblick | Organisation | `mail` office@reha-waldblick.example, status `Aktiv` |
-| `2.999.2.2` | Dr. Johanna Leitner | Person | Medical director, `memberof` 2.999.1.2, status `Aktiv` |
-| `2.999.1.3` | Klinikum Beispielstadt | Organisation | `mail` office@klinikum.example, status `Aktiv` |
-| `2.999.2.3` | Dr. Lena Hofer | Person | Specialty internal medicine, `memberof` 2.999.1.3, status `Aktiv` |
+The mock holds Labor Kanalstraße, Reha Waldblick, Klinikum Beispielstadt, Dr. Eva Brandl, Dr. Johanna Leitner, Dr. Lena Hofer, two other people named Brandl, the official test entries, and generated filler entries. [eHVD](EHVD.md#directory-content) has the full list with OIDs.
 
 Stefan Kern and Thomas Wagner are not listed. The second Eva Brandl is not listed either.
 
@@ -260,6 +249,8 @@ The request service runs this check on the document and on the name and birth da
 - [chil.at: a public ID Austria SAML2 test service provider](https://chil.at/projects/2025-07-31_id-austria-service-provider-test/saml/)
 - [BMF: supplementary register for natural persons](https://www.bmf.gv.at/ministerium/aufgaben-und-organisation/Stammzahlenregisterbehoerde/Ergaenzungsregister.html)
 - [eHVD web service handbook v2.4](https://www.gesundheit.gv.at/dam/gesundheitgvat/professional/it-services/ehvd/eHVD-ServicehandbuchV2.4.pdf), sections 2, 3.2, 3.3.2, and 5.2
+- [ID Austria: attribute "Gesundheitsdiensteanbieter"](https://www.id-austria.gv.at/de/developer/registrieren/personenmerkmale/Gesundheitsdiensteanbieter)
+- [eHVD](EHVD.md) lists all sources on the eHVD interface
 - [GDA-Index glossary entry](https://www.gesundheit.gv.at/lexikon/G/gda-index.html)
 - [ELGA guide for laboratory medicine v2.0](https://www.elga.gv.at/fileadmin/user_upload/Dokumente_PDF_MP4/Technisches/Leitfaden_ELGA_f%C3%BCr_Labormedizin_V2.0.pdf)
 - [Keycloak server administration guide](https://www.keycloak.org/docs/latest/server_admin/index.html)

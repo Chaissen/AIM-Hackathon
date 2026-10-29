@@ -15,9 +15,10 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - The Matrix bot is a separate process (`src/bot/main.ts`, run with tsx). It calls the tRPC router in-process via `createCaller(createContext(actor))`. Do not import `server-only` in modules the bot or scripts use.
 - Matrix access goes through `src/server/matrix/client.ts` (plain fetch, no E2EE). `matrix-bot-sdk` was dropped because it needs a native crypto binary.
 - Env: add new variables to `src/env.ts` (zod, with a demo default) and `.env.example`.
-- Ports: Next.js 3010, Postgres 5433, Synapse 8008, Element 8081, HAPI 8090, Mailpit 8025/1025, Keycloak 8080 (planned, T02).
+- Ports: Next.js 3010, Postgres 5433, Synapse 8008, Element 8081, HAPI 8090, Mailpit 8025/1025, Keycloak 8080 (planned, T02), eHVD mock 8095 (planned, T23).
 - Setup and start: `./scripts/setup.sh` once, then `pnpm dev`. `pnpm reset` empties Postgres, HAPI, and Mailpit. `!status` in the Matrix room checks DB, FHIR, and Matrix.
 - Verify before handing back: `pnpm typecheck && pnpm lint && pnpm build`.
 - New dependencies must be at least 7 days old (`minimumReleaseAge` in `pnpm-workspace.yaml`); do not lower it.
-- Docs live in `docs/` (start with `DEVELOPMENT.md` and `ARCHITECTURE.md`). Keep them in sync with the code when you change the stack, ports, commands, or env variables.
+- `docs/` is the single source of truth (start with `DEVELOPMENT.md` and `ARCHITECTURE.md`). Read the relevant doc before you build, and update it in the same change when you change the stack, ports, commands, env variables, data, or a design decision.
+- eHVD: follow `docs/EHVD.md`. The real WSDL is `docs/ehvd/eHVD.wsdl`; follow it, not the handbook's method names. The synthetic OIDs listed there are fixed and shared by the eHVD mock, Keycloak, and the FHIR identifiers.
 - Track data lives in `track/` (copy of the official repo, including `track/scenario/documents/`). Synthetic data only.

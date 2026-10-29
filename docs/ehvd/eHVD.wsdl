@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  eHVD web service WSDL, "Service: eHVD, Version: 2, Owner: BRZ". Unchanged except for this comment.
+  Source: wsdl/eHVD.wsdl in the open-source MOA-ID module moa-id-module-ehvd_integration 4.1.5.3 by EGIZ,
+  https://apps.egiz.gv.at/maven/MOA/id/server/modules/moa-id-module-ehvd_integration/4.1.5.3/
+  The live WSDL at https://ehvdws.gesundheit.gv.at/ehvd.wsdl is only reachable from IP addresses that BRZ has allowed.
+  See docs/EHVD.md.
+-->
+<wsdl:definitions xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/" xmlns:soap12="http://schemas.xmlsoap.org/wsdl/soap12/" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:tns="eHVD" xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/" xmlns:mime="http://www.w3.org/2003/01/wsdl/mime" targetNamespace="eHVD">
+
+	<wsdl:documentation>
+		Service: eHVD
+		Version: 2
+		Owner: BRZ
+	</wsdl:documentation>
+
+	<wsdl:types>
+		<xs:schema xmlns:ehvd="eHVD" xmlns:jaxb="http://java.sun.com/xml/ns/jaxb" xmlns:xjc="http://java.sun.com/xml/ns/jaxb/xjc" xmlns:xs="http://www.w3.org/2001/XMLSchema" jaxb:extensionBindingPrefixes="xjc" jaxb:version="2.0" elementFormDefault="qualified" targetNamespace="eHVD" version="1.0">
+			<xs:annotation>
+				<xs:appinfo>
+					<jaxb:globalBindings>
+						<jaxb:serializable uid="1"/>
+					</jaxb:globalBindings>
+				</xs:appinfo>
+			</xs:annotation>
+
+			<xs:complexType name="InstanceIdentifier">
+				<xs:sequence>
+					<xs:element maxOccurs="1" minOccurs="0" name="oidIssuingAuthority" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="1" name="id" type="xs:string"/>
+				</xs:sequence>
+			</xs:complexType>
+
+			<xs:complexType name="InstanceIdentifierSearch">
+				<xs:sequence>
+					<xs:element maxOccurs="1" minOccurs="0" name="firstname" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="1" name="surname" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="0" name="rolecode" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="0" name="postcode" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="0" name="streetNumber" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="0" name="streetName" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="0" name="city" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="0" name="state" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="1" name="maxResults" type="xs:integer"/>
+					<xs:element maxOccurs="1" minOccurs="0" name="ehvdstatus" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="0" name="elgastatus" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="0" name="description" type="xs:string"/>
+				</xs:sequence>
+			</xs:complexType>
+
+			<xs:complexType name="GDAStatus">
+				<xs:sequence>
+					<xs:element maxOccurs="1" minOccurs="1" name="ehvdstatus" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="1" name="elgastatus" type="xs:string"/>
+				</xs:sequence>
+			</xs:complexType>
+
+			<xs:complexType name="GDARoles">
+				<xs:sequence>
+					<xs:element maxOccurs="unbounded" minOccurs="0" name="role" type="xs:string"/>
+					<xs:element maxOccurs="unbounded" minOccurs="0" name="elgaRole" type="xs:string"/>
+					<xs:element maxOccurs="unbounded" minOccurs="0" name="specialisation" type="xs:string"/>
+				</xs:sequence>
+			</xs:complexType>
+
+			<xs:complexType name="GdaAddress">
+				<xs:sequence>
+					<xs:element maxOccurs="1" minOccurs="0" name="streetNumber" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="0" name="streetName" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="0" name="city" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="0" name="state" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="0" name="zip" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="0" name="country" type="xs:string"/>
+				</xs:sequence>
+			</xs:complexType>
+
+			<xs:complexType name="GDARelationship">
+				<xs:sequence>
+					<xs:element maxOccurs="unbounded" minOccurs="0" name="memberof" type="xs:string"/>
+					<xs:element maxOccurs="unbounded" minOccurs="0" name="ownerof" type="xs:string"/>
+				</xs:sequence>
+			</xs:complexType>
+
+			<xs:complexType name="GDADBTimestamps">
+				<xs:sequence>
+					<xs:element maxOccurs="1" minOccurs="0" name="add" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="0" name="modify" type="xs:string"/>
+				</xs:sequence>
+			</xs:complexType>
+
+			<xs:complexType name="GdaDescriptor">
+				<xs:sequence>
+					<xs:element maxOccurs="1" minOccurs="1" name="id" type="ehvd:InstanceIdentifier"/>
+					<xs:element maxOccurs="unbounded" minOccurs="0" name="otherID" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="1" name="status" type="ehvd:GDAStatus"/>
+					<xs:element maxOccurs="1" minOccurs="0" name="firstname" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="1" name="surname" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="0" name="gender" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="0" name="title" type="xs:string"/>
+					<xs:element maxOccurs="unbounded" minOccurs="0" name="knownname" type="xs:string"/>
+					<xs:element maxOccurs="unbounded" minOccurs="0" name="address" type="ehvd:GdaAddress"/>
+					<xs:element maxOccurs="unbounded" minOccurs="1" name="description" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="1" name="roles" type="ehvd:GDARoles"/>
+					<xs:element maxOccurs="1" minOccurs="0" name="relations" type="ehvd:GDARelationship"/>
+					<xs:element maxOccurs="1" minOccurs="0" name="tel" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="0" name="fax" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="0" name="web" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="0" name="mail" type="xs:string"/>
+					<xs:element maxOccurs="1" minOccurs="1" name="timestamps" type="ehvd:GDADBTimestamps"/>
+				</xs:sequence>
+			</xs:complexType>
+
+			<xs:element name="GetGdaSearch">
+				<xs:complexType>
+					<xs:sequence>
+						<xs:element maxOccurs="1" minOccurs="1" name="hcIdentifierSearch" type="ehvd:InstanceIdentifierSearch"/>
+					</xs:sequence>
+				</xs:complexType>
+			</xs:element>
+
+			<xs:element name="GetGdaDescriptors">
+				<xs:complexType>
+					<xs:sequence>
+						<xs:element maxOccurs="1" minOccurs="1" name="hcIdentifier" type="ehvd:InstanceIdentifier"/>
+					</xs:sequence>
+				</xs:complexType>
+			</xs:element>
+
+			<xs:element name="GdaIndexResponse">
+				<xs:complexType>
+					<xs:sequence>
+						<xs:element maxOccurs="1" minOccurs="0" name="gda" type="ehvd:GdaDescriptor"/>
+					</xs:sequence>
+				</xs:complexType>
+			</xs:element>
+
+			<xs:element name="GdaIndexResponseList">
+				<xs:complexType>
+					<xs:sequence>
+						<xs:element maxOccurs="unbounded" minOccurs="0" name="gda" type="ehvd:GdaDescriptor"/>
+					</xs:sequence>
+				</xs:complexType>
+			</xs:element>
+
+		</xs:schema>
+	</wsdl:types>
+
+	<wsdl:message name="GetGdaDescriptors">
+		<wsdl:part element="tns:GetGdaDescriptors" name="GetGdaDescriptors">
+		</wsdl:part>
+	</wsdl:message>
+
+	<wsdl:message name="GetGdaSearch">
+		<wsdl:part element="tns:GetGdaSearch" name="GetGdaSearch">
+		</wsdl:part>
+	</wsdl:message>
+
+
+	<wsdl:message name="GdaIndexResponse">
+		<wsdl:part element="tns:GdaIndexResponse" name="GdaIndexResponse">
+		</wsdl:part>
+	</wsdl:message>
+
+	<wsdl:message name="GdaIndexResponseList">
+		<wsdl:part element="tns:GdaIndexResponseList" name="GdaIndexResponseList">
+		</wsdl:part>
+	</wsdl:message>
+
+	<wsdl:portType name="eHVD">
+
+		<wsdl:documentation>eHVD Service Interfaces
+		</wsdl:documentation>
+
+		<wsdl:operation name="GetGDA">
+			<wsdl:input message="tns:GetGdaDescriptors" name="GetGdaDescriptors">
+			</wsdl:input>
+			<wsdl:output message="tns:GdaIndexResponse" name="GdaIndexResponse">
+			</wsdl:output>
+		</wsdl:operation>
+
+		<wsdl:operation name="GdaSearch">
+			<wsdl:input message="tns:GetGdaSearch" name="GetGdaSearch">
+			</wsdl:input>
+			<wsdl:output message="tns:GdaIndexResponseList" name="GdaIndexResponseList">
+			</wsdl:output>
+		</wsdl:operation>
+
+	</wsdl:portType>
+
+	<wsdl:binding name="eHVDSOAPBinding12" type="tns:eHVD">
+		<wsdl:documentation>SOAP 1.2 Binding</wsdl:documentation>
+
+		<soap12:binding transport="http://schemas.xmlsoap.org/soap/http" style="document"/>
+
+		<wsdl:operation name="GetGDA">
+			<soap12:operation soapAction="eHVD/GetGDA"/>
+			<wsdl:input name="GetGdaDescriptors">
+				<mime:content type="application/soap+xml"/>
+				<soap12:body use="literal"/>
+			</wsdl:input>
+			<wsdl:output name="GdaIndexResponse">
+				<soap12:body use="literal"/>
+			</wsdl:output>
+		</wsdl:operation>
+
+		<wsdl:operation name="GdaSearch">
+			<soap12:operation soapAction="eHVD/GdaSearch"/>
+			<wsdl:input name="GetGdaSearch">
+				<mime:content type="application/soap+xml"/>
+				<soap12:body use="literal"/>
+			</wsdl:input>
+			<wsdl:output name="GdaIndexResponseList">
+				<soap12:body use="literal"/>
+			</wsdl:output>
+		</wsdl:operation>
+
+	</wsdl:binding>
+
+	<wsdl:service name="eHVDService">
+		<wsdl:documentation>eHVD Service</wsdl:documentation>
+
+		<wsdl:port name="eHVDPort12" binding="tns:eHVDSOAPBinding12">
+			<soap12:address location="https://ehvdws.gesundheit.gv.at"/>
+		</wsdl:port>
+
+	</wsdl:service>
+
+</wsdl:definitions>

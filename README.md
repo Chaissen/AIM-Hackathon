@@ -11,6 +11,7 @@ Status: design written; TypeScript stack set up (Next.js, tRPC, Postgres, Matrix
 | [Whitepaper](docs/WHITEPAPER.md) | The problem, the solution, our answers to the five design questions, and how we measure the metrics |
 | [Development](docs/DEVELOPMENT.md) | Set up, start, reset, and extend the stack; troubleshooting |
 | [Architecture](docs/ARCHITECTURE.md) | Components, ports, the request lifecycle, the Matrix bot, messages, parsing, and the audit log |
+| [eHVD](docs/EHVD.md) | The real eHVD SOAP interface, what is public about it, our mock, and how ordy uses it |
 | [Identity and misdelivery](docs/IDENTITY.md) | Real ID Austria and eHVD, the Keycloak simulation, the identity checks, and the three misdelivery tests |
 | [FHIR model](docs/FHIR.md) | The resources we file, how they reference each other, and how we validate them |
 | [Timeline](docs/TIMELINE.md) | Milestones, tasks, owners, and the cut list |
