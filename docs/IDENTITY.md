@@ -329,13 +329,14 @@ Dr. Brandl logs in and uploads `lab-result-max-beispiel.md`, a result for Max Be
 ```ts
 export function samePatient(docName: string, docBirthDate: string, patient: { family: string; given: string[]; birthDate: string }) {
   const family = nameWords(patient.family);
+  if (!family.size || !patient.birthDate) return false;
   const allNames = new Set([...family, ...nameWords(patient.given.join(" "))]);
   const docWords = nameWords(docName);
   return docBirthDate === patient.birthDate && isSubset(family, docWords) && isSubset(docWords, allNames);
 }
 ```
 
-The request service runs this check on the document and on the name and birth date typed into the form. Both must pass.
+The request service runs this check on the document and on the name and birth date typed into the form. Both must pass. The code is in `src/server/documents/patient-check.ts`, and `nameWords` is in `src/server/identity/names.ts`.
 
 ## Sources
 
