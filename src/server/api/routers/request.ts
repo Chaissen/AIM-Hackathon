@@ -7,6 +7,7 @@ import { requestInput } from "@/lib/request-input";
 import { clinicProcedure, createTRPCRouter } from "@/server/api/trpc";
 import type { Db } from "@/server/db";
 import { auditLog } from "@/server/db/schema";
+import { nameWords } from "@/server/identity/names";
 import { displayName } from "@/server/matrix/client";
 import { type RequestEvent, taskStatus, TransitionError } from "@/server/requests/lifecycle";
 import { applyEvent, createRequest, getRequest, listRequests, type RequestRow } from "@/server/requests/service";
@@ -61,6 +62,10 @@ export const requestRouter = createTRPCRouter({
         ? { channel: "sms" as const, address: input.phone }
         : null;
     if (!contact) throw new TRPCError({ code: "BAD_REQUEST", message: "Enter an email address or a mobile number" });
+    // An empty set of name words passes every subset test of the name match (docs/IDENTITY.md), so "Dr." alone is no name.
+    if (!nameWords(input.given).size || !nameWords(input.family).size) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Enter the person's given name and family name, not only a title" });
+    }
 
     const { request, token } = await createRequest(
       ctx.db,
