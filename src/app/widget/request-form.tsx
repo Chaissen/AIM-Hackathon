@@ -93,7 +93,7 @@ export function RequestForm({ patients }: { patients: PatientOption[] | null }) 
       </p>
 
       <Button type="submit">Send request</Button>
-      {/* TODO(T04, T05): call the request procedure here. */}
+      {/* TODO(T05): call trpc.request.create here, with the Matrix OpenID token. */}
       {touched && parsed.success && <p className="text-sm text-muted-foreground">Sending from the widget is not connected yet.</p>}
     </form>
   );
