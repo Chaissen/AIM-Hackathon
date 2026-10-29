@@ -10,6 +10,7 @@ const handler = (req: Request) =>
     req,
     router: appRouter,
     createContext: () => createContextFromRequest(req),
+    responseMeta: () => ({ headers: { "Cache-Control": "private, no-store" } }),
     onError:
       env.NODE_ENV === "development"
         ? ({ path, error }) => console.error(`tRPC failed on ${path ?? "<no-path>"}: ${error.message}`)
