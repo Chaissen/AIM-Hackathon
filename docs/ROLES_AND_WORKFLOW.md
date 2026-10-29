@@ -96,7 +96,7 @@ Minimum set by Fri 07:30:
 - 3 lab results for Maria with other tests, units, and LOINC codes
 - 2 rehab reports with a stay that spans two months
 - 3 documents for other patients, one of them with the same family name and a different birth date
-- 2 new outside people with double names, created on the Keycloak sign-up page
+- 2 new outside people with double names, added with `pnpm citizen`
 
 Steps:
 

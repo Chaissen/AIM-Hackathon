@@ -44,7 +44,7 @@ In Element, open the room "Dr. Hofer · Outside documents". `!help` lists the bo
 | Command | What it does |
 |---|---|
 | `pnpm dev` | Next.js (`dev:web`) and the Matrix bot (`dev:bot`), both reload on changes |
-| `pnpm typecheck` · `pnpm lint` · `pnpm build` | Checks before every push |
+| `pnpm typecheck` · `pnpm lint` · `pnpm test` · `pnpm build` | Checks before every push |
 | `pnpm reset` | Empty Postgres, HAPI, and Mailpit, and reload the patient |
 | `pnpm db:generate --name <name>` · `pnpm db:migrate` | Create a migration from `src/server/db/schema.ts`, apply it |
 | `pnpm db:studio` | Browse the database |
