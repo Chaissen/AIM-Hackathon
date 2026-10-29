@@ -88,17 +88,6 @@ export function Steps({ r }: { r: any }) {
   )
 }
 
-export function MiniSteps({ r }: { r: any }) {
-  const cls: Record<string, string> = { done: "bg-emerald-500", now: "bg-primary", fail: "bg-red-500", hold: "bg-amber-500", "": "bg-muted" }
-  return (
-    <span className="inline-flex gap-0.5" aria-hidden>
-      {stepsFor(r).map((s: any) => (
-        <i key={s.k} className={cn("h-1 w-3 rounded-full", cls[s.st])} />
-      ))}
-    </span>
-  )
-}
-
 export function RangeBar({ x }: { x: any }) {
   if (isNaN(x.low) || isNaN(x.high)) return null
   const pos = Math.max(2, Math.min(98, 20 + ((x.value - x.low) / (x.high - x.low)) * 60))

@@ -1,5 +1,5 @@
 // @ts-nocheck
-/* ordy request engine: ported unchanged from prototype/ordy.html.
+/* ordy request engine: ported unchanged from the first single-file prototype (see git history).
    Simulates the request service, ID Austria (Keycloak), the eHVD, Mailpit/SMS,
    the FHIR mapper and the audit log, all in the browser. Synthetic data only. */
 // ---------- Reference data (from docs/*.md and track/scenario) ----------
@@ -508,7 +508,6 @@ const act = {
   },
   reject(r) { if (!['identity_held', 'answer_held'].includes(r.state)) return; r.state = 'cancelled'; bot(r, `Request ${r.id} rejected and cancelled by ${ME.matrix}.`, 'bad'); },
   cancel(r) { if (!STATES[r.state]?.open) return; r.state = 'cancelled'; bot(r, `Request ${r.id} cancelled.`, 'info'); },
-  expire(r) { if (!STATES[r.state]?.open) return; r.state = 'expired'; bot(r, `Request ${r.id} expired. Nobody answered within 7 days.`, 'warn'); }
 };
 
 // ---------- Example run (seed) ----------
@@ -528,7 +527,7 @@ async function seed() {
   tick(2400);
   createRequest({ docType: 'rehab-report', patientId: 'maria-beispiel', given: 'Stefan', family: 'Kern', org: 'Reha Waldblick', channel: 'sms', address: '+43 660 000 0101' });
   S.outbox.forEach((m) => (m.read = m.kind === 'email'));
-  clock = null; S.ui.seeded = true; save();
+  clock = null; save();
 }
 
 
@@ -583,8 +582,8 @@ export function subscribe(fn) { listeners.add(fn); return () => listeners.delete
 export function getVersion() { return version; }
 export function commit() { save(); version++; listeners.forEach((f) => f()); }
 export async function boot() { S = load(); if (!S) await seed(); version++; }
-export async function resetSeed() { const th = S?.ui?.theme; await seed(); S.ui.theme = th; commit(); }
-export function resetEmpty() { const th = S?.ui?.theme; S = blankState(); S.ui.theme = th; commit(); }
+export async function resetSeed() { await seed(); commit(); }
+export function resetEmpty() { S = blankState(); commit(); }
 export const state = () => S;
 
 export {
