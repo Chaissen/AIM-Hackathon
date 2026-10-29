@@ -128,12 +128,18 @@ If the address check fails, the widget shows the warning next to **Send anyway**
 
 The bot listens in rooms it has joined. It accepts commands from any Matrix user on `MATRIX_SERVER_NAME` and ignores everyone else (`src/bot/main.ts`). It has two commands. `!help` lists them, and `!status` checks the database, the FHIR server, and Matrix.
 
-The request service posts notices in Dr. Hofer's room as the bot user. The first notice of a request starts a thread, and later notices go into that thread:
+The request service posts notices in Dr. Hofer's room as the bot user, with `notifyRoom` in `src/server/matrix/notices.ts`. Each notice is a plain-text `m.notice`, never HTML, because the names in it come from Dr. Hofer's input and from ID Austria. The first notice of a request starts a thread, and the request service stores its event id in `requests.matrix_event`. Later notices go into that thread with an `m.thread` relation. Their reply fallback points to the first notice, so a client without threads shows them as replies to it.
 
-- "Request 1 sent to Dr. Eva Brandl (Labor Kanalstraße) by email."
-- "Request 1 was opened by someone who is not Dr. Eva Brandl (ID Austria name: Anna Huber). Nothing was shown or filed. Check the address."
-- "The answer to request 1 is about a different patient. Name and birth date do not match Maria Beispiel. Nothing was filed."
-- "Lab result for Maria Beispiel from Dr. Eva Brandl is filed. Identity checked with ID Austria. 4 values, all within the reference range."
+| When | Notice |
+|---|---|
+| The request goes out | "Request 1 sent to Dr. Eva Brandl (Labor Kanalstraße) by email." |
+| An identity check fails (M1, M2) | "Request 1 was opened by someone who is not Dr. Eva Brandl (ID Austria name: Anna Huber). Nothing was shown or filed. Check the address." |
+| The patient check fails (M3) | "The answer to request 1 is about a different patient. Name and birth date do not match Maria Beispiel. Nothing was filed." |
+| The name matches only partly | "Request 1 is on hold. The ID Austria name Petra Brandl matches Dr. Eva Brandl only in part. Accept or reject the person in the widget." |
+| The release check does not pass | "The answer to request 1 is on hold. The eHVD does not list Dr. Eva Brandl as a member of Labor Kanalstraße. Accept or reject the answer in the widget." |
+| The answer is filed | "Lab result for Maria Beispiel from Dr. Eva Brandl is filed. Identity checked with ID Austria. 4 values, all within the reference range." |
+
+The caller writes the reason sentence of a held notice. A filed lab result with values outside the reference range says how many, for example "4 values, 1 outside the reference range." A rehab discharge report has no values, so its filed notice ends after "Identity checked with ID Austria."
 
 ## Outgoing messages
 
@@ -185,6 +191,8 @@ The scenario documents share one Markdown format:
 The parser reads headings and tables from markdown-it tokens and splits `Key: value` lines at the first `": "`. It reads dates against a fixed list of formats in the `Europe/Vienna` time zone, for example `22 October 2026, 08:10`. The `Patient` line splits at `", born "` into name and birth date.
 
 The document kind picks the mapper. `lab report` goes to the lab mapper and `discharge report` goes to the rehab mapper. Any other kind becomes a DocumentReference with the text attached, held for Dr. Hofer.
+
+The parser lives in `src/server/documents/`. `parseDocument()` returns a typed `LabResult`, `RehabReport`, or generic document (`types.ts`), or a list of reasons the uploader can act on; it never throws on content. It converts the unit `10^9/L` to UCUM `10*9/L`, computes `N`, `H`, or `L` from the reference range, and reads a stay that names the month once, twice, or crosses a year. `checkAnswerPatient()` in `patient-check.ts` runs `samePatient()` on the document and on the form, and `uploadHash()` gives the SHA-256 that stays in the audit log when an upload is discarded.
 
 ### AI fallback (optional, cut first)
 
@@ -282,9 +290,12 @@ src/
     requests/                 request lifecycle, link tokens, and the request service
     audit/record.ts           recordAudit() for the six audit events
     fhir/                     FHIR client, mappers planned (T12 to T14)
+    documents/                parser and patient check (T10, T11), typed records in types.ts
+    identity/names.ts         name words and subset test from Identity, shared by the patient check and T08
     ehvd/oid.ts               OID check shared by the login and pnpm citizen
     ehvd/                     eHVD SOAP client, planned (T15)
     matrix/client.ts          Matrix client-server API
+    matrix/notices.ts         notice texts and notifyRoom for Dr. Hofer's room
     auth/eid-session.ts       outside person's session cookie
     portal/data.ts            data loaders for the portal and SMS pages, the SMS log is a stub until T06
   bot/                        Matrix bot process and commands
