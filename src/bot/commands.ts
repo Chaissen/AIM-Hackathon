@@ -4,7 +4,7 @@ type Caller = ReturnType<typeof createCaller>;
 export type Reply = { text: string; html?: string };
 type Command = { usage: string; help: string; run: (caller: Caller, args: string) => Promise<Reply> };
 
-// Planned (organisations/ARCHITECTURE.md, "Matrix bot"): !request, !send, !accept, !reject, !cancel, !status <id>.
+// Planned (docs/ARCHITECTURE.md, "Matrix bot"): !request, !send, !accept, !reject, !cancel, !status <id>.
 export const commands: Record<string, Command> = {
   help: {
     usage: "!help",
