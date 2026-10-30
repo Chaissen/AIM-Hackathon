@@ -95,12 +95,12 @@ Dr. Hofer signs in to the ordy workspace with her existing Matrix account. An en
 
 | Component | Built or reused | Role |
 |---|---|---|
-| ordy web | Built: Next.js 16, tRPC v11, zod, Drizzle, shadcn/ui | Workspace and Messages for Dr. Hofer, optional widget, outside portal, identity checks, parser, patient check, FHIR mapping, audit log, SMS screen |
+| ordy web | Built: Next.js 16, tRPC v11, zod, Drizzle, shadcn/ui | Workspace and Messages for Dr. Hofer, the Element Web widget, outside portal, identity checks, parser, patient check, FHIR mapping, audit log, SMS screen |
 | ordy bot | Built: Node.js process with a small Matrix client on `fetch` | `!help` and `!status` in Dr. Hofer's room |
 | eHVD mock | Built: Node.js service in `services/ehvd-mock/` | Our mock of the eHVD with the real SOAP interface and synthetic entries |
 | Synapse | Reused | Matrix server for `klinikum.example` |
 | Workspace gateway | Reused: nginx | Same-origin entry for the Next.js workspace on 8081 |
-| Element Web | Reused, optional | Legacy Matrix client on 8082 |
+| Element Web | Reused | Chat app on 8082, with the ordy widget pinned in Dr. Hofer's room |
 | Keycloak | Configured | Simulated ID Austria with the real claim names |
 | HAPI FHIR | Reused | FHIR R4 server |
 | Postgres | Reused | Requests, person number bindings, audit log |
@@ -140,42 +140,47 @@ Short answers to the five questions of the track. They describe our design, and 
 
 ### 1. How does an outside person prove who they are if they are in no directory?
 
-They log in with ID Austria, the Austrian state electronic ID. It gives ordy their verified name, birth date, and a person number (bPK) that stays the same for our service. ordy compares the name with the name Dr. Hofer typed. Two things back this up. The link went only to the email address or phone number Dr. Hofer gave, so whoever opens it most likely reached it through that inbox or phone, and a forwarded link still fails the name match. And for a healthcare professional such as Dr. Brandl, ordy checks the eHVD, the Austrian eHealth directory, which lists her role and organisation. Later, after her first filed answer, ordy stores the person number, so only that exact person can answer as Eva Brandl at Labor Kanalstraße again. Stefan Kern, a discharge manager, is in no directory at all. For him, ID Austria, the name match, the person number, and the phone number are the whole check, and the eHVD check falls on the physician who wrote the report (question 2). Nobody needs an account with us or an entry in the PGK directory.
+They log in with ID Austria. ordy is built on its real OpenID Connect interface and reads its claims under their official names, so moving from our Keycloak simulation to real ID Austria changes only the URL and the client credentials.
+
+| ID Austria claim | What ordy does with it |
+|---|---|
+| `given_name`, `family_name` | Must match the person Dr. Hofer named, so a forwarded link fails here |
+| `urn:pvpgvat:oidc.eid_ida_level` | Must be `urn:eidgvat:eid.status.full`: the identity was officially confirmed |
+| `urn:pvpgvat:oidc.bpk` | The person number. After the first filed answer, only this bPK may answer as that person at that organisation. ordy never uses the transient `sub`. |
+| `urn:eidgvat:attributes.gda` | Only for healthcare professionals: their eHVD entry. ordy looks up its OID in the eHVD (`GetGDA`) to confirm the person, their role, and their organisation. |
+
+Someone in no directory, such as Stefan Kern, passes on the first three. The eHVD check then falls on the physician who wrote the report (question 2). Nobody needs an account with us. The link goes only to the email address or phone number Dr. Hofer gave, so the person also needs that inbox or phone.
 
 ### 2. Which identity check do you require for each type of document and why?
 
-Every outside person sees the patient once the identity check passes. So every sender, for every document type, needs an ID Austria login with full function (the identity was checked in person once), a name that matches the person Dr. Hofer named, and the stored person number once one is known. In our reading of Austrian law, only the physician responsible for the content may release a document, so ordy also checks that physician in the eHVD:
+Every sender needs the full check from question 1, because every sender sees the patient. On top, the physician responsible for the content must be confirmed in the eHVD, because only that physician may release the document:
 
-| Document | Release check | Why |
+| Document | eHVD must confirm | Why |
 |---|---|---|
-| Lab result | The physician under `Validated by` is an active lab medicine specialist at the lab | A lab report is a specialist's document, and its values feed a clinical decision |
-| Rehab discharge report | The physician under `Written by` is an active physician at the rehab clinic, and the clinic is an active hospital | The signing physician is responsible for the report. The discharge manager only sends it. |
+| Lab result | `Validated by`: an active lab medicine specialist at the lab | A specialist answers for the values |
+| Rehab report | `Written by`: an active physician at an active rehab clinic | The physician signs the report; the discharge manager only sends it |
 
-If the eHVD cannot confirm the physician, the answer waits until Dr. Hofer accepts it, because the eHVD can be out of date.
+If the eHVD cannot confirm the physician, Dr. Hofer decides.
 
 ### 3. Which FHIR resources do you create and how do they reference each other and the patient?
 
-| Answer | Resources |
-|---|---|
-| Lab result | One Observation per test with its LOINC code, UCUM unit, and reference range, grouped by one DiagnosticReport that carries the original document |
-| Rehab report | One DocumentReference with the report text attached and the stay period |
-| Every answer | One Provenance that targets the clinical resources filed and records who sent it, when, and how the identity was checked, including the signed ID Austria token |
-| Every request | One Task from sent to completed, pointing at the DiagnosticReport or DocumentReference |
-| People and organisations | Practitioner for Dr. Hofer, the sender, and the document author. Organization for the outside organisation and for ID Austria, which signs the identity proof. |
+- **Lab result:** one `Observation` per test with its LOINC code, grouped by a `DiagnosticReport`.
+- **Rehab report:** a `DocumentReference` with the text attached.
+- **Every answer:** a `Provenance` (who sent it, when, and how ID Austria checked them) and a `Task` for the request.
 
-Every clinical resource points at the Patient through `subject`, and the Task points at her through `for`. The DiagnosticReport lists its Observations in `result`, the Task points at the DiagnosticReport or DocumentReference in `output`, and the Provenance lists the clinical resources in `target` and names the sender and the author in `agent`. One answer is filed as one transaction Bundle, so it is filed completely or not at all. [FHIR model](docs/FHIR.md) has the reference diagram and the field mapping.
+All point at the Patient. The report lists its Observations, the Task points at the report, and the Provenance targets everything filed, all in one transaction Bundle.
 
 ### 4. How do you notice a misdelivery?
 
-ordy checks at three points. Each catch writes a `misdelivery_caught` audit entry. Dr. Hofer sees the first in the workspace and gets a Matrix notice for the other two.
+At three points, each logged as `misdelivery_caught` and shown to Dr. Hofer:
 
-1. Before sending: an email domain that differs from the organisation's domain in the eHVD, such as `labor-kanaI.example`, needs Dr. Hofer's confirmation.
-2. At login: the ID Austria name must match the requested person. A stranger at a mistyped address (M1) and a colleague with a forwarded email (M2) fail here: they see neither the patient nor the document type, and they cannot answer.
-3. On answer: the patient's name and birth date in the document and in the form must match the patient record. A result for another patient (M3) is not filed.
+1. **Before sending:** the email domain must match the organisation's domain in the eHVD, so `labor-kanaI.example` needs her confirmation.
+2. **At login:** the ID Austria name must match the person she named. A wrong address (M1) or a forwarded link (M2) fails here, before anything is shown.
+3. **On upload:** the patient in the document must match her patient record, so another patient's result (M3) is never filed.
 
 ### 5. Where does your service run: at the clinic, at the outside organisation or at a third party?
 
-At the clinic, next to the Matrix server and the FHIR server it already runs. Patient data leaves the clinic only toward the person who proved their identity. The outside organisation runs nothing; its staff need a browser and ID Austria. A third party such as the PGK operator could later run one shared instance, but it would then hold patient data from every clinic.
+At the clinic, next to the Matrix and FHIR servers it already runs. Patient data leaves the clinic only toward the person who passed the identity check. The outside organisation runs nothing: a browser and ID Austria are enough.
 
 ## Metrics
 
