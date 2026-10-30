@@ -5,12 +5,23 @@ import { z } from "zod";
 import { env } from "@/env";
 import { requestInput } from "@/lib/request-input";
 import { clinicProcedure, createTRPCRouter } from "@/server/api/trpc";
+import { auditActor } from "@/server/audit/record";
 import type { Db } from "@/server/db";
 import { auditLog } from "@/server/db/schema";
+import { type AddressCheck as EhvdAddressCheck, addressWarning, checkAddress } from "@/server/ehvd/address-check";
 import { nameWords } from "@/server/identity/names";
 import { displayName } from "@/server/matrix/client";
 import { taskStatus, TransitionError } from "@/server/requests/lifecycle";
-import { applyEvent, createRequest, getRequest, listRequests, type NonLoginEvent, type RequestRow } from "@/server/requests/service";
+import {
+  type AddressCheck,
+  applyEvent,
+  createRequest,
+  getRequest,
+  listRequests,
+  type NonLoginEvent,
+  type RequestRow,
+  sendAnyway,
+} from "@/server/requests/service";
 
 // Postgres `serial` ends at 2^31 - 1; a larger id would reach the database as an error.
 const byId = z.object({ id: z.number().int().positive().max(2_147_483_647) });
@@ -44,6 +55,32 @@ const ownRequestProcedure = clinicProcedure.input(byId).use(async ({ ctx, input,
   return next({ ctx: { ...ctx, request } });
 });
 
+/** The eHVD's answer as the request service stores it (docs/EHVD.md, "The address check"). */
+const stored = (check: EhvdAddressCheck): AddressCheck =>
+  check.result === "pass"
+    ? { passed: true }
+    : check.result === "mismatch"
+      ? { passed: false, domain: check.domain, expectedDomain: check.expectedDomain }
+      : { passed: false, unchecked: true };
+
+/**
+ * The warning next to Send anyway for a request that waits for it. A mismatch is rebuilt from its audit entry. Why
+ * the eHVD could not confirm an address is not stored, so a reload says only that.
+ */
+function pendingWarning(request: RequestRow, audit: (typeof auditLog.$inferSelect)[]): string | null {
+  if (request.state !== "awaiting_confirmation") return null;
+  const caught = audit.find((a) => a.event === "misdelivery_caught" && a.outcome === "address_mismatch");
+  const detail = caught?.detail as { domain: string; expectedDomain: string } | undefined;
+  return detail
+    ? addressWarning({ result: "mismatch", domain: detail.domain, expectedDomain: detail.expectedDomain }, request.org)
+    : "The eHVD could not confirm the address, so the request has not been sent.";
+}
+
+// TODO(T06): send the link by email or SMS. Until then, print it in development so the portal can be tried.
+function printLink(request: RequestRow, token: string) {
+  if (env.NODE_ENV === "development" && request.state === "sent") console.info(`Request ${request.id}: ${env.PUBLIC_URL}/r/${token}`);
+}
+
 async function change(ctx: { db: Db; request: RequestRow }, event: NonLoginEvent) {
   try {
     const request = await applyEvent(ctx.db, ctx.request.id, event);
@@ -68,6 +105,8 @@ export const requestRouter = createTRPCRouter({
       throw new TRPCError({ code: "BAD_REQUEST", message: "Enter the person's given name and family name" });
     }
 
+    // The address check against the eHVD (T15). An SMS always passes it.
+    const check = await checkAddress({ ...contact, org: input.org });
     const { request, token } = await createRequest(
       ctx.db,
       {
@@ -80,20 +119,31 @@ export const requestRouter = createTRPCRouter({
         requester: ctx.actor.mxid,
         requesterName: (await displayName(ctx.actor.mxid)) ?? ctx.actor.mxid,
       },
-      // TODO(T15): the address check against the eHVD decides this.
-      { passed: true },
+      stored(check),
     );
-    // TODO(T06): send the link by email or SMS. Until then, print it in development so the portal can be tried.
-    if (env.NODE_ENV === "development" && request.state === "sent") console.info(`Request ${request.id}: ${env.PUBLIC_URL}/r/${token}`);
-    return summary(request);
+    printLink(request, token);
+    return { ...summary(request), addressWarning: check.result === "pass" ? null : addressWarning(check, input.org) };
   }),
 
   get: ownRequestProcedure.query(async ({ ctx }) => {
     const audit = await ctx.db.select().from(auditLog).where(eq(auditLog.requestId, ctx.request.id)).orderBy(asc(auditLog.at), asc(auditLog.id));
-    return { ...summary(ctx.request), audit };
+    return { ...summary(ctx.request), addressWarning: pendingWarning(ctx.request, audit), audit };
   }),
 
   list: clinicProcedure.query(async ({ ctx }) => (await listRequests(ctx.db, ctx.actor.mxid)).map(summary)),
 
   cancel: ownRequestProcedure.mutation(async ({ ctx }) => summary(await change(ctx, "cancel"))),
+
+  /** Dr. Hofer confirms the address after the warning. The request goes out with a new 7-day link. */
+  sendAnyway: ownRequestProcedure.mutation(async ({ ctx }) => {
+    try {
+      const sent = await sendAnyway(ctx.db, ctx.request.id, auditActor(ctx.actor));
+      if (!sent) throw notFound(ctx.request.id);
+      printLink(sent.request, sent.token);
+      return summary(sent.request);
+    } catch (e) {
+      if (e instanceof TransitionError) throw new TRPCError({ code: "CONFLICT", message: e.message, cause: e });
+      throw e;
+    }
+  }),
 });
