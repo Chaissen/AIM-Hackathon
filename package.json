@@ -22,6 +22,7 @@
     "validate": "tsx --env-file-if-exists=.env scripts/validate.ts",
     "audit:check": "tsx --env-file-if-exists=.env scripts/audit-check.ts",
     "scenario": "tsx --env-file-if-exists=.env scripts/scenario.ts",
+    "clinical-review:export": "tsx scripts/clinical-review-export.ts",
     "setup": "./scripts/setup.sh",
     "reset": "./scripts/reset.sh"
   },
@@ -39,6 +40,7 @@
     "markdown-it": "^15.0.3",
     "matrix-widget-api": "1.20.0",
     "next": "16.4.2",
+    "nodemailer": "^10.2.1",
     "openid-client": "6.8.8",
     "postgres": "^3.4.9",
     "radix-ui": "^1.8.1",

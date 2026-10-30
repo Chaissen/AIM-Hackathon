@@ -38,7 +38,7 @@ The task ids go into branch names and commit messages.
 | T03 | Synapse config, Matrix users, Element config, room and widget bootstrap. Done. | Dev 3 | T01 | 2 |
 | T04 | Request service: Postgres tables `requests` and `bindings` (Drizzle), request states, audit log writer | Dev 1 | T01 | 3 |
 | T05 | Widget actions with the Matrix OpenID token (request form, **Send anyway**, **Accept**, **Reject**, **Cancel**) and the Matrix notices. `!status` is done. | Dev 3 | T03, T04 | 3 |
-| T06 | Email to Mailpit, SMS screen, outgoing message check | Dev 1 | T04 | 3 |
+| T06 | Email over SMTP to Mailpit or through Gmail to the team inboxes, outgoing message check. No SMS. | Dev 1 | T04 | 3 |
 | T07 | Login with openid-client in Next.js route handlers, ID token check, session cookie | Dev 1 | T02, T04 | 3 |
 | T08 | Identity checks: level, name match, person number binding | Dev 3 | T07 | 3 |
 | T09 | Answer form and upload | Dev 1 | T07 | 3 |

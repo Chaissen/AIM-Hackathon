@@ -102,7 +102,7 @@ A third party, such as the PGK network operator, could later run one shared inst
 | Matrix | Synapse and Element Web, server name `klinikum.example` | The PGK homeserver |
 | ID Austria | Keycloak over OpenID Connect, with the claim names of a real ID Austria response, including the eHVD entry for healthcare professionals | The ID Austria reference environment, then production. Both need a registered service provider, which private companies register through Mein USP. |
 | eHVD | A mock SOAP service in its own container with the real interface (WSDL version 2 from BRZ) and synthetic entries | The eHVD web service, after registration with the health ministry |
-| Email | Mailpit catches every message | The clinic's mail server |
+| Email | Mailpit catches every message locally. For the pitch, Gmail delivers it to the team inboxes only. | The clinic's mail server |
 | SMS | A page in the request service shows each SMS | An SMS gateway |
 | FHIR server | Local HAPI FHIR | The clinic's FHIR server |
 
@@ -119,7 +119,7 @@ Keycloak does not simulate the phone-app confirmation that real ID Austria uses.
 
 `pnpm scenario` (`scripts/scenario.ts`) produces all four in one run against the running stack. It runs request 1, M1 on its own request, M2 and M3 on request 1, and request 2. It checks each step in the audit log, on HAPI, and in Matrix, and then measures. Only entries written during the run count. The run starts at Postgres' `now()`, the clock that writes `audit_log.at`, and a Matrix notice counts when it is newer than the newest room event at the start, so no two clocks are compared. It writes the table for the README to `out/metrics/metrics.md` and the details to `out/metrics/scenario.json`. The stopwatch test with someone new (T19) stays a separate, human measurement.
 
-Each step of the runner drives the flow (`act`) and then checks the result (`verify`). The checks are done. The parts that drive the flow wait for the request core (T04), email and SMS (T06), the login and identity checks (T07, T08), the address check (T15), the answer flow (T09), and the filing (T13). Until they land, the runner reports those steps as blocked and the metrics that depend on them as not measured.
+Each step of the runner drives the flow (`act`) and then checks the result (`verify`). The checks are done. The parts that drive the flow wait for the request core (T04), email (T06), the login and identity checks (T07, T08), the address check (T15), the answer flow (T09), and the filing (T13). Until they land, the runner reports those steps as blocked and the metrics that depend on them as not measured.
 
 ## How this answers the judging questions
 
