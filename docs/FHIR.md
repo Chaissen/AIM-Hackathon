@@ -245,14 +245,14 @@ The request service puts `track/scenario/patient.json` on the server with `PUT P
 
 ## Validation
 
-1. After a run, `pnpm validate` (`scripts/validate.ts`, planned in T18) reads the ids of the filed resources from the `answer_filed` audit entries. `detail.resources` lists every resource in the transaction, the Task included. A Practitioner known from `bindings` is only referenced, not part of the transaction, so it appears in `sender` or `author` but not in `resources`. `detail` also names `output`, `targets`, `provenance`, `task`, `sender`, `author`, and `organization`.
+1. After a run, `pnpm validate` (`scripts/validate.ts`) reads the ids of the filed resources from the `answer_filed` audit entries, all of them or with `--since <time>` those of one run. `detail.resources` lists every resource in the transaction, the Task included. A Practitioner known from `bindings` is only referenced, not part of the transaction, so it appears in `sender` or `author` but not in `resources`. `detail` also names `output`, `targets`, `provenance`, `task`, `sender`, `author`, and `organization`.
 2. It fetches each resource from HAPI into `out/filed/`.
-3. It runs the validator on each file, as the scenario README says: `java -jar validator_cli.jar <file> -version 4.0`.
-4. It counts the issues with severity error. The target is 0. Warnings do not count.
+3. It runs the validator on all files at once, as the scenario README says: `java -jar validator_cli.jar <files> -version 4.0`, with `-locale en-US` so the messages are in English.
+4. It counts the issues with severity `error` or `fatal`. The target is 0. Warnings do not count. Every file must have a result. It prints each error, writes the raw validator result to `out/metrics/validator-output.json` and the counts to `out/metrics/validate.json`, and exits with 1 on any error or missing result, or with a short message when the validator cannot run (no Java, a jar with another hash).
 
-Until `pnpm validate` exists (T18), run the validator by hand after a change to the parser or the mappers: on their output for the three scenario documents (fixtures in `src/server/documents/scenario-fixtures.ts`), on its own and inside a transaction Bundle. The target is 0 errors and only the `dom-6` warning.
+`pnpm validate path/to/file.json path/to/folder` validates hand-made resources instead, without Postgres or HAPI. `pnpm scenario` runs the same check on the resources filed during its run. After a change to the parser or the mappers, validate their output for the three scenario documents (fixtures in `src/server/documents/scenario-fixtures.ts`) this way, on its own and inside a transaction Bundle. The target is 0 errors and only the `dom-6` warning.
 
-The validator checks LOINC codes against tx.fhir.org, so it needs internet access.
+The validator needs Java 17 or newer. `pnpm validate` downloads the pinned version 7.0.3 to `tools/validator_cli.jar` if it is missing and checks its SHA-256 before every run ([Development](DEVELOPMENT.md#hl7-validator)). The first run downloads the FHIR packages to `~/.fhir` and takes a few minutes; later runs take under a minute. The validator checks LOINC codes against tx.fhir.org, so it needs internet access.
 
 Traps we know about:
 
