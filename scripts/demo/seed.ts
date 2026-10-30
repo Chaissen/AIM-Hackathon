@@ -18,17 +18,16 @@ import { createContext } from "@/server/api/trpc";
 import type { AnswerOutcome } from "@/server/answers/submit";
 import type { EidSession } from "@/server/auth/eid-session";
 import { db } from "@/server/db";
-import { auditLog, heldAnswers, requests, smsOutbox } from "@/server/db/schema";
+import { auditLog, heldAnswers, requests } from "@/server/db/schema";
 import { uploadHash } from "@/server/documents/patient-check";
 import type { LoginPage } from "@/server/identity/login";
 import { parseEmail, startFakeSmtp } from "@/server/mail/fake-smtp";
 import { findAnswerContext } from "@/server/portal/data";
 import type { RequestState } from "@/server/requests/lifecycle";
-import { hashLinkToken } from "@/server/requests/link-token";
 import { expireDueRequests, getRequest } from "@/server/requests/service";
 import { mirrorTask } from "@/server/requests/task";
 
-import { CITIZENS, type Citizen, logIn, openLink, upload } from "./browser";
+import { CITIZENS, type Citizen, currentToken, logIn, openLink, tokenFromSms, upload } from "./browser";
 
 const { values: flags } = parseArgs({ options: { force: { type: "boolean", default: false } } });
 
@@ -65,8 +64,6 @@ const KERN = { docType: "rehab-report", given: "Stefan", family: "Kern", org: "R
 type Seeded = { id: number; docType: DocumentType; story: string };
 const seeded: Seeded[] = [];
 
-const linkPrefix = new URL("/r/", env.PUBLIC_URL).href;
-const linkTokens = (text: string) => text.split(linkPrefix).slice(1).map((rest) => /^[A-Za-z0-9_-]+/.exec(rest)?.[0] ?? "");
 
 /**
  * The seed sends no email (docs/COMPLIANCE_AND_SAFETY.md). `sendRequestEmail` still builds every request email, runs the
@@ -76,21 +73,13 @@ const linkTokens = (text: string) => text.split(linkPrefix).slice(1).map((rest) 
 const smtp = await startFakeSmtp();
 Object.assign(env, { SMTP_HOST: "127.0.0.1", SMTP_PORT: smtp.port });
 
-/** The link token in the email this run kept for this request: the one whose hash the request stores. */
+/** The link token in the email this run kept for this request. */
 async function tokenFromEmail(id: number, address: string): Promise<string> {
-  const { linkHash } = (await getRequest(db, id)) ?? fail(`request ${id} does not exist`);
-  const tokens = smtp.received
+  const bodies = smtp.received
     .map((email) => parseEmail(email.raw))
     .filter(({ headers }) => headers.get("to")?.toLowerCase() === address.toLowerCase())
-    .flatMap(({ body }) => linkTokens(body));
-  return tokens.find((t) => hashLinkToken(t) === linkHash) ?? fail(`no email for request ${id}`);
-}
-
-/** The link token in the SMS the request service stored for the SMS screen: the one whose hash the request stores. */
-async function tokenFromSms(id: number): Promise<string> {
-  const { linkHash } = (await getRequest(db, id)) ?? fail(`request ${id} does not exist`);
-  const sms = await db.select({ body: smsOutbox.body }).from(smsOutbox).where(eq(smsOutbox.requestId, id));
-  return sms.flatMap(({ body }) => linkTokens(body)).find((t) => hashLinkToken(t) === linkHash) ?? fail(`no SMS for request ${id}`);
+    .map(({ body }) => body);
+  return (await currentToken(id, bodies)) ?? fail(`no email for request ${id}`);
 }
 
 type NewRequest = Omit<RequestInput, "email" | "phone"> & ({ email: string } | { phone: string });
@@ -100,7 +89,8 @@ async function send(input: NewRequest, story: string): Promise<{ id: number; tok
   const result = await hofer.request.create(input);
   seeded.push({ id: result.id, docType: result.docType, story });
   if (result.state === "awaiting_confirmation") return { id: result.id, token: null };
-  return { id: result.id, token: "phone" in input ? await tokenFromSms(result.id) : await tokenFromEmail(result.id, input.email) };
+  const token = "phone" in input ? ((await tokenFromSms(result.id)) ?? fail(`no SMS for request ${result.id}`)) : await tokenFromEmail(result.id, input.email);
+  return { id: result.id, token };
 }
 
 async function expectState(id: number, state: RequestState) {

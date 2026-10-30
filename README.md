@@ -24,7 +24,7 @@ The feature table describes this checkout. The workspace gateway and hostname mi
 | Request email | **Works.** The request form and **Send anyway** send the link by email to Mailpit. A check refuses an email that names the patient, the birth date, or a document type. A refused or failed email stores nothing. |
 | SMS, and the SMS screen's message list | **Works.** An SMS request puts its SMS on the SMS screen at `/sms`, after the same content check as the email. No SMS is really sent. |
 | AI fallback parser (optional) | **Built, not connected.** Tested with a stand-in for the model. The answer flow uses the rule-based parser only. |
-| Metric runner | **Partly.** `pnpm validate` and `pnpm audit:check` work on the filed data. `pnpm scenario` checks that the stack is up, but its flow steps have no code yet that drives them, so it reports them as blocked. |
+| Metric runner | **Works.** `pnpm scenario` runs request 1, M1 to M3, and request 2 against the running stack and measures all four metrics. `pnpm validate` and `pnpm audit:check` work on the filed data on their own. |
 
 [Timeline](docs/TIMELINE.md) has the tasks and owners.
 
@@ -75,7 +75,7 @@ Check that it works:
 | `pnpm db:studio` | Browse the database |
 | `pnpm fhir:seed` · `pnpm matrix:bootstrap` | Load the three synthetic patients; create the room and pin the widget |
 | `pnpm demo:seed` | Fill Dr. Hofer's workspace with eleven synthetic requests in every state, through the real code paths ([Demo](docs/DEMO.md#a-populated-workspace)) |
-| `pnpm scenario` · `pnpm validate` · `pnpm audit:check` | All four metrics in one run, once its flow steps have code that drives them (today they report blocked); the HL7 validator on the filed resources; the six audit events per request |
+| `pnpm scenario` · `pnpm validate` · `pnpm audit:check` | All four metrics in one run against the running stack; the HL7 validator on the filed resources; the six audit events per request |
 
 ## Architecture
 
@@ -179,7 +179,7 @@ At the clinic, next to the Matrix server and the FHIR server it already runs. Pa
 
 ## Metrics
 
-We measure the four track metrics on the scenario. `pnpm scenario` is meant to run it against the running stack, but its steps have no code yet that drives the flow, so it reports them as blocked. The results below come from one run by hand on `main` at commit `06abdc9`, on 30 October 2026: `pnpm reset`, the requests created as Dr. Hofer by a script that makes the same `request.create` call as the widget's form, the links from the `pnpm dev` log, the logins and uploads in a browser, then `pnpm validate` and `pnpm audit:check`. [Whitepaper](docs/WHITEPAPER.md#how-we-measure-the-metrics) has the method in full.
+We measure the four track metrics on the scenario. `pnpm scenario` runs it against the running stack: Dr. Hofer's requests through the tRPC router, the links from Mailpit and the SMS screen, the logins at the simulated ID Austria, and the uploads through the portal. On `main` after #68 it passed every step and met all four metrics, with 0 validation errors in 17 resources. The results below come from one run by hand on `main` at commit `06abdc9`, on 30 October 2026: `pnpm reset`, the requests created as Dr. Hofer by a script that makes the same `request.create` call as the widget's form, the links from the `pnpm dev` log, the logins and uploads in a browser, then `pnpm validate` and `pnpm audit:check`. [Whitepaper](docs/WHITEPAPER.md#how-we-measure-the-metrics) has the method in full.
 
 | Metric | Target | How we measure | Result |
 |---|---|---|---|

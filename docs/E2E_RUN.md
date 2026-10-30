@@ -18,7 +18,7 @@ The recording (9 min 7 s, 1440x900), 51 screenshots, and the logs stay outside g
 | 7. M2, forwarded link | Pass | Thomas Wagner opened request 1's link and was turned away, with no patient data and no upload. The audit log has a failed `identity_checked` and `wrong_person`. |
 | 7. M3, wrong patient | Pass | Eva Brandl uploaded Max Beispiel's document while entering Maria's details. The upload was stopped, and HAPI had no DiagnosticReport for Maria before the right upload. The notice did not name Max. The audit log kept the file's SHA-256 and size, not its text. |
 | 8. Element Web | Pass | Dr. Hofer's room at http://localhost:8082 showed the pinned ordy widget, which worked after the identity approval. |
-| 9. Metric commands | Fail | `pnpm validate` and `pnpm audit:check` passed. `pnpm scenario` exited 1, because its six flow steps have no code yet. |
+| 9. Metric commands | Fail | `pnpm validate` and `pnpm audit:check` passed. `pnpm scenario` exited 1, because its six flow steps had no code yet. Fixed since: see finding 2. |
 
 M2 and M3 ran on request 1 before it was filed, as [Demo](DEMO.md) requires, because a filed request takes no other login.
 
@@ -34,7 +34,7 @@ M2 and M3 ran on request 1 before it was filed, as [Demo](DEMO.md) requires, bec
 ## Findings
 
 1. The request form promises a review that does not happen. For the rehab request, it says "Stefan Kern is not in the healthcare directory. You will review the answer before it goes into the record." The report was then filed without a review, because the release check looks at the physician responsible for the document, Dr. Johanna Leitner, and she passed. The text comes from `REVIEW` in `src/app/widget/request-form.tsx`. The release decision is in `src/server/answers/submit.ts`. Not fixed yet.
-2. `pnpm scenario` cannot run the flow, because its steps have no code that drives it. [Metrics](../README.md#metrics) already says so.
+2. `pnpm scenario` could not run the flow, because its steps had no code that drives it. Fixed since: each step now drives the flow through the same helpers as `pnpm demo:seed`. A run on the same stack passed all seven steps and met all four metrics: 0 validation errors in 17 resources, 3 of 3 misdeliveries, and 6 of 6 audit events on request 1.
 
 ## Checks on the same commit
 
