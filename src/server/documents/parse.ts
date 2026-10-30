@@ -1,10 +1,10 @@
 import MarkdownIt from "markdown-it";
 
-import { BLOOD_PRESSURE, vitalSign } from "@/server/fhir/vital-signs";
 import { TITLE } from "@/server/identity/names";
 import { parseDate, parseStay, parseViennaDateTime } from "./dates";
 import type { LabRow, ParseResult, ParsedDocument, PersonLine } from "./types";
 import { toUcum } from "./ucum";
+import { REFUSED_VITAL_SIGNS, vitalSign } from "./vital-signs";
 
 // Reads the scenario Markdown format into typed records (docs/ARCHITECTURE.md, "Document parsing").
 
@@ -142,16 +142,18 @@ function labRows(table: Table, errors: string[]): LabRow[] {
       errors.push(`${row}: "${loinc}" is not a LOINC code such as 6301-6, or its check digit is wrong.`);
       return [];
     }
-    // FHIR files blood pressure and other vital signs by their own profiles (src/server/fhir/vital-signs.ts).
-    if (BLOOD_PRESSURE.has(loinc)) {
-      errors.push(`${row}: blood pressure needs systolic and diastolic together, which one table row cannot carry. Write it below the table.`);
+    // FHIR files vital signs by their own profiles (vital-signs.ts).
+    const refused = REFUSED_VITAL_SIGNS.get(loinc);
+    if (refused) {
+      errors.push(`${row}: ${refused}`);
       return [];
     }
     const unitText = cell("Unit");
     const ucum = toUcum(unitText);
     const vital = vitalSign(loinc);
     if (vital && !(ucum && vital.units.includes(ucum))) {
-      errors.push(`${row}: "${unitText}" is not a unit for this vital sign. Use a unit such as ${vital.example}.`);
+      const problem = unitText ? `"${unitText}" is not a unit for this vital sign` : "this vital sign has no unit";
+      errors.push(`${row}: ${problem}. Use a unit such as ${vital.example}.`);
       return [];
     }
     const [lowText, highText, ...extra] = cell("Reference range").split(" to ");

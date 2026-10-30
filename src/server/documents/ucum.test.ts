@@ -26,6 +26,7 @@ test("toUcum codes the usual lab spellings in UCUM", () => {
     ["mOsm/kg", "mosm/kg"],
     ["pH", "[pH]"],
     ["°C", "Cel"],
+    ["°F", "[degF]"],
     ["kg/m²", "kg/m2"],
     [" s ", "s"],
     ["g/L", "g/L"],
@@ -39,6 +40,6 @@ test("toUcum keeps every code on its list as it is", () => {
 
 test("toUcum leaves empty, unknown, and misleading units uncoded", () => {
   // G/L and T/L mean giga and tera per litre on Austrian lab reports, but gauss and tesla per litre in UCUM.
-  // mU/L usually means milli-international units there, but milli-enzyme units in UCUM.
-  for (const unit of ["", "G/L", "T/L", "mU/L", "Tsd/µl", "ratio", "mmol / L"]) assert.equal(toUcum(unit), null, unit);
+  // mU/L, U/mL, and kU/L often mean international or arbitrary units there, but enzyme units in UCUM.
+  for (const unit of ["", "G/L", "T/L", "mU/L", "U/mL", "kU/l", "Tsd/µl", "ratio", "mmol / L"]) assert.equal(toUcum(unit), null, unit);
 });

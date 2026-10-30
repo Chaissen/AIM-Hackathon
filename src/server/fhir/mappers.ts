@@ -14,7 +14,7 @@ import type {
 
 import { viennaInstant } from "@/server/documents/dates";
 import type { LabResult, LabRow, ParsedDocument, RehabReport } from "@/server/documents/types";
-import { vitalSign } from "@/server/fhir/vital-signs";
+import { vitalSign } from "@/server/documents/vital-signs";
 
 // Lab and rehab mappers (docs/FHIR.md, "Lab result mapping" and "Rehab report mapping").
 // They only build the clinical resources. The filing (T13) creates the Practitioner and Organization,
@@ -33,7 +33,10 @@ export type MapContext = {
   patient: Reference;
   /** The organisation from the heading. */
   organization: Reference;
-  /** The physician under `Validated by` or `Written by`. Null when the filing has none. */
+  /**
+   * The author, or the sender when the sender is the author, as `prepareParties()` decides. It becomes the performer,
+   * the results interpreter, and the first author. Null leaves those out.
+   */
   practitioner: Reference | null;
 };
 

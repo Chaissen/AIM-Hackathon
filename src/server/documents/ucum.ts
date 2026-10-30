@@ -1,9 +1,9 @@
 // Lab documents write units as people do, FHIR wants UCUM (docs/FHIR.md, validator traps). Only units on this list
 // get a UCUM code. Any other unit stays text, so it can never fail the UCUM check, and a spelling that means something
-// else in UCUM is never coded: `G/L` is gauss per litre, and `mU/L` on a lab report usually means milli-international
-// units, not milli-enzyme units.
+// else in UCUM is never coded: `G/L` is gauss per litre, and `mU/L`, `U/mL`, or `kU/L` on a lab report often mean
+// international or arbitrary units (TSH, tumour markers, IgE), not enzyme units.
 
-export const UCUM_CODES = new Set([
+export const UCUM_CODES: ReadonlySet<string> = new Set([
   // Counts
   "10*9/L",
   "10*12/L",
@@ -32,8 +32,6 @@ export const UCUM_CODES = new Set([
   "mg/mmol",
   // Enzyme and hormone activities
   "U/L",
-  "U/mL",
-  "kU/L",
   "[IU]/L",
   "[IU]/mL",
   "m[IU]/L",
@@ -53,7 +51,7 @@ export const UCUM_CODES = new Set([
   "[pH]",
   "mm[Hg]",
   "kPa",
-  // Vital signs a lab table may carry (src/server/fhir/vital-signs.ts)
+  // Vital signs a lab table may carry (vital-signs.ts)
   "Cel",
   "[degF]",
   "/min",
@@ -63,7 +61,16 @@ export const UCUM_CODES = new Set([
   "kg/m2",
 ]);
 
+/** Whole units with another name in UCUM. */
+const ALIASES: ReadonlyMap<string, string> = new Map([
+  ["°C", "Cel"],
+  ["°F", "[degF]"],
+  ["pH", "[pH]"],
+]);
+
 const SUPERSCRIPT = "⁰¹²³⁴⁵⁶⁷⁸⁹";
+const SUPERSCRIPTS = new RegExp(`[${SUPERSCRIPT}]+`, "g");
+const POWER_OF_TEN = new RegExp(`10([${SUPERSCRIPT}]+)`);
 const plain = (digits: string) => [...digits].map((c) => SUPERSCRIPT.indexOf(c)).join("");
 
 /**
@@ -71,19 +78,19 @@ const plain = (digits: string) => [...digits].map((c) => SUPERSCRIPT.indexOf(c))
  * `IU/L` to `[IU]/L`, or `°C` to `Cel`. Null for an empty unit and for any unit not on the list.
  */
 export function toUcum(unit: string): string | null {
-  const code = unit
-    .trim()
-    .replace(/10([⁰¹²³⁴⁵⁶⁷⁸⁹]+)/, (_, power: string) => `10*${plain(power)}`)
-    .replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹]+/g, plain)
+  const written = unit.trim();
+  const code = (ALIASES.get(written) ?? written)
+    // Powers of ten: `10⁹` and `10^9` are `10*9`, and a leading `x` or `×` goes. The `x` step needs the `*` already there.
+    .replace(POWER_OF_TEN, (_, power: string) => `10*${plain(power)}`)
+    .replace(SUPERSCRIPTS, plain)
     .replace(/\^/g, "*")
-    .replace(/[µμ]/g, "u")
     .replace(/^[xX×]\s*(?=10\*)/, "")
-    .replace(/^°C$/, "Cel")
-    .replace(/^°F$/, "[degF]")
-    .replace(/^pH$/, "[pH]")
+    // Atoms: micro is `u`, mercury and international units go in brackets, osmole is lower case.
+    .replace(/[µμ]/g, "u")
     .replace(/mm ?Hg/, "mm[Hg]")
-    .replace(/Osm/, "osm")
     .replace(/(?<!\[)IU(?!\])/g, "[IU]")
+    .replace(/Osm/, "osm")
+    // Litre is `L` after a prefix or a slash. This runs after the micro step, so `µl` becomes `uL`.
     .replace(/(^|\/|[munpfd])l(?=$|\/)/g, "$1L");
   return UCUM_CODES.has(code) ? code : null;
 }

@@ -177,6 +177,13 @@ test("mapRehabReport builds the DocumentReference from docs/FHIR.md", () => {
   });
 });
 
+test("mapRehabReport gives the DocumentReference its own reference objects", () => {
+  const { resource } = mapRehabReport(rehabReportMaria, context, filedAt);
+  const references = [resource.subject, ...(resource.author ?? [])];
+  assert.equal(references.length, 3);
+  assert.equal(new Set([...references, ...Object.values(context)]).size, references.length + 3);
+});
+
 test("mapRehabReport names only the organisation when the filing passes no physician", () => {
   const { resource } = mapRehabReport({ ...rehabReportMaria, reason: null }, { ...context, practitioner: null }, filedAt);
   assert.deepEqual(resource.author, [{ reference: "urn:uuid:organization" }]);

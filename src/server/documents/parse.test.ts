@@ -158,12 +158,21 @@ test("a vital sign needs a unit its FHIR profile allows, and blood pressure cann
   assert.equal(ratio.ok, false);
   if (!ratio.ok) assert.deepEqual(ratio.errors, ['Row 2 (sO2): "ratio" is not a unit for this vital sign. Use a unit such as %.']);
 
+  const none = parseDocument(sO2(""));
+  assert.equal(none.ok, false);
+  if (!none.ok) assert.deepEqual(none.errors, ["Row 2 (sO2): this vital sign has no unit. Use a unit such as %."]);
+
   const pressure = parseDocument(maria.replace("| aPTT | 31 | s | 25 to 37 | 14979-9 |", "| Systolic | 120 | mmHg | 90 to 140 | 8480-6 |"));
   assert.equal(pressure.ok, false);
   if (!pressure.ok) assert.match(pressure.errors.join(" "), /^Row 2 \(Systolic\): blood pressure needs systolic and diastolic together/);
+
+  // The oxygen profile's code means arterial blood, so a mixed venous saturation is refused rather than mislabelled.
+  const venous = parseDocument(maria.replace("| aPTT | 31 | s | 25 to 37 | 14979-9 |", "| SvO2 | 70 | % | 65 to 75 | 19224-5 |"));
+  assert.equal(venous.ok, false);
+  if (!venous.ok) assert.match(venous.errors.join(" "), /^Row 2 \(SvO2\): the FHIR profile for oxygen saturation adds the code for arterial blood/);
 });
 
-test("a row without a test name is named as such in every reason", () => {
+test("a row without a test name is called so in its reason", () => {
   const markdown = scenario("lab-result-maria-beispiel.md").replace("| aPTT | 31 | s | 25 to 37 | 14979-9 |", "|  | 31 | s | 25 to 37 | 14997-9 |");
   const result = parseDocument(markdown);
   assert.equal(result.ok, false);
@@ -183,6 +192,7 @@ test("dates in Europe/Vienna get the right offset in summer and in winter", () =
   assert.equal(viennaInstant(new Date("2026-10-25T00:59:59Z")), "2026-10-25T02:59:59+02:00");
   assert.equal(viennaInstant(new Date("2026-10-25T01:00:00Z")), "2026-10-25T02:00:00+01:00");
   assert.equal(parseDate("1 January 1960"), "1960-01-01");
+  assert.equal(parseDate("1 January 0999"), "0999-01-01");
   assert.equal(parseDate("29 February 2025"), null);
   assert.equal(parseDate("12 Mars 1961"), null);
 });
