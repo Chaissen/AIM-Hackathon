@@ -4,6 +4,8 @@ import { TITLE } from "@/server/identity/names";
 import { parseDate, parseStay, parseViennaDateTime } from "./dates";
 import { keyLines, patientIdentity } from "./patient-lines";
 import type { LabRow, ParseResult, ParsedDocument, PersonLine, SafetyRefusal } from "./types";
+import { toUcum } from "./ucum";
+import { REFUSED_VITAL_SIGNS, vitalSign } from "./vital-signs";
 
 // Reads the scenario Markdown format into typed records (docs/ARCHITECTURE.md, "Document parsing").
 
@@ -121,13 +123,29 @@ export function toNumber(text: string): number | null {
 
 /** A LOINC code such as `6301-6`, with the mod-10 check digit after the dash (Luhn over the digits before it). */
 export function isLoinc(code: string): boolean {
-  const m = /^(\d{1,7})-(\d)$/.exec(code);
+  const m = /^([1-9]\d{0,6})-(\d)$/.exec(code);
   if (!m) return false;
   const sum = [...m[1]].reverse().reduce((acc, c, i) => {
     const d = Number(c) * (i % 2 === 0 ? 2 : 1);
     return acc + (d > 9 ? d - 9 : d);
   }, 0);
   return (10 - (sum % 10)) % 10 === Number(m[2]);
+}
+
+/**
+ * The UCUM code of a row's unit (`ucum.ts`), or why the row cannot be filed: a vital sign FHIR cannot file as one row,
+ * or one with a unit its profile does not allow (`vital-signs.ts`). The AI fallback checks its rows with it too.
+ */
+export function rowUnit(loinc: string, unitText: string): { ucum: string | null } | { error: string } {
+  const refused = REFUSED_VITAL_SIGNS.get(loinc);
+  if (refused) return { error: refused };
+  const ucum = toUcum(unitText);
+  const vital = vitalSign(loinc);
+  if (vital && !(ucum && vital.units.includes(ucum))) {
+    const problem = unitText ? `"${unitText}" is not a unit for this vital sign` : "this vital sign has no unit";
+    return { error: `${problem}. Use a unit such as ${vital.example}.` };
+  }
+  return { ucum };
 }
 
 function labRows(table: Table, errors: string[]): LabRow[] {
@@ -140,32 +158,38 @@ function labRows(table: Table, errors: string[]): LabRow[] {
   return table.rows.flatMap((cells, n) => {
     const cell = (c: (typeof LAB_COLUMNS)[number]) => cells[col[c]] ?? "";
     const test = cell("Test");
+    const label = `Row ${n + 1} (${test || "no test name"})`;
     const value = toNumber(cell("Result"));
     if (value === null) {
-      errors.push(`Row ${n + 1} (${test || "no test name"}): the result "${cell("Result")}" is not a number.`);
+      errors.push(`${label}: the result "${cell("Result")}" is not a number.`);
       return [];
     }
-    if (!isLoinc(cell("LOINC code"))) {
-      errors.push(`Row ${n + 1} (${test}): "${cell("LOINC code")}" is not a LOINC code such as 6301-6, or its check digit is wrong.`);
+    const loinc = cell("LOINC code");
+    if (!isLoinc(loinc)) {
+      errors.push(`${label}: "${loinc}" is not a LOINC code such as 6301-6, or its check digit is wrong.`);
+      return [];
+    }
+    const unitText = cell("Unit");
+    const unit = rowUnit(loinc, unitText);
+    if ("error" in unit) {
+      errors.push(`${label}: ${unit.error}`);
       return [];
     }
     const [lowText, highText, ...extra] = cell("Reference range").split(" to ");
     const low = extra.length ? null : toNumber(lowText ?? "");
     const high = extra.length ? null : toNumber(highText ?? "");
     const hasRange = low !== null && high !== null;
-    const unitText = cell("Unit");
     return [
       {
         test,
         value,
         valueText: cell("Result"),
-        // UCUM writes powers with "*": "10^9/L" becomes "10*9/L" (docs/FHIR.md, validator traps).
-        ucum: unitText ? unitText.replace(/\^/g, "*") : null,
+        ucum: unit.ucum,
         unitText,
         low: hasRange ? low : null,
         high: hasRange ? high : null,
         rangeText: cell("Reference range"),
-        loinc: cell("LOINC code"),
+        loinc,
         interpretation: hasRange ? (value < low ? "L" : value > high ? "H" : "N") : null,
       },
     ];
