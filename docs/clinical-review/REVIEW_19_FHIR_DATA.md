@@ -27,26 +27,26 @@ Done by a developer on 30 October 2026, not by a clinician. Only Doc 1's grade c
 
 | # | Finding | Answers | Effect on the filed data | Pre-review suggests | Issue |
 |---|---|---|---|---|---|
-| 1 | A one-sided reference range such as `< 5` or `> 45` loses its limit, and the value gets no flag | A3 (CRP), A5 (LDL, HDL) | **CRP 14 mg/L (range below 5) is stored without `H`.** The lab's own comment asks to look for a source of inflammation before the procedure. LDL 128 mg/dL (below 116) has no `H`, and HDL 58 mg/dL (above 45) has no `N`. The range is kept as text only. | A3 unsafe, A5 acceptable or unsafe | [#49](https://github.com/Chaissen/AIM-Hackathon/issues/49) |
+| 1 | A one-sided reference range such as `< 5` or `> 45` loses its limit, and the value gets no flag | A3 (CRP), A5 (LDL, HDL) | **Fixed by #49.** CRP 14 mg/L (range below 5) is stored with the upper limit 5 mg/L and `H`, LDL 128 mg/dL (below 116) with the upper limit 116 mg/dL and `H`, and HDL 58 mg/dL (above 45) with the lower limit 45 mg/dL and `N`. The range text is kept as written. Doc 1 decides how to flag a value exactly on a strict limit, such as 5 with `< 5` ([FHIR model](../FHIR.md#one-sided-ranges)). | correct | [#49](https://github.com/Chaissen/AIM-Hackathon/issues/49) |
 | 2 | Dr. Eva Brandl validated the lab results, but the Provenance stores her in the role "author", the FHIR role for whoever wrote the content | A1, A3, A4, A5 | The document says "Validated by". The person is right, but the coded role is not. FHIR's closer role is "verifier". [FHIR model](../FHIR.md#provenance) chose "author" on purpose for the person responsible for the content, so Doc 1 decides (question in each lab answer's grade block). **The narrative is fixed.** In A4 and A5 it said "Written by" and now says "Validated by", as the document does. | acceptable | [#50](https://github.com/Chaissen/AIM-Hackathon/issues/50) |
 | 3 | The request record (Task) in each upload package had no entry address (`fullUrl`) | all | **Fixed by #51.** No clinical effect. The Task's entry address is now its address on the FHIR server, and the HL7 validator no longer reports the 2 technical errors per upload. | — | none, closed |
 | 4 | Trailing zeros are dropped: `1.0` is stored as `1`, `2.0 to 4.0` as 2 and 4, `0,50` as 0.5 | A1, A3, A4, A5 | The numbers are the same, but they have fewer decimal places. The range text and the attached document keep the values as written. This is a design decision in [FHIR model](../FHIR.md#the-scenario-values). | acceptable | none, by design |
 | 5 | The units `µmol/L` and `mIU/L` are not valid UCUM | A4, A5 | **Fixed by #30.** They are stored as the UCUM codes `umol/L` and `m[IU]/L`, and the unit as written is kept next to the code. | correct | none, closed |
 
-Everything else matched: patient, LOINC codes and their meaning, values, units, two-sided ranges and their flags, sample and report times with the right summer or winter time offset, the lab's comment, the validating physician's name and eHVD record (her role is finding 2), the rehab author, sender, clinic, stay dates and reason, and the attached original text, which is byte-identical to the uploaded file in all seven answers.
+Everything else matched: patient, LOINC codes and their meaning, values, units, two-sided and one-sided ranges and their flags, sample and report times with the right summer or winter time offset, the lab's comment, the validating physician's name and eHVD record (her role is finding 2), the rehab author, sender, clinic, stay dates and reason, and the attached original text, which is byte-identical to the uploaded file in all seven answers.
 
 ## The known parser gaps
 
-[Extra test documents](../../track/scenario/extra/index.md#open-parser-gaps) lists two parser gaps. This is what they do to the filed data today:
+[Extra test documents](../../track/scenario/extra/index.md#open-parser-gaps) listed two parser gaps. Both are closed:
 
-| Gap | Status on `main` (0466f90) | Effect on the filed data |
+| Gap | Status | Effect on the filed data |
 |---|---|---|
-| One-sided reference ranges (`< 5`, `< 116`, `> 45`) | **Open** ([#49](https://github.com/Chaissen/AIM-Hackathon/issues/49)) | The range is stored as the text "< 5" with no lower or upper limit, so nothing can compare the value against it, and the value has no `H`, `L`, or `N`. Affects CRP in A3, and LDL and HDL in A5. |
-| Units that are not UCUM (`µmol/L`, `mIU/L`, `µg/dL`) | **Closed by #30.** The table in `index.md` and the `todo` markers in `extra.test.ts` still list it. #49 asks to remove them. | None. Uric acid is stored as `umol/L` and TSH as `m[IU]/L`. Before #30 they would have been stored as written, and the validator would have rejected them. `µg/dL` is only in the Maria Anna Beispiel document, which is blocked and never filed. |
+| One-sided reference ranges (`< 5`, `< 116`, `> 45`) | **Closed by #49** | None. CRP in A3 and LDL in A5 are stored with their upper limit and `H`, HDL in A5 with its lower limit and `N`. Before #49 they were stored as range text only, with no limit and no flag. |
+| Units that are not UCUM (`µmol/L`, `mIU/L`, `µg/dL`) | **Closed by #30.** #49 removed it from `index.md` and its `todo` markers from `extra.test.ts`. | None. Uric acid is stored as `umol/L` and TSH as `m[IU]/L`. Before #30 they would have been stored as written, and the validator would have rejected them. `µg/dL` is only in the Maria Anna Beispiel document, which is blocked and never filed. |
 
 ## How this package was made
 
-- **Code.** `main` at `0466f90`, which contains the mappers from #30 (PR head `2dc9b74`, the same code). Parser, patient check, mappers, and `buildFilingBundle()`, with no server involved. `pnpm clinical-review:export` writes one upload package (a FHIR transaction Bundle) per answer to [`19-fhir/`](19-fhir/). Run it again after any change to the parser, the mappers, or the filing, and compare. It ran again after the fix for #50, and only the narrative of A4 and A5 changed.
+- **Code.** `main` at `0466f90`, which contains the mappers from #30 (PR head `2dc9b74`, the same code). Parser, patient check, mappers, and `buildFilingBundle()`, with no server involved. `pnpm clinical-review:export` writes one upload package (a FHIR transaction Bundle) per answer to [`19-fhir/`](19-fhir/). Run it again after any change to the parser, the mappers, or the filing, and compare. It ran again after the fix for #50, and only the narrative of A4 and A5 changed. It ran again after the one-sided range fix in #49, and only the reference ranges and flags in A3 and A5 changed.
 - **Not yet wired.** The answer flow that collects the people for the filing (T09, [#13](https://github.com/Chaissen/AIM-Hackathon/issues/13)) is not merged. The export follows [FHIR model](../FHIR.md) and [Identity](../IDENTITY.md#who-may-release-a-document) for who goes where, and the T09 draft for the sentence about the release check.
 - **Fixed inputs.** Every answer uses the same times: Dr. Hofer sends the request on 29 October 2026 at 09:00, the outside person logs in at 14:01:40 and sends at 14:02, and ordy files at 14:02:12 (Vienna time, `+01:00`). The ID token is the test citizen's, with a placeholder signature. A real filing carries the token that ID Austria signed. Each answer stands alone, as if it were the first answer from that sender and the first mention of its author. On a real server, the answers share people: Dr. Eva Brandl (A1, A3, A4, A5) and Dr. Johanna Leitner (A2, A6, A7) are created once, by their eHVD identifier, and every later answer points at the existing record, whose name the later answer does not change. So the stored record shows the name from the first answer filed. Dr. Brandl's is "Dr. Eva Brandl" in every answer. Dr. Leitner's is "Dr. Johanna Leitner" when A2 or A6 is filed first, as in the demo order, although A7 sends "Prim. Dr. Johanna Leitner". A7's narrative is built from the document, so it still says "Prim. Dr.".
 - **Validator.** On 30 October 2026, HL7 validator 7.0.3 found 0 errors in each of the seven Bundles as regenerated for #51. The only warning is `dom-6`, a resource without narrative. Before #51, the Task entry caused 2 errors per Bundle. To check: `pnpm validate docs/clinical-review/19-fhir`.
@@ -159,15 +159,15 @@ File: [`track/scenario/extra/lab-result-maria-beispiel-blood-count.md`](../../tr
 | Erythrocytes | 789-8: Erythrocytes [#/volume] in blood by automated count | 3.82 → 3.82 | 10^12/L → `10*12/L` | 3.90 to 5.20 → 3.9 to 5.2 | L → L | match |
 | Haematocrit | 4544-3: Hematocrit [volume fraction] of blood by automated count | 34.6 → 34.6 | % → `%` | 36.0 to 46.0 → 36 to 46 | L → L | match |
 | Platelets | 777-3: Platelets [#/volume] in blood by automated count | 412 → 412 | 10^9/L → `10*9/L` | 150 to 400 → 150 to 400 | H → H | match |
-| C-reactive protein | 1988-5: C reactive protein [mass/volume] in serum or plasma | 14 → 14 | mg/L → `mg/L` | < 5 → **text "< 5" only, no upper limit** | H → **no flag** | **differs** ([#49](https://github.com/Chaissen/AIM-Hackathon/issues/49)) |
+| C-reactive protein | 1988-5: C reactive protein [mass/volume] in serum or plasma | 14 → 14 | mg/L → `mg/L` | < 5 → upper limit 5 mg/L, text "< 5" | H → H | match (one-sided range fixed by #49) |
 
-**CRP:** the value and the range text are stored, but the range has no upper limit, so nothing compares 14 against 5, and the value carries no `H`. A list that highlights abnormal values by their flag shows CRP 14 mg/L as unremarkable. The comment, stored on the report, still says CRP is raised.
+**CRP:** FHIR's upper limit includes its own value, so the stored limit reads "at most 5". The range text keeps "< 5" as written. Until you decide otherwise, ordy flags a value of exactly 5 as `H` ([FHIR model](../FHIR.md#one-sided-ranges)).
 
 Provenance narrative, as stored:
 
 > Sent by Dr. Eva Brandl on 29 October 2026 at 14:02. Identity checked with ID Austria (simulation), full function, level high. The eHVD confirms Dr. Eva Brandl as responsible for the content at Labor Kanalstraße, found by the eHVD OID in the ID Austria login.
 
-Pre-review suggests **unsafe**: an abnormal value that the lab says must be acted on before the procedure is not flagged. Dr. Brandl is stored in the role "author" as in A1 (finding 2).
+Pre-review: the values have no differences since #49. Dr. Brandl is stored in the role "author" as in A1 (finding 2). Suggests **correct** if Doc 1 accepts the role "author" below, otherwise **acceptable**.
 
 **Question for Doc 1 (role of the validating physician):** the document says "Validated by: Dr. Eva Brandl". The record of who released this answer (the Provenance) stores her in the role "author", the FHIR role for whoever wrote the content. FHIR also has the role "verifier", which is closer to "validated by". Is "author" acceptable here?
 
@@ -251,8 +251,8 @@ File: [`track/scenario/extra/lab-result-maria-beispiel-metabolic.md`](../../trac
 |---|---|---|---|---|---|---|
 | HbA1c | 4548-4: Hemoglobin A1c/Hemoglobin.total in blood | 6.1 → 6.1 | % → `%` | 4.0 to 5.6 → 4 to 5.6 | H → H | match |
 | Glucose, fasting | 1558-6: Fasting glucose [mass/volume] in serum or plasma | 104 → 104 | mg/dL → `mg/dL` | 70 to 99 → 70 to 99 | H → H | match |
-| LDL cholesterol | 13457-7: Cholesterol in LDL [mass/volume] in serum or plasma by calculation | 128 → 128 | mg/dL → `mg/dL` | < 116 → **text "< 116" only, no upper limit** | H → **no flag** | **differs** ([#49](https://github.com/Chaissen/AIM-Hackathon/issues/49)) |
-| HDL cholesterol | 2085-9: Cholesterol in HDL [mass/volume] in serum or plasma | 58 → 58 | mg/dL → `mg/dL` | > 45 → **text "> 45" only, no lower limit** | N → **no flag** | **differs** ([#49](https://github.com/Chaissen/AIM-Hackathon/issues/49)) |
+| LDL cholesterol | 13457-7: Cholesterol in LDL [mass/volume] in serum or plasma by calculation | 128 → 128 | mg/dL → `mg/dL` | < 116 → upper limit 116 mg/dL, text "< 116" | H → H | match (one-sided range fixed by #49) |
+| HDL cholesterol | 2085-9: Cholesterol in HDL [mass/volume] in serum or plasma | 58 → 58 | mg/dL → `mg/dL` | > 45 → lower limit 45 mg/dL, text "> 45" | N → N | match (one-sided range fixed by #49) |
 | TSH | 3016-3: Thyrotropin [units/volume] in serum or plasma | 1.84 → 1.84 | mIU/L → `m[IU]/L` | 0.27 to 4.20 → 0.27 to 4.2 | N → N | match (unit gap fixed by #30) |
 
 LOINC 13457-7 means a calculated LDL. The document does not say whether LDL was calculated or measured. The code is the lab's choice, so it is kept.
@@ -263,7 +263,7 @@ Provenance narrative, as stored:
 
 **Coded role differs:** the Provenance role "author", as in A4 ([#50](https://github.com/Chaissen/AIM-Hackathon/issues/50)). The narrative says "Validated by", as the document does.
 
-Pre-review suggests **acceptable or unsafe**, Doc 1's call. LDL 128 mg/dL is above its target and not flagged. HDL is normal and only lacks its `N`. The comment does not mention LDL.
+Pre-review suggests **acceptable**: all values, units, ranges, and flags match since #49. The narrative's verb and the coded role say "wrote" where the document says "validated".
 
 **Question for Doc 1 (role of the validating physician):** the document says "Validated by: Dr. Eva Brandl". The record of who released this answer (the Provenance) stores her in the role "author", the FHIR role for whoever wrote the content. FHIR also has the role "verifier", which is closer to "validated by". Is "author" acceptable here?
 
