@@ -93,6 +93,7 @@ for (const [test_, username, name] of [
 
     // Counts toward the lock.
     assert.equal(run.failedChecks, 1);
+    assert.equal(run.bound, false);
     assert.equal(s.row.failedChecks, 1);
 
     // Dr. Hofer gets a Matrix notice.
@@ -107,6 +108,7 @@ test("M2: the link still works for Dr. Brandl after a failed check, and binds he
   const run = await s.login(eva);
   assert.equal(run.page, "answer");
   assert.deepEqual(run.transition, { from: "sent", to: "verified", personNumber: eva.personNumber });
+  assert.equal(run.bound, true);
   assert.deepEqual([s.row.state, s.row.personNumber, s.row.failedChecks], ["verified", eva.personNumber, 1]);
   assert.deepEqual(events(s.audit), [["identity_checked", "pass"]]);
   assert.equal(s.notices.length, 0);
@@ -115,6 +117,7 @@ test("M2: the link still works for Dr. Brandl after a failed check, and binds he
   const again = await s.login(eva);
   assert.equal(again.page, "answer");
   assert.equal(again.transition, null);
+  assert.equal(again.bound, true);
 });
 
 test("the third failed check locks the link", async () => {
@@ -215,7 +218,9 @@ test("a pass that loses the race to a hold shows try again", async () => {
   const [held, passed] = await Promise.all([s.login(petra), s.login(eva)]);
   // Petra's transition ran first in this store, so Eva's pass finds the request held.
   assert.equal(held.applied, true);
+  assert.equal(held.bound, true);
   assert.equal(passed.applied, false);
+  assert.equal(passed.bound, false);
   assert.equal(passed.page, "unavailable");
   assert.equal(s.row.state, "identity_held");
 });
@@ -226,6 +231,7 @@ test("a hold that loses the race to a pass shows try again and tells Dr. Hofer n
   // Eva's pass ran first, so Petra's hold is never applied and nobody will decide on it.
   assert.equal(passed.applied, true);
   assert.equal(held.applied, false);
+  assert.equal(held.bound, false);
   assert.equal(held.page, "unavailable");
   assert.equal(held.notice, null);
   assert.equal(s.notices.length, 0);
