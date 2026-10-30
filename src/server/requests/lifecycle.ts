@@ -73,6 +73,11 @@ const TRANSITIONS: Record<RequestEvent, Partial<Record<RequestState, RequestStat
   expire: open("expired"),
 };
 
+export const REQUESTER_EVENTS = ["send_anyway", "accept", "reject", "cancel"] as const satisfies RequestEvent[];
+export type RequesterEvent = (typeof REQUESTER_EVENTS)[number];
+
+export const accepts = (state: RequestState, event: RequestEvent) => TRANSITIONS[event][state] !== undefined;
+
 export class TransitionError extends Error {
   constructor(readonly from: RequestState, readonly event: RequestEvent) {
     super(`A request in state ${from} does not accept ${event}`);
