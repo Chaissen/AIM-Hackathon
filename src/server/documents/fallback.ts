@@ -2,7 +2,7 @@ import MarkdownIt from "markdown-it";
 import { z } from "zod";
 
 import { parseDateWide, parseStayWide, parseViennaDateTimeWide } from "./dates";
-import { freeText, isLoinc, parseDocument, parsePersonLine, rowUnit, toNumber } from "./parse";
+import { freeText, isLoinc, oneSided, parseDocument, parsePersonLine, rangeFields, rowUnit, toNumber, twoSided } from "./parse";
 import { HEADER_ONLY_KEYS, IDENTITY_KEYS, headerBlock, isPatientHeading, keyLines, patientIdentity, toKeyLine, type KeyLine } from "./patient-lines";
 import type { LabResult, LabRow, ParseResult, ParsedDocument, PersonLine, RehabReport, SafetyRefusal } from "./types";
 
@@ -91,7 +91,6 @@ const COLUMNS: Record<LabRowKey, Set<string>> = {
 const COLUMN_LABEL: Record<LabRowKey, string> = { test: "test", valueText: "result", unitText: "unit", rangeText: "reference range", loinc: "LOINC" };
 const LAB_KINDS = new Set(["lab report", "laboratory report", "lab result", "lab results", "laboratory result", "laboratory results", "lab findings"]);
 const REHAB_KINDS = new Set(["discharge report", "discharge letter", "discharge summary", "rehab discharge report", "rehabilitation discharge report"]);
-/** `0.8 to 1.2`, `0.8 - 1.2`, `25 – 37`, `25 — 37`, or `25 − 37`. Anything else, such as `< 37` or `25 bis 37`, is unreadable. */
 const RANGE = /^(-?\d+(?:[.,]\d+)?)\s*(?:to|-|–|—|−)\s*(-?\d+(?:[.,]\d+)?)$/;
 
 const md = new MarkdownIt();
@@ -160,23 +159,21 @@ function labRow(row: ModelReading["rows"][number], n: number, errors: string[]):
   const unit = rowUnit(row.loinc, row.unitText);
   if ("error" in unit) errors.push(`${where}: ${unit.error}`);
   // A range that is written but cannot be read gives no record, so a value outside it can never pass as normal.
-  const range = row.rangeText ? RANGE.exec(collapse(row.rangeText)) : null;
-  const low = range ? toNumber(range[1]) : null;
-  const high = range ? toNumber(range[2]) : null;
-  if (row.rangeText && (low === null || high === null)) errors.push(`${where}: the reference range "${row.rangeText}" cannot be read.`);
-  if (value === null || !isLoinc(row.loinc) || "error" in unit || (row.rangeText && (low === null || high === null))) return null;
-  const hasRange = low !== null && high !== null;
+  const dashed = row.rangeText ? RANGE.exec(collapse(row.rangeText)) : null;
+  const low = dashed ? toNumber(dashed[1]) : null;
+  const high = dashed ? toNumber(dashed[2]) : null;
+  const range = low !== null && high !== null ? twoSided(low, high) : oneSided(row.rangeText);
+  if (row.rangeText && !range) errors.push(`${where}: the reference range "${row.rangeText}" cannot be read.`);
+  if (value === null || !isLoinc(row.loinc) || "error" in unit || (row.rangeText && !range)) return null;
   return {
     test: row.test,
     value,
     valueText: row.valueText,
     ucum: unit.ucum,
     unitText: row.unitText,
-    low: hasRange ? low : null,
-    high: hasRange ? high : null,
     rangeText: row.rangeText,
     loinc: row.loinc,
-    interpretation: hasRange ? (value < low ? "L" : value > high ? "H" : "N") : null,
+    ...rangeFields(value, range),
   };
 }
 

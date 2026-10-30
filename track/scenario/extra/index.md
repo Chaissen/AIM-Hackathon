@@ -45,9 +45,6 @@ Name traps for the request ([name match](../../../docs/IDENTITY.md#name-match)):
 
 ## Open parser gaps
 
-Run on 30 October 2026 against `parseDocument` from `main`, after PR #40, which fixed the title `Prim.`. The test marks these expectations as `todo`, so they show up in every run without failing it. Remove the `todo` when the parser is fixed.
+None. #30 closed the gap for units that are not UCUM (`µmol/L`, `mIU/L`, `µg/dL`). #49 closed the gap for one-sided reference ranges (`< 5`, `< 116`, `> 45`).
 
-| Gap | Documents | Parser today | Expected |
-|---|---|---|---|
-| One-sided reference ranges | blood count (`< 5`), metabolic (`< 116`, `> 45`) | `low` and `high` null, no interpretation. CRP 14 and LDL 128 are not flagged. | `< x` gives only `high`, `> x` only `low`. `text` keeps the range as written. |
-| Units that are not UCUM | kidney (`µmol/L`), metabolic (`mIU/L`), Maria Anna Beispiel (`µg/dL`) | Passed through unchanged, so the validator reports an error | `umol/L`, `m[IU]/L`, `ug/dL`. `unitText` keeps the unit as written. |
+When a document here shows a new gap, add it to a table with the columns Gap, Documents, Parser today, and Expected. Mark its expectation in `extra.test.ts` as `todo`, so it shows up in every run without failing it. Remove the row and the `todo` when the parser is fixed.

@@ -91,7 +91,7 @@ test("blood count: winter offset, 10^12/L, and four values outside the range", (
   assert.equal(row(doc, "Haematocrit").ucum, "%");
 });
 
-test("blood count: CRP 14 with the range < 5 is H", { todo: "parser gap: one-sided reference ranges" }, () => {
+test("blood count: CRP 14 with the range < 5 is H", () => {
   const crp = row(lab("lab-result-maria-beispiel-blood-count.md"), "C-reactive protein");
   assert.deepEqual([crp.low, crp.high, crp.rangeText, crp.interpretation], [null, 5, "< 5", "H"]);
 });
@@ -111,7 +111,7 @@ test("kidney: decimal commas, and the clock change between sample and report", (
   );
 });
 
-test("kidney: µmol/L becomes the UCUM code umol/L", { todo: "parser gap: units that are not UCUM" }, () => {
+test("kidney: µmol/L becomes the UCUM code umol/L", () => {
   const urate = row(lab("lab-result-maria-beispiel-kidney.md"), "Uric acid");
   assert.deepEqual([urate.ucum, urate.unitText], ["umol/L", "µmol/L"]);
 });
@@ -130,7 +130,7 @@ test("metabolic: family name first in capitals, and the ranges that have two end
   assert.equal(row(doc, "HbA1c").ucum, "%");
 });
 
-test("metabolic: LDL < 116 and HDL > 45 keep one end each", { todo: "parser gap: one-sided reference ranges" }, () => {
+test("metabolic: LDL < 116 and HDL > 45 keep one end each", () => {
   const doc = lab("lab-result-maria-beispiel-metabolic.md");
   const ldl = row(doc, "LDL cholesterol");
   const hdl = row(doc, "HDL cholesterol");
@@ -138,7 +138,7 @@ test("metabolic: LDL < 116 and HDL > 45 keep one end each", { todo: "parser gap:
   assert.deepEqual([hdl.low, hdl.high, hdl.interpretation], [45, null, "N"]);
 });
 
-test("metabolic: mIU/L becomes the UCUM code m[IU]/L", { todo: "parser gap: units that are not UCUM" }, () => {
+test("metabolic: mIU/L becomes the UCUM code m[IU]/L", () => {
   assert.equal(row(lab("lab-result-maria-beispiel-metabolic.md"), "TSH").ucum, "m[IU]/L");
 });
 
@@ -168,7 +168,7 @@ test("rehab 2024: Prim. counts as a title", () => {
   assert.deepEqual([writtenBy?.titles, writtenBy?.given, writtenBy?.family], [["Prim.", "Dr."], "Johanna", "Leitner"]);
 });
 
-test("Maria Anna Beispiel: µg/dL becomes the UCUM code ug/dL", { todo: "parser gap: units that are not UCUM" }, () => {
+test("Maria Anna Beispiel: µg/dL becomes the UCUM code ug/dL", () => {
   assert.equal(row(lab("lab-result-maria-anna-beispiel.md"), "Iron").ucum, "ug/dL");
 });
 

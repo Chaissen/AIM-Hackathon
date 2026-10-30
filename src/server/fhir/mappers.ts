@@ -71,7 +71,7 @@ const markdownAttachment = (doc: ParsedDocument, title?: string): Attachment =>
 const quantity = (value: number, row: LabRow): Quantity =>
   compact<Quantity>({ value, unit: row.unitText, system: row.ucum ? UCUM : null, code: row.ucum });
 
-// The parser gives both bounds or neither. A row without bounds and without text gets no range (`ref-1`).
+// FHIR's `low` and `high` include their value, so only `text` keeps a strict end such as `< 5`.
 function referenceRange(row: LabRow): ObservationReferenceRange[] | null {
   const range = compact<ObservationReferenceRange>({
     low: row.low === null ? null : quantity(row.low, row),

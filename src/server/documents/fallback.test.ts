@@ -235,16 +235,14 @@ test("the type comes from the heading, and a table under an unknown kind gives n
 
 // Finding 5: a range that cannot be read gives no record.
 
-test("dash ranges are read, and a range that cannot be read gives no record instead of no flag", async () => {
+test("dash and one-sided ranges are read, and a range that cannot be read gives no record instead of no flag", async () => {
   const aptt48 = (range: string) => lab.replace("| aPTT | 31 | s | 25 - 37 |", `| aPTT | 48 | s | ${range} |`);
-  for (const range of ["25 — 37", "25 − 37", "25 – 37", "25 to 37"]) {
+  for (const [range, low] of [["25 — 37", 25], ["25 − 37", 25], ["25 – 37", 25], ["25 to 37", 25], ["< 37", null]] as const) {
     const doc = (await record(aptt48(range), changed(goodLab, (r) => Object.assign(r.rows[1], { valueText: "48", rangeText: range })))) as LabResult;
-    assert.deepEqual([doc.rows[1].low, doc.rows[1].high, doc.rows[1].interpretation], [25, 37, "H"], range);
+    assert.deepEqual([doc.rows[1].low, doc.rows[1].high, doc.rows[1].interpretation], [low, 37, "H"], range);
   }
-  for (const range of ["25 bis 37", "< 37"]) {
-    const errors = await unreadable(aptt48(range));
-    assert.ok(errors.includes(`Row 2 (aPTT): the reference range "${range}" cannot be read.`), errors.join("; "));
-  }
+  const errors = await unreadable(aptt48("25 bis 37"));
+  assert.ok(errors.includes('Row 2 (aPTT): the reference range "25 bis 37" cannot be read.'), errors.join("; "));
 });
 
 // Finding 6: a second patient in any form is refused before the model.
