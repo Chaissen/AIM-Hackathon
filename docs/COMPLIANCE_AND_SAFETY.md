@@ -90,13 +90,11 @@ AI is optional in this project. If we build the AI fallback parser:
 
 ## Disclaimer
 
-The README, the application footer, and the video show this text:
+The README and the video show this text:
 
 > **Important notice.** This software is a prototype built for the AIM hackathon 2026. It is not a medical device, it has not been clinically validated, and no regulatory body has approved or certified it. It uses fictional, synthetic data only. ID Austria and the eHVD are simulated.
 >
 > Do not use it to diagnose, treat, or monitor any condition, or to make any clinical decision. Do not enter real patient data or any personal data. The authors accept no liability for any use outside the hackathon demonstration.
-
-Short form for the application footer: "Prototype with synthetic data. ID Austria is simulated. Not for clinical use."
 
 ## Responsibilities
 
