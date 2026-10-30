@@ -11,3 +11,5 @@ if (env.NODE_ENV !== "production") globalForDb.pg = client;
 
 export const db = drizzle(client, { schema });
 export type Db = typeof db;
+/** A transaction from `db.transaction`, for helpers that take either. */
+export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];

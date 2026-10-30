@@ -18,7 +18,8 @@ function dayMonth(day: string, monthName: string): { day: number; month: number 
   return month > 0 ? { day: Number(day), month } : null;
 }
 
-const toIso = ({ year, month, day }: DateParts): IsoDate => `${year}-${pad(month)}-${pad(day)}`;
+// FHIR wants four digits for the year, also for a typo such as 0999.
+const toIso = ({ year, month, day }: DateParts): IsoDate => `${String(year).padStart(4, "0")}-${pad(month)}-${pad(day)}`;
 
 /** `12 March 1961` to `1961-03-12`. Null for any other format or an impossible date. */
 export function parseDate(text: string): IsoDate | null {

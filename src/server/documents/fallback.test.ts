@@ -440,6 +440,16 @@ test("the wide date readers take the dotted and ISO formats", () => {
   assert.equal(parseStayWide("23.09.2026 - 02.09.2026"), null);
 });
 
+test("the fallback codes units and checks vital signs with the parser's rowUnit()", async () => {
+  const fibrinogen = "| Fibrinogen | 3.1 | g/L | 2.0 - 4.0 | 3255-7 |";
+  const creatinine = lab.replace(fibrinogen, "| Creatinine | 80 | µmol/l | 45 - 84 | 14682-9 |");
+  const reading = changed(goodLab, (r) => (r.rows[3] = { test: "Creatinine", valueText: "80", unitText: "µmol/l", rangeText: "45 - 84", loinc: "14682-9" }));
+  assert.equal(((await record(creatinine, reading)) as LabResult).rows[3].ucum, "umol/L");
+
+  const temperature = lab.replace(fibrinogen, "| Temperature | 37.2 | ratio | 36 - 37.5 | 8310-5 |");
+  assert.ok((await unreadable(temperature)).includes('Row 4 (Temperature): "ratio" is not a unit for this vital sign. Use a unit such as °C.'));
+});
+
 // #46: a key/value table row and a key with its value on the next line, in a format the parser does not know.
 
 test("a key/value table row with another patient is refused without the model, and with the same patient it is read", async () => {
