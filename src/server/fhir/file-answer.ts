@@ -20,7 +20,10 @@ export type AnswerFiled = {
   sender: string;
   author: string;
   organization: string;
-  /** Every resource the transaction created or reused, the Task included. */
+  /**
+   * Every resource in the transaction, created or matched, the Task included. A Practitioner known from `bindings`
+   * is only referenced, so it is in `sender` or `author` but not here.
+   */
   resources: string[];
 };
 
@@ -35,8 +38,13 @@ async function writeAnswerFiled(requestId: number, detail: AnswerFiled) {
 }
 
 /**
- * Files one answer. If HAPI rejects the transaction, nothing is filed and nothing is audited; the FhirError
- * goes to the caller, which keeps the answer and tells Dr. Hofer.
+ * Files one answer and writes `answer_filed`.
+ *
+ * An error means the answer may or may not be on the server: HAPI may have rejected the transaction (FhirError with
+ * its status), or committed it while the response was lost (timeout, network) or the audit insert failed afterwards.
+ * Keep the answer and call `fileAnswer` again with a Bundle built from the same answer (same request id and upload
+ * hash). Every POST is a conditional create, so the retry files nothing new, gets back the ids of what the first
+ * attempt filed, and writes the audit entry.
  */
 export async function fileAnswer(
   requestId: number,

@@ -21,12 +21,28 @@ We file all resources of one answer in one [transaction Bundle](https://hl7.org/
 
 The filing (T13) lives in `src/server/fhir/`. `filing.ts` is pure and builds the Bundle, and `file-answer.ts` sends it and writes the audit entry.
 
-1. `prepareParties()` builds the Practitioner and Organization entries: Dr. Hofer, the sender, the author when it is someone else, the outside organisation, and the identity provider. It returns their `urn:uuid:` references.
+1. `prepareParties(parties, { requestId, uploadSha256 })` builds the Practitioner and Organization entries: Dr. Hofer, the sender, the author when it is someone else, the outside organisation, and the identity provider. It returns their `urn:uuid:` references as FHIR `Reference`s, which the mapper takes as they are. `uploadSha256` is `uploadHash()` of the uploaded file and names the answer.
 2. The mapper (T12, T14) builds the clinical resources with those references.
 3. `buildFilingBundle()` adds the Provenance and the completed Task and returns the Bundle with the references the audit entry needs.
-4. `fileAnswer()` POSTs the Bundle to the server base, reads the server ids from the `transaction-response`, and writes `answer_filed`. If HAPI rejects the Bundle, nothing is filed, nothing is audited, and the error goes to the caller.
+4. `fileAnswer()` POSTs the Bundle to the server base, reads the server ids from the `transaction-response`, and writes `answer_filed`.
 
 Order of the entries: Practitioners, Organizations, the DiagnosticReport or DocumentReference, the Observations, the Provenance, the Task.
+
+### Retries
+
+Every POST in the Bundle is a conditional create (`ifNoneExist`), so the same answer is filed at most once:
+
+| Entry | Condition |
+|---|---|
+| Practitioner, Organization with an eHVD entry | `identifier=urn:ietf:rfc:3986\|urn:oid:<OID>`. Every answer from that person or organisation reuses it. |
+| Practitioner, Organization without an eHVD entry | `identifier=urn:aim-t2:answer\|<request id>:<upload SHA-256>:<part>`, part `sender`, `author`, or `organization`. Only a retry of the same answer reuses it. |
+| "ID Austria (simulation)" | `identifier=urn:ietf:rfc:3986\|<issuer URL>` |
+| DiagnosticReport or DocumentReference | `identifier=urn:aim-t2:answer\|<request id>:<upload SHA-256>:output` |
+| Each Observation | the same with `result-1`, `result-2`, … in table order |
+| Provenance | `target=<urn:uuid of the output>`. R4 Provenance has no `identifier`. HAPI resolves the `urn:uuid:` in the condition to the output's server id, so the condition finds the Provenance of the same answer. Another FHIR server must do the same, or the Provenance needs another key. |
+| Task | `PUT Task/ordy-request-<request id>`, idempotent anyway |
+
+When `fileAnswer()` throws, the answer may or may not be on the server. HAPI may have rejected the transaction (a `FhirError` with its status, nothing filed), or it may have committed while the response was lost (the 15-second timeout, the network) or the audit insert failed afterwards. Either way nothing is audited. The caller keeps the answer and calls `fileAnswer()` again with a Bundle built from the same answer, meaning the same request id and upload hash. The retry files nothing new, gets back the ids of what the first attempt filed, and writes `answer_filed`. Another upload has another hash and is a new answer.
 
 ## How the resources reference each other
 
@@ -201,7 +217,7 @@ The ID token is the proof of the identity check. Anyone can verify its signature
 | `restriction.period.end` | The link expiry |
 | `output` | The DiagnosticReport or the DocumentReference, once filed, with `type.text` "Lab result" or "Rehab discharge report" |
 
-The Task id is `ordy-request-<request id>`, and every write is a `PUT`, so the same Task follows the request from sent to filed. The filing Bundle PUTs it with status `completed` and the output. For the other state changes, `syncTask()` in `src/server/fhir/file-answer.ts` PUTs it; until the outside person has a Practitioner, `owner` is a reference with only `display`. Wiring `syncTask()` into the state changes belongs to the request core (T04).
+The Task id is `ordy-request-<request id>`, and every write is a `PUT`, so the same Task follows the request from sent to filed. The filing Bundle PUTs it with status `completed` and the output. Its status comes from `taskStatus()` in `src/server/requests/lifecycle.ts`, the table in [Architecture](ARCHITECTURE.md#request-lifecycle). For the other state changes, `syncTask()` in `src/server/fhir/file-answer.ts` PUTs it; until the outside person has a Practitioner, `owner` is a reference with only `display`. Wiring `syncTask()` into the state changes belongs to the request core (T04).
 
 The Task stays on the clinic's FHIR server. It is the only place outside the request service database where the request appears with its document type.
 
@@ -211,8 +227,8 @@ The Task stays on the clinic's FHIR server. It is the only place outside the req
 - We do not store the outside person's birth date in the Practitioner.
 - An Organization holds the name and the eHVD OID, for example `urn:oid:1.2.40.0.34.3.1.99.1.2` for Labor Kanalstraße.
 - The transaction uses conditional create with `ifNoneExist` on the identifier, for example `identifier=urn:ietf:rfc:3986|urn:oid:1.2.40.0.34.3.2.99.1.2`, so a second answer from Dr. Brandl reuses her Practitioner.
-- For people without an eHVD entry, such as Stefan Kern, the `bindings` table remembers the Practitioner id. The filing then references `Practitioner/<id>` and creates nothing. Without a binding, it creates a new Practitioner without identifier, and `answer_filed` names its id in `sender` so the binding can store it.
-- An organisation without an eHVD entry gets a new Organization without identifier. We do not match organisations by name.
+- For people without an eHVD entry, such as Stefan Kern, the `bindings` table remembers the Practitioner id. The filing then references `Practitioner/<id>` and creates nothing. Without a binding, it creates a new Practitioner whose only identifier names the answer (see [Retries](#retries)), and `answer_filed` names its id in `sender` so the binding can store it.
+- An organisation without an eHVD entry gets a new Organization whose only identifier names the answer. We do not match organisations by name.
 - The Organization "ID Austria (simulation)" has the issuer URL from the ID token as identifier, `http://localhost:8080/realms/idaustria-sim` in the demo, and is created once the same way. Real ID Austria has its own issuer, so it becomes a separate Organization.
 
 ## Patient
@@ -221,7 +237,7 @@ The request service puts `track/scenario/patient.json` on the server with `PUT P
 
 ## Validation
 
-1. After a run, `pnpm validate` (`scripts/validate.ts`, planned in T18) reads the ids of the filed resources from the `answer_filed` audit entries. `detail.resources` lists every resource the transaction created or reused, the Task included. `detail` also names `output`, `targets`, `provenance`, `task`, `sender`, `author`, and `organization`.
+1. After a run, `pnpm validate` (`scripts/validate.ts`, planned in T18) reads the ids of the filed resources from the `answer_filed` audit entries. `detail.resources` lists every resource in the transaction, the Task included. A Practitioner known from `bindings` is only referenced, not part of the transaction, so it appears in `sender` or `author` but not in `resources`. `detail` also names `output`, `targets`, `provenance`, `task`, `sender`, `author`, and `organization`.
 2. It fetches each resource from HAPI into `out/filed/`.
 3. It runs the validator on each file, as the scenario README says: `java -jar validator_cli.jar <file> -version 4.0`.
 4. It counts the issues with severity error. The target is 0. Warnings do not count.

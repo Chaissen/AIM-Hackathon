@@ -1,18 +1,35 @@
 import { randomUUID } from "node:crypto";
 
-import type { Bundle, BundleEntry, FhirResource, Organization, Practitioner, Provenance, ProvenanceAgent, Reference, Task } from "fhir/r4";
+import type {
+  Bundle,
+  BundleEntry,
+  DiagnosticReport,
+  DocumentReference,
+  Identifier,
+  Observation,
+  Organization,
+  Practitioner,
+  Provenance,
+  ProvenanceAgent,
+  Reference,
+  Task,
+} from "fhir/r4";
 import { decodeJwt } from "jose";
 
 import type { DocumentType } from "@/lib/document-types";
 import { DOCUMENT_TYPES } from "@/lib/document-types";
 import { viennaInstant } from "@/server/documents/dates";
+import { taskStatus, type RequestState } from "@/server/requests/lifecycle";
 
 // The filing of one answer (docs/FHIR.md, "Provenance", "Task", "Practitioner and Organization").
 // Everything here is pure: it builds one transaction Bundle, so the answer is filed completely or not at all.
 // `file-answer.ts` posts it and writes the audit entry.
+//
+// Every POST in the Bundle is a conditional create, so posting the same answer twice files it once. A retry after
+// a lost response gets back the resources the first, committed transaction filed instead of a second copy.
 
-/** A resource with the `urn:uuid:` fullUrl it gets in the Bundle. The mappers (T12, T14) return this shape. */
-export type FilingEntry = { fullUrl: string; resource: FhirResource };
+/** A clinical resource with the `urn:uuid:` fullUrl it gets in the Bundle. The mappers (T12, T14) return this shape. */
+export type FilingEntry = { fullUrl: string; resource: DiagnosticReport | Observation | DocumentReference };
 
 /** A person as the request and ID Austria name them. */
 export type Person = {
@@ -46,8 +63,20 @@ export type Parties = {
   identityProvider: IdentityProvider;
 };
 
+/**
+ * One answer: the request and the SHA-256 of the upload (`uploadHash()`). Rebuilding the Bundle for the same answer
+ * gives the same conditions, so a retry matches what the first attempt filed.
+ */
+export type AnswerKey = { requestId: number; uploadSha256: string };
+
+/** The identifier system for resources an answer creates. Values are `<request id>:<upload SHA-256>:<part>`. */
+export const ANSWER_SYSTEM = "urn:aim-t2:answer";
+
+const answerIdentifier = (key: AnswerKey, part: string): Identifier => ({ system: ANSWER_SYSTEM, value: `${key.requestId}:${key.uploadSha256}:${part}` });
+
 /** References the mappers and the Provenance point at, and the Bundle entries that create them. */
 export type PreparedParties = {
+  answer: AnswerKey;
   requester: Reference;
   sender: Reference;
   /** The author's reference, or the sender's when the sender is the author. Pass it to the mapper as `practitioner`. */
@@ -62,26 +91,20 @@ export type PreparedParties = {
 const RFC3986 = "urn:ietf:rfc:3986";
 const urn = () => `urn:uuid:${randomUUID()}`;
 
-const oidIdentifier = (oid: string) => ({ system: RFC3986, value: `urn:oid:${oid}` });
+const oidIdentifier = (oid: string): Identifier => ({ system: RFC3986, value: `urn:oid:${oid}` });
+
+const ifNoneExist = (identifier: Identifier) => `identifier=${identifier.system}|${identifier.value}`;
 
 /**
- * A POST entry. With an identifier, the entry is a conditional create (`ifNoneExist`), so a second answer from
- * the same person or organisation reuses the resource instead of creating a copy.
+ * A conditional create (`ifNoneExist`) on the identifier. With an eHVD OID, a second answer from the same person or
+ * organisation reuses the resource. Without one, the identifier comes from the answer, so only a retry reuses it.
  */
-function create(resource: Practitioner | Organization, identifier: { system: string; value: string } | null): { reference: Reference; entry: BundleEntry } {
+function create(resource: Practitioner | Organization, identifier: Identifier): { reference: Reference; entry: BundleEntry } {
   const fullUrl = urn();
-  const withIdentifier: Practitioner | Organization = identifier ? { ...resource, identifier: [identifier] } : resource;
+  const withIdentifier: Practitioner | Organization = { ...resource, identifier: [identifier] };
   return {
     reference: { reference: fullUrl },
-    entry: {
-      fullUrl,
-      resource: withIdentifier,
-      request: {
-        method: "POST",
-        url: resource.resourceType,
-        ...(identifier && { ifNoneExist: `identifier=${identifier.system}|${identifier.value}` }),
-      },
-    },
+    entry: { fullUrl, resource: withIdentifier, request: { method: "POST", url: resource.resourceType, ifNoneExist: ifNoneExist(identifier) } },
   };
 }
 
@@ -89,24 +112,24 @@ const givenNames = (given: string) => given.trim().split(/\s+/).filter(Boolean);
 
 export const displayName = (person: Person) => [...(person.titles ?? []), ...givenNames(person.given), person.family].join(" ");
 
-function practitioner(person: Person) {
+function practitioner(person: Person, answer: AnswerKey, part: string) {
   if (!person.ehvdOid && person.practitionerId) return { reference: { reference: `Practitioner/${person.practitionerId}` }, entry: null };
   // No birth date: we never store the outside person's birth date (docs/FHIR.md).
   const resource: Practitioner = {
     resourceType: "Practitioner",
     name: [{ family: person.family, given: givenNames(person.given), ...(person.titles?.length ? { prefix: person.titles } : {}) }],
   };
-  return create(resource, person.ehvdOid ? oidIdentifier(person.ehvdOid) : null);
+  return create(resource, person.ehvdOid ? oidIdentifier(person.ehvdOid) : answerIdentifier(answer, part));
 }
 
 /** Builds the Practitioner and Organization entries. Call it before the mapper, which needs the references. */
-export function prepareParties(parties: Parties): PreparedParties {
-  const requester = practitioner(parties.requester);
-  const sender = practitioner(parties.sender);
-  const author = parties.author ? practitioner(parties.author) : sender;
+export function prepareParties(parties: Parties, answer: AnswerKey): PreparedParties {
+  const requester = practitioner(parties.requester, answer, "requester");
+  const sender = practitioner(parties.sender, answer, "sender");
+  const author = parties.author ? practitioner(parties.author, answer, "author") : sender;
   const organization = create(
     { resourceType: "Organization", name: parties.organization.name },
-    parties.organization.ehvdOid ? oidIdentifier(parties.organization.ehvdOid) : null,
+    parties.organization.ehvdOid ? oidIdentifier(parties.organization.ehvdOid) : answerIdentifier(answer, "organization"),
   );
   const identityProvider = create(
     { resourceType: "Organization", name: parties.identityProvider.name },
@@ -114,6 +137,7 @@ export function prepareParties(parties: Parties): PreparedParties {
   );
   const slots = [requester, sender, ...(parties.author ? [author] : []), organization, identityProvider];
   return {
+    answer,
     requester: requester.reference,
     sender: sender.reference,
     author: author.reference,
@@ -123,21 +147,6 @@ export function prepareParties(parties: Parties): PreparedParties {
     entries: slots.flatMap((slot) => (slot.entry ? [slot.entry] : [])),
   };
 }
-
-// Task mirrors the request state (docs/ARCHITECTURE.md, "Request lifecycle").
-export const TASK_STATUS = {
-  awaiting_confirmation: "draft",
-  sent: "requested",
-  identity_held: "on-hold",
-  verified: "in-progress",
-  answer_held: "on-hold",
-  filed: "completed",
-  cancelled: "cancelled",
-  expired: "failed",
-  locked: "failed",
-} as const satisfies Record<string, Task["status"]>;
-
-export type RequestState = keyof typeof TASK_STATUS;
 
 /** The Task id is fixed per request, so every state change and the filing PUT the same Task. */
 export const taskId = (requestId: number) => `ordy-request-${requestId}`;
@@ -163,7 +172,7 @@ export function buildTask(input: TaskInput): Task & { id: string } {
   return {
     resourceType: "Task",
     id: taskId(input.requestId),
-    status: TASK_STATUS[input.state],
+    status: taskStatus(input.state),
     ...(input.businessStatus && { businessStatus: { text: input.businessStatus } }),
     intent: "order",
     description: `Request for a ${type.messageName}`,
@@ -210,7 +219,7 @@ export type AnswerFiling = {
   /** The names as written into the narrative. */
   parties: Parties;
   prepared: PreparedParties;
-  /** The mapper output: the DiagnosticReport or DocumentReference, and the Observations if any. */
+  /** The mapper output: the DiagnosticReport or DocumentReference, and the Observations if any, in document order. */
   clinical: { output: FilingEntry; others: FilingEntry[] };
   /** The ID token exactly as received from ID Austria. */
   idToken: string;
@@ -251,9 +260,25 @@ function narrative(filing: AnswerFiling, levels: string): string {
 
 const ref = (reference: Reference) => reference.reference ?? "";
 
+/**
+ * The clinical entry with the answer's identifier and a conditional create on it. The part is the entry's place in
+ * the answer, so the same document gives the same identifiers again.
+ */
+function clinicalEntry({ fullUrl, resource }: FilingEntry, answer: AnswerKey, part: string): BundleEntry {
+  const identifier = answerIdentifier(answer, part);
+  const withIdentifier: FilingEntry["resource"] = { ...resource, identifier: [...(resource.identifier ?? []), identifier] };
+  return {
+    fullUrl,
+    resource: withIdentifier,
+    request: { method: "POST", url: resource.resourceType, ifNoneExist: ifNoneExist(identifier) },
+  };
+}
+
 /** One transaction Bundle per answer: parties, clinical resources, Provenance, and the completed Task. */
 export function buildFilingBundle(filing: AnswerFiling): Filing {
   const { prepared, clinical, request } = filing;
+  const { answer } = prepared;
+  if (answer.requestId !== request.id) throw new Error(`The parties were prepared for request ${answer.requestId}, not ${request.id}`);
   const { loginAt, levels } = readIdToken(filing.idToken);
   const clinicalEntries = [clinical.output, ...clinical.others];
   const targets = clinicalEntries.map((entry) => entry.fullUrl);
@@ -298,8 +323,11 @@ export function buildFilingBundle(filing: AnswerFiling): Filing {
     type: "transaction",
     entry: [
       ...prepared.entries,
-      ...clinicalEntries.map(({ fullUrl, resource }) => ({ fullUrl, resource, request: { method: "POST" as const, url: resource.resourceType } })),
-      { fullUrl: provenanceUrl, resource: provenance, request: { method: "POST", url: "Provenance" } },
+      clinicalEntry(clinical.output, answer, "output"),
+      ...clinical.others.map((entry, index) => clinicalEntry(entry, answer, `result-${index + 1}`)),
+      // R4 Provenance has no identifier. Its target is the output, which the conditional create above makes unique
+      // per answer. HAPI resolves the `urn:uuid:` in the condition to the output's server id.
+      { fullUrl: provenanceUrl, resource: provenance, request: { method: "POST", url: "Provenance", ifNoneExist: `target=${clinical.output.fullUrl}` } },
       // PUT, so the Task the request created earlier is updated, or created if it does not exist yet.
       { resource: task, request: { method: "PUT", url: `Task/${task.id}` } },
     ],

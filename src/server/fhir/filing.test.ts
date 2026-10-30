@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { Bundle, BundleEntry, DiagnosticReport, DocumentReference, Observation, Organization, Practitioner, Provenance, Task } from "fhir/r4";
+import type { Bundle, BundleEntry, DiagnosticReport, DocumentReference, Identifier, Observation, Organization, Practitioner, Provenance, Reference, Resource, Task } from "fhir/r4";
 
 import { viennaInstant } from "@/server/documents/dates";
 
@@ -18,6 +18,8 @@ import {
 } from "./filing";
 
 const ISSUER = "http://localhost:8080/realms/idaustria-sim";
+const LAB_SHA = "a".repeat(64);
+const REHAB_SHA = "b".repeat(64);
 
 // The filing only decodes the token; the login verified it. So an unsigned token is enough here.
 function idToken(claims: Record<string, unknown>) {
@@ -89,8 +91,8 @@ const request = (id: number, docType: "lab-result" | "rehab-report") => ({
   expiresAt: new Date("2026-11-05T12:30:00Z"),
 });
 
-function labFiling(overrides: Partial<AnswerFiling> = {}): AnswerFiling {
-  const prepared = prepareParties(labParties);
+function labFiling(overrides: Partial<AnswerFiling> = {}, uploadSha256 = LAB_SHA): AnswerFiling {
+  const prepared = prepareParties(labParties, { requestId: 1, uploadSha256 });
   return {
     request: request(1, "lab-result"),
     parties: labParties,
@@ -105,7 +107,7 @@ function labFiling(overrides: Partial<AnswerFiling> = {}): AnswerFiling {
 }
 
 function rehabFiling(): AnswerFiling {
-  const prepared = prepareParties(rehabParties);
+  const prepared = prepareParties(rehabParties, { requestId: 2, uploadSha256: REHAB_SHA });
   return {
     request: request(2, "rehab-report"),
     parties: rehabParties,
@@ -159,10 +161,14 @@ test("request 1: one transaction with conditional creates on the eHVD OIDs", () 
   assert.deepEqual(
     byType<Observation>(bundle, "Observation").map((e) => e.request),
     [
-      { method: "POST", url: "Observation" },
-      { method: "POST", url: "Observation" },
+      { method: "POST", url: "Observation", ifNoneExist: `identifier=urn:aim-t2:answer|1:${LAB_SHA}:result-1` },
+      { method: "POST", url: "Observation", ifNoneExist: `identifier=urn:aim-t2:answer|1:${LAB_SHA}:result-2` },
     ],
   );
+  const report = only<DiagnosticReport>(bundle, "DiagnosticReport");
+  assert.deepEqual(report.resource.identifier, [{ system: "urn:aim-t2:answer", value: `1:${LAB_SHA}:output` }]);
+  assert.deepEqual(report.request, { method: "POST", url: "DiagnosticReport", ifNoneExist: `identifier=urn:aim-t2:answer|1:${LAB_SHA}:output` });
+  assert.deepEqual(only<Provenance>(bundle, "Provenance").request, { method: "POST", url: "Provenance", ifNoneExist: "target=urn:uuid:diagnostic-report" });
 });
 
 test("request 1: Provenance names the author, the policy, and the ID token as signature", () => {
@@ -228,8 +234,10 @@ test("request 2: Dr. Leitner is the author, Stefan Kern the informant without an
 
   const kern = byType<Practitioner>(bundle, "Practitioner").find((e) => e.resource.name?.[0]?.family === "Kern");
   assert.ok(kern);
-  assert.deepEqual(kern.request, { method: "POST", url: "Practitioner" });
-  assert.equal(kern.resource.identifier, undefined);
+  // No eHVD entry, so the identifier comes from the answer: a retry reuses him, a later answer does not.
+  const kernIdentifier = { system: "urn:aim-t2:answer", value: `2:${REHAB_SHA}:sender` };
+  assert.deepEqual(kern.request, { method: "POST", url: "Practitioner", ifNoneExist: `identifier=urn:aim-t2:answer|2:${REHAB_SHA}:sender` });
+  assert.deepEqual(kern.resource.identifier, [kernIdentifier]);
   assert.equal(kern.resource.name?.[0]?.prefix, undefined);
 
   const { resource: provenance } = only<Provenance>(bundle, "Provenance");
@@ -259,7 +267,7 @@ test("a held answer Dr. Hofer accepted carries the accepted-by-requester policy"
 });
 
 test("a person the bindings table knows is referenced, not created again", () => {
-  const prepared = prepareParties({ ...rehabParties, sender: { ...rehabParties.sender, practitionerId: "kern-1" } });
+  const prepared = prepareParties({ ...rehabParties, sender: { ...rehabParties.sender, practitionerId: "kern-1" } }, { requestId: 2, uploadSha256: REHAB_SHA });
   assert.deepEqual(prepared.sender, { reference: "Practitioner/kern-1" });
   assert.equal(prepared.entries.filter((e) => e.resource?.resourceType === "Practitioner").length, 2);
 });
@@ -333,4 +341,90 @@ test("fileAnswer writes no audit entry when HAPI rejects the transaction", async
     /400/,
   );
   assert.equal(audited, false);
+});
+
+const conditions = (bundle: Bundle) => (bundle.entry ?? []).map((e) => `${e.request?.method} ${e.request?.url} ${e.request?.ifNoneExist ?? ""}`);
+
+test("every POST is conditional, and the same answer gives the same conditions again", () => {
+  const first = buildFilingBundle(labFiling()).bundle;
+  for (const entry of first.entry ?? []) if (entry.request?.method === "POST") assert.ok(entry.request.ifNoneExist, `${entry.request.url} is conditional`);
+  assert.deepEqual(conditions(buildFilingBundle(labFiling()).bundle), conditions(first));
+  // Another upload is another answer.
+  assert.notDeepEqual(conditions(buildFilingBundle(labFiling({}, "c".repeat(64))).bundle), conditions(first));
+});
+
+test("buildFilingBundle refuses parties prepared for another request", () => {
+  assert.throws(() => buildFilingBundle(labFiling({ request: request(9, "lab-result") })), /prepared for request 1, not 9/);
+});
+
+/**
+ * A FHIR server with the transaction behaviour the filing relies on: conditional create on `identifier` and on
+ * `target`, with `urn:uuid:` placeholders in the condition resolved to the ids of earlier entries (as HAPI does).
+ */
+function fakeServer() {
+  const store = new Map<string, Resource & { identifier?: Identifier[]; target?: Reference[] }>();
+  let next = 100;
+  const matches = (resource: Resource & { identifier?: Identifier[]; target?: Reference[] }, condition: string) => {
+    const [param, value] = [condition.slice(0, condition.indexOf("=")), condition.slice(condition.indexOf("=") + 1)];
+    if (param === "target") return resource.target?.some((t) => t.reference === value) ?? false;
+    const [system, code] = [value.slice(0, value.indexOf("|")), value.slice(value.indexOf("|") + 1)];
+    return resource.identifier?.some((i) => i.system === system && i.value === code) ?? false;
+  };
+  async function transaction(bundle: Bundle): Promise<Bundle> {
+    const ids = new Map<string, string>();
+    const resolve = (text: string) => text.replace(/urn:uuid:[\w-]+/g, (u) => ids.get(u) ?? u);
+    const writes: [string, Resource][] = [];
+    const entry = (bundle.entry ?? []).map(({ fullUrl, resource, request }) => {
+      if (!resource || !request) throw new Error("incomplete entry");
+      if (request.method === "PUT") {
+        writes.push([request.url, resource]);
+        return { response: { status: "200 OK", location: `${request.url}/_history/1` } };
+      }
+      const condition = request.ifNoneExist && resolve(request.ifNoneExist);
+      const found = condition ? [...store].find(([id, r]) => id.startsWith(`${request.url}/`) && matches(r, condition))?.[0] : undefined;
+      const id = found ?? `${request.url}/${next++}`;
+      if (fullUrl) ids.set(fullUrl, id);
+      if (!found) writes.push([id, resource]);
+      return { response: { status: found ? "200 OK" : "201 Created", location: `${id}/_history/1` } };
+    });
+    for (const [id, resource] of writes) store.set(id, JSON.parse(resolve(JSON.stringify(resource))));
+    return { resourceType: "Bundle", type: "transaction-response", entry };
+  }
+  return { store, transaction };
+}
+
+test("a retry after a lost response files nothing new and writes answer_filed once", async () => {
+  const server = fakeServer();
+  const audits: AnswerFiled[] = [];
+  const audit = async (_: number, detail: AnswerFiled) => void audits.push(detail);
+
+  // HAPI commits, but the response never arrives (the 15 s timeout fires).
+  await assert.rejects(
+    fileAnswer(1, buildFilingBundle(labFiling()), {
+      transaction: async (bundle) => {
+        await server.transaction(bundle);
+        throw new Error("The operation was aborted due to timeout");
+      },
+      audit,
+    }),
+    /timeout/,
+  );
+  const filed = new Map(server.store);
+  assert.equal(filed.size, 9);
+  assert.equal(audits.length, 0);
+
+  // The caller rebuilds the Bundle from the same answer and tries again.
+  const detail = await fileAnswer(1, buildFilingBundle(labFiling()), { transaction: server.transaction, audit });
+  assert.deepEqual([...server.store.keys()], [...filed.keys()]);
+  assert.deepEqual(audits, [detail]);
+  assert.equal(detail.provenance, [...filed.keys()].find((id) => id.startsWith("Provenance/")));
+  assert.deepEqual(server.store.get(detail.output), filed.get(detail.output));
+
+  // The audit insert fails after HAPI answered: the retry again files nothing new.
+  await assert.rejects(fileAnswer(1, buildFilingBundle(labFiling()), { transaction: server.transaction, audit: async () => Promise.reject(new Error("db down")) }));
+  assert.equal(server.store.size, 9);
+
+  // A different upload is a new answer and is filed again.
+  await fileAnswer(1, buildFilingBundle(labFiling({}, "c".repeat(64))), { transaction: server.transaction, audit });
+  assert.equal(server.store.size, 9 + 4);
 });
