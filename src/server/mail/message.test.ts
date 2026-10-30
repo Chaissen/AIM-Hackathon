@@ -66,6 +66,12 @@ test("a combining mark from any block drops out without splitting the word", () 
   assert.deepEqual(check("Hello Ma", { ...maria, given: ["Ma\u1ab0ria"] }), []);
 });
 
+test("a character that joins the next one does not hide it", () => {
+  assert.deepEqual(check("Dr. \u0600Maria Hofer"), ["patient-name"]);
+  assert.deepEqual(check("\u0600lab"), ["document-type"]);
+  assert.deepEqual(check("born \u06001961-03-12"), ["birth-date"]);
+});
+
 test("an upper-case Greek name is caught whatever follows its final sigma", () => {
   const pavlos = { family: "Παύλος", given: ["Νίκος"], birthDate: "1950-05-05" };
   for (const text of ["ΠΑΥΛΟΣ", "ΠΑΥΛΟΣ's", "ΠΑΥΛΟΣ:ABC", "Παυλος"]) assert.deepEqual(check(text, pavlos), ["patient-name"], text);
@@ -82,5 +88,8 @@ test("a patient without a birth date is still checked for the name", () => {
 
 test("a name with a letter that has no case refuses every email for that patient", () => {
   assert.deepEqual(check("Hello", { family: "李", given: ["明"], birthDate: "1970-01-01" }), ["patient-name"]);
-  assert.deepEqual(check("Hello", { family: "O’Brien", given: ["Seán"], birthDate: "1970-01-01" }), []);
+  for (const [given, family] of [["Seán", "O’Brien"], ["Seán", "Oʼbrien"], ["Лукʼян", "Іванов"]]) {
+    assert.deepEqual(check("Hello", { family, given: [given], birthDate: "1970-01-01" }), [], family);
+  }
+  assert.deepEqual(check("Лукʼян", { family: "Іванов", given: ["Лукʼян"], birthDate: "1970-01-01" }), ["patient-name"]);
 });
