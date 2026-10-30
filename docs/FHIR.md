@@ -17,33 +17,6 @@ This page lists the FHIR R4 resources the request service files, how they refere
 
 We file all resources of one answer in one [transaction Bundle](https://hl7.org/fhir/R4/http.html#transaction), so an answer is filed completely or not at all.
 
-## Filing an answer
-
-The filing (T13) lives in `src/server/fhir/`. `filing.ts` is pure and builds the Bundle, and `file-answer.ts` sends it and writes the audit entry.
-
-1. `prepareParties(parties, { requestId, uploadSha256 })` builds the Practitioner and Organization entries: Dr. Hofer, the sender, the author when it is someone else, the outside organisation, and the identity provider. It returns their `urn:uuid:` references as FHIR `Reference`s, which the mapper takes as they are. `uploadSha256` is `uploadHash()` of the uploaded file and names the answer.
-2. The mapper (T12, T14) builds the clinical resources with those references.
-3. `buildFilingBundle()` adds the Provenance and the completed Task and returns the Bundle with the references the audit entry needs.
-4. `fileAnswer()` POSTs the Bundle to the server base, reads the server ids from the `transaction-response`, and writes `answer_filed`.
-
-Order of the entries: Practitioners, Organizations, the DiagnosticReport or DocumentReference, the Observations, the Provenance, the Task.
-
-### Retries
-
-Every POST in the Bundle is a conditional create (`ifNoneExist`), so the same answer is filed at most once:
-
-| Entry | Condition |
-|---|---|
-| Practitioner, Organization with an eHVD entry | `identifier=urn:ietf:rfc:3986\|urn:oid:<OID>`. Every answer from that person or organisation reuses it. |
-| Practitioner, Organization without an eHVD entry | `identifier=urn:aim-t2:answer\|<request id>:<upload SHA-256>:<part>`, part `sender`, `author`, or `organization`. Only a retry of the same answer reuses it. |
-| "ID Austria (simulation)" | `identifier=urn:ietf:rfc:3986\|<issuer URL>` |
-| DiagnosticReport or DocumentReference | `identifier=urn:aim-t2:answer\|<request id>:<upload SHA-256>:output` |
-| Each Observation | the same with `result-1`, `result-2`, … in table order |
-| Provenance | `target=<urn:uuid of the output>`. R4 Provenance has no `identifier`. HAPI resolves the `urn:uuid:` in the condition to the output's server id, so the condition finds the Provenance of the same answer. Another FHIR server must do the same, or the Provenance needs another key. |
-| Task | `PUT Task/ordy-request-<request id>`, idempotent anyway |
-
-When `fileAnswer()` throws, the answer may or may not be on the server. HAPI may have rejected the transaction (a `FhirError` with its status, nothing filed), or it may have committed while the response was lost (the 15-second timeout, the network) or the audit insert failed afterwards. Either way nothing is audited. The caller keeps the answer and calls `fileAnswer()` again with a Bundle built from the same answer, meaning the same request id and upload hash. The retry files nothing new, gets back the ids of what the first attempt filed, and writes `answer_filed`. Another upload has another hash and is a new answer.
-
 ## How the resources reference each other
 
 ```
@@ -154,6 +127,33 @@ The DocumentReference has `status` `current`, `docStatus` `final`, and `date` se
 The `Stay` line can name the month once ("2 to 23 September 2026") or twice ("28 August to 12 September 2026"). The parser splits at `" to "` and borrows the month and year from the right side when the left side lacks them.
 
 The medication list stays inside the attached text. One MedicationStatement per line is a stretch goal and the first thing to cut.
+
+## Filing an answer
+
+The filing (T13) lives in `src/server/fhir/`. `filing.ts` is pure and builds the Bundle, and `file-answer.ts` sends it and writes the audit entry.
+
+1. `prepareParties(parties, { requestId, uploadSha256 })` builds the Practitioner and Organization entries: Dr. Hofer, the sender, the author when it is someone else, the outside organisation, and the identity provider. It returns their `urn:uuid:` references as FHIR `Reference`s, which the mapper takes as they are. `uploadSha256` is `uploadHash()` of the uploaded file and names the answer.
+2. The mapper (T12, T14) builds the clinical resources with those references.
+3. `buildFilingBundle()` adds the Provenance and the completed Task and returns the Bundle with the references the audit entry needs.
+4. `fileAnswer()` POSTs the Bundle to the server base, reads the server ids from the `transaction-response`, and writes `answer_filed`.
+
+Order of the entries: Practitioners, Organizations, the DiagnosticReport or DocumentReference, the Observations, the Provenance, the Task.
+
+### Retries
+
+Every POST in the Bundle is a conditional create (`ifNoneExist`), so the same answer is filed at most once:
+
+| Entry | Condition |
+|---|---|
+| Practitioner, Organization with an eHVD entry | `identifier=urn:ietf:rfc:3986\|urn:oid:<OID>`. Every answer from that person or organisation reuses it. |
+| Practitioner, Organization without an eHVD entry | `identifier=urn:aim-t2:answer\|<request id>:<upload SHA-256>:<part>`, part `sender`, `author`, or `organization`. Only a retry of the same answer reuses it. |
+| "ID Austria (simulation)" | `identifier=urn:ietf:rfc:3986\|<issuer URL>` |
+| DiagnosticReport or DocumentReference | `identifier=urn:aim-t2:answer\|<request id>:<upload SHA-256>:output` |
+| Each Observation | the same with `result-1`, `result-2`, … in table order |
+| Provenance | `target=<urn:uuid of the output>`. R4 Provenance has no `identifier`. HAPI resolves the `urn:uuid:` in the condition to the output's server id, so the condition finds the Provenance of the same answer. Another FHIR server must do the same, or the Provenance needs another key. |
+| Task | `PUT Task/ordy-request-<request id>`, idempotent anyway |
+
+When `fileAnswer()` throws, the answer may or may not be on the server. HAPI may have rejected the transaction (a `FhirError` with its status, nothing filed), or it may have committed while the response was lost (the 15-second timeout, the network) or the audit insert failed afterwards. Either way nothing is audited. The caller keeps the answer and calls `fileAnswer()` again with a Bundle built from the same answer, meaning the same request id and upload hash. The retry files nothing new, gets back the ids of what the first attempt filed, and writes `answer_filed`. Another upload has another hash and is a new answer.
 
 ## Provenance
 

@@ -274,14 +274,15 @@ src/
     api/root.ts               app router and createCaller
     api/routers/              one router per area
     db/                       Drizzle schema and client
-    requests/lifecycle.ts     request states and the Task status they map to (T04 adds the transitions)
-    fhir/                     FHIR client, filing (T13: transaction Bundle, Provenance, Task), mappers planned (T12, T14)
+    fhir/                     FHIR client, mappers planned (T12 to T14)
     documents/                parser and patient check (T10, T11), typed records in types.ts
     identity/names.ts         name words, subset and shared-word tests from Identity, shared by the patient check and T08
     identity/checks.ts        identity checks at login: level, name, person number, eHVD claim (T08)
     identity/login.ts         what a check result does: state, audit entries, page, notice, and runIdentityChecks for the callback (T08)
     ehvd/oid.ts               OID check shared by the login and pnpm citizen
     ehvd/                     eHVD SOAP client, planned (T15)
+    fhir/filing.ts            one answer as a transaction Bundle with Provenance and Task; fhir/file-answer.ts posts it (T13)
+    requests/lifecycle.ts     request states and the Task status they map to (T04 adds the transitions)
     matrix/client.ts          Matrix client-server API
     matrix/notices.ts         notice texts and notifyRoom for Dr. Hofer's room
     auth/eid-session.ts       outside person's session cookie
