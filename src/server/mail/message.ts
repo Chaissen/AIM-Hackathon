@@ -28,16 +28,14 @@ export function requestEmail({ requester, clinic, link, expiresAt }: RequestEmai
 export type ContentCategory = "patient-name" | "birth-date" | "document-type";
 type Term = { category: ContentCategory; words: string[] };
 
-// Umlauts are spelled out. Two letters fold because case changes them. Lowercasing "YILMAZ" gives i but "Yılmaz" has ı,
+// ß is spelled out. ı and ς fold because case changes them. Lowercasing "YILMAZ" gives i but "Yılmaz" has ı,
 // and lowercasing "ΠΑΥΛΟΣ's" gives σ but "Παύλος" ends in ς.
 const FOLD = new Map([
-  ["ä", "ae"],
-  ["ö", "oe"],
-  ["ü", "ue"],
   ["ß", "ss"],
   ["ı", "i"],
   ["ς", "σ"],
 ]);
+const DIAERESIS = "\u0308";
 const isDigit = (c: string) => c >= "0" && c <= "9";
 const isWordChar = (c: string) => isDigit(c) || c.toLowerCase() !== c.toUpperCase();
 const graphemes = new Intl.Segmenter("und", { granularity: "grapheme" });
@@ -49,8 +47,7 @@ const isModifierLetter = (c: string) => c >= "\u02b0" && c <= "\u02ff";
 const isUncasedLetter = (c: string) => !isWordChar(c) && !isModifierLetter(c) && Boolean(wordSegmenter.segment(c).containing(0)?.isWordLike);
 
 function fold(text: string): string {
-  // Normalize to NFC first, or a decomposed "ü" loses its umlaut instead of becoming "ue".
-  const spelled = Array.from(text.normalize("NFC").toLowerCase(), (c) => FOLD.get(c) ?? c).join("");
+  const spelled = Array.from(text.toLowerCase(), (c) => FOLD.get(c) ?? c).join("");
   return spelled.normalize("NFKD").toLowerCase();
 }
 
@@ -59,6 +56,8 @@ function words(text: string): string[] {
   let word = "";
   for (const c of fold(text)) {
     if (isWordChar(c)) word += c;
+    // An umlaut is spelled out (ü as ue), also with a tone mark as in "Lǚ", whose diaeresis decomposes after the u.
+    else if (c === DIAERESIS && (word.endsWith("a") || word.endsWith("o") || word.endsWith("u"))) word += "e";
     else if (isMark(c)) continue;
     else if (word) {
       result.push(word);
@@ -83,7 +82,8 @@ const patientName = (patient: ExpectedPatient) => [...patient.given, patient.fam
 
 function forbiddenTerms(patient: ExpectedPatient): Term[] {
   return [
-    ...oneWordTerms("patient-name", patientName(patient)),
+    // An initial names nobody, and the link has the word "r" and the text the word "a".
+    ...oneWordTerms("patient-name", patientName(patient)).filter((term) => Array.from(term.words[0]).length > 1),
     ...birthDateForms(patient.birthDate).map((form): Term => ({ category: "birth-date", words: words(form) })),
     ...DOCUMENT_TYPE_TERMS,
   ];

@@ -22,7 +22,7 @@ The brief forbids the patient's name, the patient's birth date, and the document
 
 The request service checks every message before sending. It splits the subject and the text into words and refuses to send if the message contains:
 
-- any word of the patient's given or family names
+- any word of the patient's given or family names, except an initial of one letter
 - the birth date as `1961-03-12`, `12.03.1961`, or `12 March 1961`
 - a document type word from the document types table, such as `lab`, `labor`, `result`, `befund`, `rehab`, `discharge`, or `report`
 
