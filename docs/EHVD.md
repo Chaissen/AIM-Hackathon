@@ -310,10 +310,10 @@ The code lives in `src/server/ehvd/` and reads `EHVD_URL`, default `http://local
 
 | Check | How |
 |---|---|
-| Organisation | `GdaSearch` with the organisation name as `surname`, `ehvdstatus` `Aktiv`, and `maxResults` 10. Exactly one active organisation gives the OID and the `mail` domain. Persons with that surname do not count. |
+| Organisation | `GdaSearch` with the organisation name as `surname`, `ehvdstatus` `Aktiv`, and `maxResults` 10. Exactly one active organisation whose name has the same words gives the OID and the `mail` domain. Persons with that surname do not count. |
 | Address check before sending | The domain of the email address Dr. Hofer typed must equal the domain of the organisation's `mail`. `labor-kanaI.example` does not. |
-| Responsible person, when it is the sender and the login carried the GDA claim | `GetGDA` with the OID from the claim. The entry must be a person, carry the name from the document, be active, have the role the document type needs, and list the organisation in `memberof`. |
-| Responsible person, otherwise | `GdaSearch` with `firstname` and `surname` from the document, `ehvdstatus` `Aktiv`, and `maxResults` 200. Exactly one active hit that carries the name from the document and is a member of the organisation confirms the role. Here the name is the only link. |
+| Responsible person, when it is the sender and the login carried the GDA claim | `GetGDA` with the OID from the claim. The entry must have that OID, be a person, carry the name from the document, be active, have the role the document type needs, and list the organisation in `memberof`. |
+| Responsible person, otherwise | `GdaSearch` with the `surname` from the document and `maxResults` 200, without a status filter, so the notice can say that a physician is not active. Only if that gives fault 6005 does a second search add the `firstname`. Exactly one active hit that carries the name from the document and is a member of the organisation confirms the role. Here the name is the only link. |
 | Lab result | The physician under `Validated by`: `role` 158 or 159 with `specialisation` `1.2.40.0.34.3.1.10.20:19`, member of the lab |
 | Rehab report | The physician under `Written by`: `elgaRole` 700, member of the rehab clinic. The rehab clinic: active, `role` 300 or 301. The sender is usually not listed. |
 
@@ -321,18 +321,18 @@ These are the release check from [Identity and misdelivery](IDENTITY.md#who-may-
 
 ### The client
 
-`client.ts` sends SOAP 1.2 with `fetch`: the operation's action in the content type, the fields in WSDL order (`soap.ts`), and every value escaped. `xml.ts` reads the answer with saxes, namespace-aware, and refuses any DOCTYPE. `ehvd` is the client for `EHVD_URL`. Tests build their own with `createEhvdClient({ url, timeoutMs })`.
+`client.ts` sends SOAP 1.2 with `fetch`: the operation's action in the content type, the fields in WSDL order (`soap.ts`), and every value escaped. `xml.ts` reads the answer with saxes, namespace-aware. It refuses any DOCTYPE and any nesting deeper than 32 levels, because saxes resolves namespaces by walking the open elements and a deeply nested answer would block the server for minutes. `ehvd` is the client for `EHVD_URL`. Tests build their own with `createEhvdClient({ url, timeoutMs })`.
 
 `getGda` and `gdaSearch` return `{ ok: true, value }` or `{ ok: false, failure }`. They never throw.
 
 | `failure.kind` | When |
 |---|---|
 | `unreachable` | No connection, no answer within 5 seconds, a redirect, or an HTTP status other than 200, 400, and 500. The firewall's empty 403 is one. |
-| `fault` | A SOAP fault, with `code` 6001 to 6006 from `soap:Detail`, or null without one, and the fault's `message` |
-| `bad_response` | An answer that is not the SOAP the WSDL describes, larger than 4 MiB, or not UTF-8 |
+| `fault` | A SOAP fault, with the fault's `message` and `code` 6001 to 6006. The code comes from `soap:Detail`, where the mock puts it, else from the message in the fault table, since the real layout is not public. Null if neither gives one. |
+| `bad_response` | An answer that is not the SOAP the WSDL describes, larger than 4 MiB, or not UTF-8. This includes an HTTP 400 or 500 without a fault, and any element other than an `eHVD` `gda` in the response, so an unexpected layout never reads as fewer hits. |
 | `bad_request` | ordy refused to send the value: a character the field rules do not allow, too long, a blank at the start or end, or `maxResults` outside 1 to 200. `*` counts as not allowed, so ordy never searches with a wildcard. `field` names the field. |
 
-`GetGDA` without a hit, fault 6002, is `{ ok: true, value: null }`, not a failure. For the identity checks at login (T08), any failure means `unreachable: ["ehvd"]`, and null means the person is not listed.
+`GetGDA` without a hit, fault 6002, is `{ ok: true, value: null }`, not a failure. A caller of the identity checks at login (T08) passes `unreachable: ["ehvd"]` for any failure.
 
 ### The address check
 
@@ -340,15 +340,15 @@ These are the release check from [Identity and misdelivery](IDENTITY.md#who-may-
 
 | Result | When | What the request service does |
 |---|---|---|
-| `pass` | The domain matches, compared case-insensitively and without a trailing dot. An SMS always passes: the eHVD has no phone numbers to compare. | Sends |
+| `pass` | The domain matches, compared case-insensitively and without a trailing dot. An SMS always passes: the person's mobile number cannot be compared with the organisation's `tel`. | Sends |
 | `mismatch`, with `domain` and `expectedDomain` | The domain differs | `awaiting_confirmation` with **Send anyway** and **Cancel**, and `misdelivery_caught` with `address_mismatch` |
-| `unchecked`, with a reason | The eHVD cannot confirm the address: `organisation_not_listed`, `several_organisations`, `no_mail`, `not_searchable`, or `ehvd_unreachable` | `awaiting_confirmation` too, because an unchecked address is never a pass, but no `misdelivery_caught`: nothing was caught |
+| `unchecked`, with a reason | The eHVD cannot confirm the address: `organisation_not_listed`, `several_organisations`, `no_mail`, `not_searchable`, or `ehvd_unreachable`. Or the address is not one plain address with an ASCII domain (`invalid_address`): several `@`, a list, a space, or a domain with the Kelvin sign U+212A in place of the `K`, which would lowercase to the organisation's `k`. The request form refuses those already. | `awaiting_confirmation` too, because an unchecked address is never a pass, but no `misdelivery_caught`: nothing was caught |
 
 `addressWarning(check, org)` gives the widget text, for example "The address domain labor-kanaI.example does not match Labor Kanalstraße (labor-kanal.example)." or "The eHVD could not be reached, so the address could not be checked."
 
 ### The release check
 
-`checkRelease({ document, org, sender })` in `release-check.ts` runs after the patient check. `org` is the organisation the request went to, and `sender` the ID Austria login of the person who answered, with `gdaOid` from the GDA claim or null. It returns `pass`, with `via` `claim` or `search`, the practitioner's entry, and the organisation's entry, or `hold`, with a `reason` for the audit log and a `sentence` for Dr. Hofer's notice. It never blocks.
+`checkRelease({ document, org, sender })` in `release-check.ts` runs after the patient check. `org` is the organisation the request went to, and `sender` the ID Austria login of the person who answered, with `gdaOid` from the GDA claim or null. It returns `pass`, with `via` `claim` or `search`, the practitioner's entry, and the organisation's entry, or `hold`, with a `reason` code and a `sentence` for Dr. Hofer's notice. A hold about the organisation names the organisation. It never blocks. The answer flow (T13) maps a pass to `answer_confirmed` and a hold to `answer_unconfirmed`.
 
 The names follow the [name match](IDENTITY.md#name-match): every word of the document's given name and family name must be in the entry's. The search hits are compared that way too, so the decision never rests on how the eHVD matches names. A name without words in its given or family name never passes, because an empty set passes every subset test.
 
@@ -360,12 +360,12 @@ The names follow the [name match](IDENTITY.md#name-match): every word of the doc
 | `organisation_not_listed`, `several_organisations` | The organisation search finds no active organisation, or more than one | The eHVD does not list Labor Nirgendwo as an active organisation. |
 | `organisation_not_hospital` | A rehab report from an organisation without `role` 300 or 301 | The eHVD does not list Labor Kanalstraße as a hospital. |
 | `not_listed` | No active person with that name, or the claim's OID has no person entry | The eHVD does not list Dr. Anna Huber. |
-| `claim_differs` | The entry for the OID in the sender's login carries another name than the document | The eHVD entry of the sender's ID Austria login is not Dr. Eva Brandl. |
-| `not_active`, `wrong_role`, `not_member` | The entry is inactive, lacks the role the document type needs, or is not a member of the organisation | The eHVD does not list Dr. Martin Brandl as a member of Labor Kanalstraße. |
+| `claim_differs` | The entry for the OID in the sender's login carries another name than the document, or another OID | The eHVD entry of the sender's ID Austria login is not Dr. Eva Brandl. |
+| `not_active`, `wrong_role`, `not_member` | The entry is inactive, lacks the role the document type needs, or is not a member of the organisation. The name search finds members first, then checks that one is active. | The eHVD does not list Dr. Martin Brandl as a member of Labor Kanalstraße. |
 | `several_matches` | More than one active member with that name, or fault 6005 | The eHVD lists more than one Dr. Eva Brandl at Labor Kanalstraße. |
 | `not_searchable` | The name or organisation breaks the field rules, such as `O'Brandl` | The eHVD cannot be searched for Dr. Eva O'Brandl. |
-| `ehvd_unreachable` | Any other failure, also 6003 | The eHVD could not be reached to confirm Dr. Eva Brandl. |
+| `ehvd_unreachable` | Any other failure, also 6003 | The eHVD could not be reached to confirm Dr. Eva Brandl. Or, when the organisation search fails: … to confirm Labor Kanalstraße. |
 
 ### Tests
 
-`src/server/ehvd/*.test.ts` run against the T23 mock, started in the test process by `start-mock.ts`, so `pnpm test` needs no container. They cover the WSDL field order, every fault, the firewall's 403, a closed port, a timeout, the field rules, scenario requests 1 and 2, M1's address, and the release check for every document in [`track/scenario/extra/`](../track/scenario/extra/index.md).
+`src/server/ehvd/*.test.ts` run against the T23 mock, started in the test process by `start-mock.ts`, so `pnpm test` needs no container. They cover the WSDL field order, the faults 6002 to 6006, the firewall's 403, a closed port, a timeout, a redirect, answers the WSDL does not describe, the field rules, scenario requests 1 and 2, M1's address, and the release check for the five filed documents in [`track/scenario/extra/`](../track/scenario/extra/index.md). Cases the mock never produces, such as two physicians with the same name at one lab, use a client that changes the mock's answers.

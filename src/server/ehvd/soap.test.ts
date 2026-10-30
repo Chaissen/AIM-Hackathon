@@ -33,12 +33,13 @@ test("a descriptor is read by element name, with any prefix, and repeated elemen
   assert.deepEqual(answer.gdas[0].relations, { memberof: ["a", "b"], ownerof: [] });
 });
 
-test("a fault gives the eHVD number from soap:Detail, or null without one", () => {
-  const fault = (detail: string) =>
-    envelope(`<s:Fault><s:Code><s:Value>s:Receiver</s:Value></s:Code><s:Reason><s:Text xml:lang="en">No compliance found!</s:Text></s:Reason>${detail}</s:Fault>`);
+test("a fault gives the eHVD number from soap:Detail, else from the handbook's message, else null", () => {
+  const fault = (detail: string, message = "No compliance found!") =>
+    envelope(`<s:Fault><s:Code><s:Value>s:Receiver</s:Value></s:Code><s:Reason><s:Text xml:lang="en">${message}</s:Text></s:Reason>${detail}</s:Fault>`);
   assert.deepEqual(readResponse("GetGDA", fault('<s:Detail><code xmlns="eHVD">6002</code></s:Detail>')), { kind: "fault", code: 6002, message: "No compliance found!" });
-  assert.deepEqual(readResponse("GetGDA", fault("")), { kind: "fault", code: null, message: "No compliance found!" });
-  assert.deepEqual(readResponse("GetGDA", fault('<s:Detail><code xmlns="eHVD">7000</code></s:Detail>')).kind, "fault");
+  assert.deepEqual(readResponse("GetGDA", fault("")), { kind: "fault", code: 6002, message: "No compliance found!" });
+  assert.deepEqual(readResponse("GetGDA", fault("", "Something else")), { kind: "fault", code: null, message: "Something else" });
+  assert.deepEqual(readResponse("GetGDA", fault('<s:Detail><code xmlns="eHVD">7000</code></s:Detail>', "Something else")).kind, "fault");
 });
 
 test("anything that is not the SOAP the WSDL describes is refused", () => {
@@ -49,6 +50,8 @@ test("anything that is not the SOAP the WSDL describes is refused", () => {
     ["two gda in a GetGDA response", envelope(`<GdaIndexResponse xmlns="eHVD">${gda("<surname>A</surname>")}${gda("<surname>B</surname>")}</GdaIndexResponse>`), /more than one gda/],
     ["a gda without surname", envelope(`<GdaIndexResponse xmlns="eHVD">${gda("")}</GdaIndexResponse>`), /without surname/],
     ["a response in another namespace", envelope(`<GdaIndexResponse xmlns="urn:other"/>`), /Expected GdaIndexResponse/],
+    ["an element other than gda in the response", envelope(`<GdaIndexResponse xmlns="eHVD"><gdaDescriptor/></GdaIndexResponse>`), /Unexpected element gdaDescriptor/],
+    ["nesting past the depth limit", envelope(`<GdaIndexResponse xmlns="eHVD">${"<a>".repeat(40)}${"</a>".repeat(40)}</GdaIndexResponse>`), /deeper than 32/],
     ["XML that is not well-formed", "<s:Envelope", /Not XML/],
   ];
   for (const [label, xml, reason] of cases) assert.throws(() => readResponse("GetGDA", xml), (e: Error) => e instanceof SoapError && reason.test(e.message), label);
