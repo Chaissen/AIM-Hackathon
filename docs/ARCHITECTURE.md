@@ -12,7 +12,7 @@ This page describes what runs, how the parts talk, and what the request service 
 | Matrix bot | Notices and `!status` in Dr. Hofer's room | Built | TypeScript process in `src/bot/`, small Matrix client on `fetch` in `src/server/matrix/client.ts` | none |
 | Postgres | Requests, bindings, audit log | Reused | [`postgres:17-alpine`](https://hub.docker.com/_/postgres) | 5433, mapped to 5432 in the container |
 | Simulated ID Austria | OpenID Connect login with fake citizens | Configured (T02) | [Keycloak](https://www.keycloak.org/server/containers) | 8080 |
-| eHVD mock | Directory of healthcare people and organisations, same SOAP interface as the real eHVD | Built (T23, planned) | TypeScript service in its own container, see [eHVD](EHVD.md) | 8095 |
+| eHVD mock | Directory of healthcare people and organisations, same SOAP interface as the real eHVD | Built (T23) | TypeScript service on `node:24-alpine` with [`saxes`](https://github.com/lddubeau/saxes), in `services/ehvd-mock/`, see [eHVD](EHVD.md) | 8095 |
 | Mailpit | Catches every outgoing email | Reused | [`axllent/mailpit`](https://hub.docker.com/r/axllent/mailpit) | 1025 SMTP, 8025 web |
 | HAPI FHIR | FHIR R4 server | Reused | [`hapiproject/hapi`](https://hub.docker.com/r/hapiproject/hapi) | 8090, mapped to 8080 in the container |
 | HL7 validator | Validates every filed resource | Reused | [`validator_cli.jar`](https://github.com/hapifhir/org.hl7.fhir.core/releases) | none |
@@ -270,6 +270,8 @@ Configuration is read in `src/env.ts`. Service addresses and demo accounts have 
 | `ANTHROPIC_API_KEY` | unset, only for the optional AI fallback; unset turns it off |
 | `AI_FALLBACK_MODEL` | `claude-opus-5-5` |
 
+The eHVD mock's `EHVD_ALLOWLIST` and `EHVD_SCHEMA_ERRORS` are read only by its container, so they live in `docker-compose.yml` and `.env.example`, not in `src/env.ts`. See [eHVD](EHVD.md#configuration).
+
 To switch to real ID Austria, change `OIDC_METADATA_URL`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET`. The simulator already sends the real claim names, which [Identity and misdelivery](IDENTITY.md) lists.
 
 ## Repository layout
@@ -277,13 +279,17 @@ To switch to real ID Austria, change `OIDC_METADATA_URL`, `OIDC_CLIENT_ID`, and 
 Files marked *planned* do not exist yet. The task id says who builds them.
 
 ```
-docker-compose.yml            Synapse, Element, HAPI, Mailpit, Postgres, Keycloak (eHVD mock: T23)
+docker-compose.yml            Synapse, Element, HAPI, Mailpit, Postgres, Keycloak, eHVD mock
 .env.example                  all variables with demo values
 docker/element/config.json    Element config
 docker/synapse/               generated homeserver.yaml (git ignores it)
 docker/keycloak/idaustria-sim-realm.json   simulated ID Austria: client, mappers, test citizens
 docs/ehvd/eHVD.wsdl           the real eHVD WSDL, version 2 from BRZ
-services/ehvd-mock/           eHVD mock service and its synthetic directory, planned, T23
+services/ehvd-mock/           eHVD mock service and its synthetic directory (T23)
+  src/                        SOAP wire format, field rules, queries, directory, HTTP server
+  test/                       tests over real HTTP, run by pnpm test
+  Dockerfile.dockerignore     keeps the image's build context to the files it needs
+  Dockerfile                  image built from the repository root
 drizzle/                      generated SQL migrations
 src/
   env.ts                      zod-validated configuration
