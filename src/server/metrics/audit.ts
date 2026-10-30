@@ -1,6 +1,6 @@
 // Metrics computed from audit rows: audit coverage, effort, and misdeliveries caught (docs/WHITEPAPER.md, "How we measure the metrics").
 // Pure functions, so the scripts and the tests share them without a database.
-import type { auditLog } from "@/server/db/schema";
+import type { auditLog, requests } from "@/server/db/schema";
 
 export type AuditRow = typeof auditLog.$inferSelect;
 export type AuditEventName = AuditRow["event"];
@@ -111,16 +111,56 @@ const byTime = (a: AuditRow, b: AuditRow) => a.at.getTime() - b.at.getTime() || 
 // Effort for the outside person: from opening the link to sending the answer that was filed.
 // The start is the last `link_opened` before the first `answer_sent`, which skips earlier openings by someone else,
 // such as the colleague in M2. The end is the last `answer_sent` before the first `answer_filed`: `answer_sent` is
-// written before the patient check, so a rejected upload such as M3 does not stop the clock. Null until an answer is filed.
-export function effortSeconds(rows: AuditRow[], requestId: number): number | null {
+// written before the patient check, so a rejected upload such as M3 does not stop the clock. Undefined until an answer is filed.
+export function effortSpan(rows: AuditRow[], requestId: number): { opened: AuditRow; sent: AuditRow } | undefined {
   const own = rows.filter((r) => r.requestId === requestId).sort(byTime);
   const filed = own.find((r) => r.event === "answer_filed");
   const first = own.find((r) => r.event === "answer_sent");
-  if (!filed || !first) return null;
+  if (!filed || !first) return undefined;
   const sent = own.filter((r) => r.event === "answer_sent" && byTime(r, filed) < 0).at(-1);
   const opened = own.filter((r) => r.event === "link_opened" && byTime(r, first) < 0).at(-1);
-  if (!sent || !opened) return null;
-  return (sent.at.getTime() - opened.at.getTime()) / 1000;
+  return sent && opened ? { opened, sent } : undefined;
+}
+
+// The effort in seconds, or null until an answer is filed.
+export function effortSeconds(rows: AuditRow[], requestId: number): number | null {
+  const span = effortSpan(rows, requestId);
+  return span ? (span.sent.at.getTime() - span.opened.at.getTime()) / 1000 : null;
+}
+
+// Request 1 of the scenario (track/scenario/README.md): Dr. Brandl's lab result, sent to her own address.
+// M1 sends the same request to the mistyped `labor-kanaI.example`, so the address must match exactly.
+export const REQUEST_1 = { docType: "lab-result", address: "eva.brandl@labor-kanal.example" } as const;
+
+type RequestRow = Pick<typeof requests.$inferSelect, "id" | "docType" | "address" | "createdAt">;
+
+// The newest request 1, so a timed test measures its own request even after earlier runs.
+export function latestRequest1(rows: RequestRow[]): number | undefined {
+  const matches = rows.filter((r) => r.docType === REQUEST_1.docType && r.address.trim().toLowerCase() === REQUEST_1.address);
+  return matches.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id - a.id)[0]?.id;
+}
+
+// One request's audit timeline for the timed test (docs/clinical-review/TIMED_TEST_20.md), as `pnpm audit:check --effort`
+// prints it. Each entry shows its seconds since the `link_opened` that starts the clock, or since the request's first
+// entry while no answer is filed, so the observer can line up hesitations with the log.
+export function effortLines(rows: AuditRow[], requestId: number): string[] {
+  const own = rows.filter((r) => r.requestId === requestId).sort(byTime);
+  if (!own.length) return [`Request ${requestId}: no audit entries`];
+  const span = effortSpan(rows, requestId);
+  const zero = (span?.opened ?? own[0]).at.getTime();
+  const lines = [`Request ${requestId}: seconds since ${span ? "the link_opened that starts the clock" : "the first entry"}`];
+  for (const r of own) {
+    const offset = ((r.at.getTime() - zero) / 1000).toFixed(1).padStart(7);
+    const mark = r === span?.opened ? "  <- start" : r === span?.sent ? "  <- stop" : "";
+    lines.push(`  ${r.at.toISOString()}  ${offset} s  ${r.event.padEnd(19)} ${r.outcome.padEnd(17)} ${r.actorKind}${mark}`);
+  }
+  const seconds = effortSeconds(rows, requestId);
+  lines.push(
+    seconds === null
+      ? "Effort: not measured, because no answer was filed."
+      : `Effort: ${Math.round(seconds)} s (${seconds.toFixed(1)} s) from link_opened to the answer_sent that was filed.`,
+  );
+  return lines;
 }
 
 // The kind sits in `outcome`, as `recordAudit()` writes it.

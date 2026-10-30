@@ -8,6 +8,7 @@ How to set up, start, reset, and extend ordy. [Architecture](ARCHITECTURE.md) ex
 - Everything we write is TypeScript. Only third-party servers (Synapse, HAPI, Mailpit, Keycloak) and the HL7 validator are not.
 - Synthetic data only. No secrets in git: use `.env`, and add a placeholder to `.env.example`.
 - New dependencies must have been public for at least 7 days. `minimumReleaseAge` in `pnpm-workspace.yaml` enforces this. Do not lower it.
+- Clinical rules that wait for a clinician's decision are marked "pending clinical sign-off". Their questions are in [`clinical-review/`](clinical-review/README.md). Do not change such a rule before its review file is signed.
 
 ## Prerequisites
 
@@ -93,7 +94,7 @@ Test citizens for the ID Austria login: `eva.brandl` / `demo-eva`, `stefan.kern`
 | `pnpm matrix:bootstrap` | Creates the room if needed, joins Dr. Hofer and the bot, sets her display name, and pins the widget |
 | `pnpm citizen --given Peter --family Muster --birthdate 1970-01-01` | Adds a test citizen to the simulated ID Austria and prints the username, password, bPK, and eHVD OID. [Identity and misdelivery](IDENTITY.md#add-a-test-citizen) lists the options. |
 | `pnpm validate` | Runs the HL7 validator on every resource named in an `answer_filed` entry and counts the errors. `--since <time>` takes only the entries from that time on. `pnpm validate <file or folder>` checks hand-made resources instead. Needs Java. [FHIR](FHIR.md#validation) has the details. |
-| `pnpm audit:check` | Lists the six audit event types per request, each with who, what, and when. `--request <id>` checks one request. |
+| `pnpm audit:check` | Lists the six audit event types per request, each with who, what, and when. `--request <id>` checks one request. `--effort` prints the audit timeline and the effort in seconds of the newest request 1, or of `--request <id>`, for the [timed test](clinical-review/TIMED_TEST_20.md). |
 | `pnpm scenario` | Runs request 1, M1 to M3, and request 2 against the running stack and writes the four metric results to `out/metrics/metrics.md`. `--no-validate` skips the validator. [Whitepaper](WHITEPAPER.md#how-we-measure-the-metrics) has the details. |
 | `pnpm clinical-review:export` | Writes the transaction Bundle ordy would file for each scenario and extra document to `docs/clinical-review/19-fhir/`, without any server. Run it after a change to the parser, the mappers, or the filing, and compare. [Review 19](clinical-review/REVIEW_19_FHIR_DATA.md) has the details. |
 | `./scripts/setup.sh` | Full one-time setup, see above |
@@ -173,12 +174,12 @@ The jury tests with new outside people and new documents in the scenario's Markd
 | Kind | `Lab result`, `Rehab report`, or `Other` (any other heading kind, which the parser returns as a generic document) |
 | Patient | Name and birth date exactly as the document writes them |
 | Sender | The outside person who uploads it |
-| Expected | Starts with `Filed`, `Held`, or `Blocked`, then why. `Held` means the answer waits for Dr. Hofer in the widget, for example a document kind the parser cannot map, or a name or release-check hold. |
+| Expected | Starts with `Filed`, `Held`, or `Blocked`, then why. `Held` means the answer waits for Dr. Hofer in the widget after a release-check hold. A document kind the parser cannot map is a generic document, and the answer flow refuses it, because a request asks only for a lab result or a discharge report. |
 | Trap | What it tests, for example a double family name, a decimal comma, a unit like `10^12/L`, or a range written as `< 5` |
 
 The set holds at least 3 lab results for Maria with other tests, 2 rehab reports whose stay spans two months, and 3 documents for other patients, one with Maria's family name and a different birth date. The index also lists the 2 extra outside people with double names and the `pnpm citizen` commands that add them. Keycloak keeps them only until the container is recreated, so run the commands again after `./scripts/setup.sh`.
 
-`pnpm test` runs `src/server/documents/extra.test.ts`. It reads the index, runs every file through `parseDocument` and `checkAnswerPatient` with the form filled in from the document, and asserts the kind and the patient. For the outcome it checks only the patient check until the release check (T15) lands: `Filed` and `Held` must pass it, `Blocked` must fail it, and a `Filed` row must not be a generic document, because those are always held. It also asserts the parser values the Trap column names. An expectation the parser does not meet yet is a `todo` test and a row under "Open parser gaps" in the index. It shows up in every run without failing it. Remove the `todo` with the parser fix.
+`pnpm test` runs `src/server/documents/extra.test.ts`. It reads the index, runs every file through `parseDocument` and `checkAnswerPatient` with the form filled in from the document, and asserts the kind and the patient. For the outcome it checks the patient check: `Filed` and `Held` must pass it, `Blocked` must fail it, and a `Filed` row must not be a generic document, because the answer flow refuses those. It also asserts the parser values the Trap column names. An expectation the parser does not meet yet is a `todo` test and a row under "Open parser gaps" in the index. It shows up in every run without failing it. Remove the `todo` with the parser fix. `src/server/ehvd/release-check.test.ts` checks the release check for the filed documents against the eHVD mock.
 
 To add a document, write the file, add its row to the index, and run `pnpm test`. If the parser disagrees, decide whether the document, the expectation, or the parser is wrong. Never bend the document to make the test pass.
 

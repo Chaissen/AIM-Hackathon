@@ -1,14 +1,17 @@
 import { and, desc, eq, inArray, lte, sql } from "drizzle-orm";
+import { PgTransaction } from "drizzle-orm/pg-core";
 
 import type { DocumentType } from "@/lib/document-types";
 import { type AuditActor, type AuditEntry, recordAudit } from "@/server/audit/record";
 import type { Db, Tx } from "@/server/db";
-import { bindings, requests } from "@/server/db/schema";
+import { bindings, heldAnswers, keptAnswers, requests } from "@/server/db/schema";
 import type { LoginTransition } from "@/server/identity/login";
-import { initialState, MAX_FAILED_CHECKS, OPEN_STATES, type RequestEvent, type RequestState, transition, TransitionError } from "./lifecycle";
+import { initialState, isOpen, MAX_FAILED_CHECKS, OPEN_STATES, type RequestEvent, type RequestState, transition, TransitionError } from "./lifecycle";
 import { hashLinkToken, isLinkToken, LINK_TTL_MS, newLinkToken } from "./link-token";
+import { mirrorTask } from "./task";
 
-// Reads and state changes of requests. Every caller goes through here: the tRPC router, the portal pages, and later the login and filing.
+// Reads and state changes of requests. Every caller goes through here: the tRPC router, the portal pages, the login,
+// and the answer flow. Every state change is mirrored on the request's FHIR Task once it committed (`mirrorTask`).
 
 export type RequestRow = typeof requests.$inferSelect;
 
@@ -25,23 +28,29 @@ export type NewRequest = {
   requesterName: string;
 };
 
-const requestSent = (request: RequestRow, actor: AuditActor): AuditEntry => ({
+const requestSent = (request: RequestRow, actor: AuditActor, sentAnyway: boolean): AuditEntry => ({
   event: "request_sent",
   requestId: request.id,
   actor,
   outcome: "sent",
-  detail: { docType: request.docType, channel: request.channel, address: request.address },
+  detail: { docType: request.docType, channel: request.channel, address: request.address, sentAnyway },
 });
 
 const newExpiry = () => new Date(Date.now() + LINK_TTL_MS);
 
-/** The result of the address check (T15): the email domain against the organisation's domain in the eHVD. */
-export type AddressCheck = { passed: true } | { passed: false; domain: string; expectedDomain: string };
+/** The result of the address check (T15, src/server/ehvd/address-check.ts) as the request service stores it. */
+export type AddressCheck =
+  | { passed: true }
+  /** The email domain differs from the organisation's domain in the eHVD. */
+  | { passed: false; domain: string; expectedDomain: string }
+  /** The eHVD could not confirm the address. The request waits too, but nothing was caught. */
+  | { passed: false; unchecked: true };
 
 /**
  * Stores a new request, with its audit entry in the same transaction. If the address check passed, the request is
- * `sent` with `request_sent`. Otherwise it waits in `awaiting_confirmation` with `misdelivery_caught: address_mismatch`.
- * Returns the link token, which exists only here: the database keeps its hash.
+ * `sent` with `request_sent`. Otherwise it waits in `awaiting_confirmation`: with `misdelivery_caught: address_mismatch`
+ * for another domain, and with no entry yet for an address the eHVD could not confirm, until Send anyway logs
+ * `request_sent`. Returns the link token, which exists only here: the database keeps its hash.
  */
 export async function createRequest(db: Db, input: NewRequest, addressCheck: AddressCheck) {
   const { token, hash } = newLinkToken();
@@ -49,20 +58,19 @@ export async function createRequest(db: Db, input: NewRequest, addressCheck: Add
   const request = await db.transaction(async (tx) => {
     const [row] = await tx.insert(requests).values({ ...input, state, linkHash: hash, expiresAt: newExpiry() }).returning();
     const actor: AuditActor = { kind: "network_member", id: row.requester };
-    await recordAudit(
-      tx,
-      addressCheck.passed
-        ? requestSent(row, actor)
-        : {
-            event: "misdelivery_caught",
-            requestId: row.id,
-            actor,
-            outcome: "address_mismatch",
-            detail: { domain: addressCheck.domain, expectedDomain: addressCheck.expectedDomain },
-          },
-    );
+    if (addressCheck.passed) await recordAudit(tx, requestSent(row, actor, false));
+    else if ("domain" in addressCheck) {
+      await recordAudit(tx, {
+        event: "misdelivery_caught",
+        requestId: row.id,
+        actor,
+        outcome: "address_mismatch",
+        detail: { domain: addressCheck.domain, expectedDomain: addressCheck.expectedDomain },
+      });
+    }
     return row;
   });
+  await mirrorTask(request);
   return { request, token };
 }
 
@@ -74,7 +82,7 @@ export async function sendAnyway(db: Db, id: number, actor: AuditActor) {
   const { token, hash } = newLinkToken();
   const request = await applyEvent(db, id, "send_anyway", async (tx) => {
     const [row] = await tx.update(requests).set({ linkHash: hash, expiresAt: newExpiry() }).where(eq(requests.id, id)).returning();
-    await recordAudit(tx, requestSent(row, actor));
+    await recordAudit(tx, requestSent(row, actor, true));
     return row;
   });
   return request && { request, token };
@@ -88,10 +96,19 @@ export async function sendAnyway(db: Db, id: number, actor: AuditActor) {
 export async function expireDueRequests(db: Db | Tx, id?: number): Promise<number[]> {
   const expired = await db
     .update(requests)
-    .set({ state: "expired" })
+    // The ID token has done its work once the request is closed: a filed answer carries it in the Provenance.
+    .set({ state: "expired", idToken: null })
     .where(and(inArray(requests.state, OPEN_STATES), lte(requests.expiresAt, new Date()), id === undefined ? undefined : eq(requests.id, id)))
-    .returning({ id: requests.id });
-  return expired.map((r) => r.id);
+    .returning();
+  const ids = expired.map((r) => r.id);
+  if (ids.length) {
+    await db.delete(heldAnswers).where(inArray(heldAnswers.requestId, ids));
+    await db.delete(keptAnswers).where(inArray(keptAnswers.requestId, ids));
+    // Not awaited: this may run inside a transaction that holds row locks. If it rolls back, the next read expires the
+    // request again, and `expired` is final, so an early or repeated PUT tells nothing wrong.
+    for (const row of expired) void mirrorTask(row);
+  }
+  return ids;
 }
 
 export async function getRequest(db: Db, id: number): Promise<RequestRow | null> {
@@ -109,7 +126,11 @@ export async function findRequestByToken(db: Db, token: string): Promise<Request
 }
 
 export async function saveIdToken(db: Db, id: number, idToken: string): Promise<void> {
-  await db.update(requests).set({ idToken }).where(eq(requests.id, id));
+  // Only on an open request: a filing or a Cancel that commits during the login has cleared the token for good.
+  await db
+    .update(requests)
+    .set({ idToken })
+    .where(and(eq(requests.id, id), inArray(requests.state, OPEN_STATES)));
 }
 
 /** The requests one network member sent, newest first. */
@@ -133,15 +154,17 @@ export type NonLoginEvent = Exclude<RequestEvent, (typeof LOGIN_EVENT)[keyof typ
  *
  * `then` runs in the same transaction with the updated request and the state it changed from: write the audit entry that
  * belongs to the change there, so the state and the log never disagree. It may update more columns and return the request
- * it read back. If it throws, the state change rolls back.
+ * it read back. If it throws, the state change rolls back. Inside a transaction (`db` is a Tx), the event runs in a
+ * savepoint, so a failed event leaves the outer transaction usable. The Task follows after the commit; inside a
+ * transaction, the caller's commit is still to come, so the caller mirrors.
  */
 export async function applyEvent(
-  db: Db,
+  db: Db | Tx,
   id: number,
   event: NonLoginEvent,
   then?: (tx: Tx, request: RequestRow, from: RequestState) => Promise<RequestRow | void>,
 ): Promise<RequestRow | null> {
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     await expireDueRequests(tx, id);
     const [row] = await tx.select().from(requests).where(eq(requests.id, id)).for("update");
     if (!row) return null;
@@ -149,8 +172,21 @@ export async function applyEvent(
     if ((Object.values(LOGIN_EVENT) as RequestEvent[]).includes(event)) throw new TransitionError(row.state, event);
     const state = transition(row.state, event, row.failedChecks);
     const [updated] = await tx.update(requests).set({ state }).where(eq(requests.id, id)).returning();
-    return (await then?.(tx, updated, row.state)) ?? updated;
+    const result = (await then?.(tx, updated, row.state)) ?? updated;
+    // A held answer lives only while the request is `answer_held`: Accept files it, Reject, Cancel, and expiry drop it.
+    // A kept answer lives while an upload or an Accept may still file it: filing ends that, and so do Cancel and expiry.
+    if (state !== "answer_held") await tx.delete(heldAnswers).where(eq(heldAnswers.requestId, id));
+    if (state !== "verified" && state !== "answer_held") await tx.delete(keptAnswers).where(eq(keptAnswers.requestId, id));
+    // A closed request needs no ID token any more; a filed answer carries it in the Provenance.
+    if (!isOpen(state)) {
+      await tx.update(requests).set({ idToken: null }).where(eq(requests.id, id));
+      return { ...result, idToken: null };
+    }
+    return result;
   });
+  // The filing Bundle PUTs the Task of a filed request itself, with the output.
+  if (result && result.state !== "filed" && !(db instanceof PgTransaction)) await mirrorTask(result, event);
+  return result;
 }
 
 // The request service side of the identity check ports (docs/IDENTITY.md, "Identity checks"). identity-ports.ts wires them.
@@ -177,19 +213,23 @@ const LOGIN_EVENT = { verified: "identity_pass", identity_held: "identity_hold",
  * changed in between or the lifecycle refuses the change, for example a lock before the third failed check.
  */
 export async function applyLoginTransition(db: Db, id: number, change: LoginTransition): Promise<boolean> {
-  return db.transaction(async (tx) => {
+  const updated = await db.transaction(async (tx) => {
     await expireDueRequests(tx, id);
     const [row] = await tx.select().from(requests).where(eq(requests.id, id)).for("update");
-    if (!row || row.state !== change.from) return false;
+    if (!row || row.state !== change.from) return null;
     // Three counted failures lock a sent request. If the lock after the third one never ran, this login locks it instead.
     const to = row.failedChecks >= MAX_FAILED_CHECKS ? "locked" : change.to;
-    if (transition(row.state, LOGIN_EVENT[to], row.failedChecks) !== to) return false;
-    await tx
+    if (transition(row.state, LOGIN_EVENT[to], row.failedChecks) !== to) return null;
+    const [stored] = await tx
       .update(requests)
       .set({ state: to, ...("personNumber" in change && to === change.to ? { personNumber: change.personNumber } : {}) })
-      .where(eq(requests.id, id));
-    return to === change.to;
+      .where(eq(requests.id, id))
+      .returning();
+    return stored;
   });
+  if (!updated) return false;
+  await mirrorTask(updated);
+  return updated.state === change.to;
 }
 
 /** The bPK bound to this person at this organisation in `bindings`, or null. */

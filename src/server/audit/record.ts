@@ -18,11 +18,14 @@ export type AuditActor = { kind: (typeof auditLog.$inferInsert)["actorKind"]; id
 export type IdentityCheck = { check: CheckResult["check"]; result: Verdict; reason: CheckResult["reason"] };
 
 type Entries = {
-  request_sent: { outcome: "sent"; detail: { docType: DocumentType; channel: "email" | "sms"; address: string } };
+  // `sentAnyway`: Dr. Hofer clicked Send anyway. Without a `misdelivery_caught` before it, the eHVD had not confirmed the address.
+  request_sent: { outcome: "sent"; detail: { docType: DocumentType; channel: "email" | "sms"; address: string; sentAnyway: boolean } };
   link_opened: { outcome: "shown" | "refused"; detail: { state: RequestState } };
   identity_checked: { outcome: Verdict; detail: { checks: IdentityCheck[] } };
   answer_sent: { outcome: "received"; detail: { sha256: string; size: number } };
-  answer_filed: { outcome: "filed"; detail: AnswerFiled };
+  // The ids from the filing (T13) and the SHA-256 of the upload that was filed. `acceptedBy` is the network member who
+  // accepted a held answer; `at` says when.
+  answer_filed: { outcome: "filed"; detail: AnswerFiled & { sha256: string; acceptedBy?: string } };
   misdelivery_caught:
     | { outcome: "address_mismatch"; detail: { domain: string; expectedDomain: string } }
     // The actor already names the person who failed.
