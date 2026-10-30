@@ -44,7 +44,9 @@ The check compares whole words. A substring check would block every message, bec
 | Person number bindings | Postgres `bindings` | Only the person who answered before can answer as that person again | Until the demo reset |
 | Audit log | Postgres `audit_log`, including the document type, channel, and recipient address of each sent request | Who did what and when. No document text. | Until the demo reset |
 | Filed answers | HAPI FHIR | The clinical record | Until the demo reset |
-| ID token of the sender | Provenance `signature.data` | Proof of the identity check that anyone can verify later | With the record |
+| Held answers, about the right patient | Postgres `held_answers`: the text, its hash, the sender's name and eHVD OID, their ID token, the hold reason, and the eHVD OIDs the release check found | Dr. Hofer decides about an answer the eHVD did not confirm | Until she accepts (then it is in HAPI) or rejects it, or the request is cancelled or expires |
+| Answers whose filing outcome is unknown | Postgres `kept_answers`: the parsed document, the parties, the sender's ID token, and the upload hash | After a timeout the FHIR server may have filed it, so a retry must file exactly this answer | Until it is filed or the FHIR server refuses it, or the request is cancelled or expires |
+| ID token of the sender | Provenance `signature.data`, and `requests.id_token` for the person the request is bound to | Proof of the identity check that anyone can verify later | With the record. In `requests` only while the request is open: filing, cancelling, rejecting, and expiry clear it |
 | Uploads for the wrong patient | Nowhere. Only the SHA-256 hash and the reason stay in the audit log. | Max Beispiel's data must not end up in Maria's record or anywhere else | Discarded after the check |
 | Name and person number of everyone who logs in at a link, whether the check passes, holds, or fails | Audit log | The audit needs to say who tried and who answered | Until the demo reset |
 | Notices in Dr. Hofer's Matrix room | Synapse: the requested person's name and organisation, and the ID Austria name of each person whose check failed or was held. Never a person number. | Dr. Hofer decides about held people and sees misdeliveries | Until the room is deleted. `pnpm reset` keeps the room. |
@@ -76,7 +78,7 @@ AI is optional in this project. If we build the AI fallback parser:
 | GDPR Art. 35, impact assessment | A data protection impact assessment comes before any pilot with real data |
 | eIDAS | ID Austria at level high is the identity source. We record the level in the Provenance. |
 | EHDS, primary use | FHIR R4 output fits the European move toward exchangeable health records |
-| ÄrzteG 1998 §§ 2, 31; MTD-Gesetz 2024 §§ 4, 5; KAKuG §§ 7, 8, 24 | Only the physician responsible for the content releases a document. The release check confirms that person in the eHVD, see [Identity and misdelivery](IDENTITY.md#who-may-release-a-document). |
+| ÄrzteG 1998 §§ 2, 3, 31, 49; MTD-Gesetz 2024 §§ 4, 5; KAKuG §§ 2, 7, 24 | Only the physician responsible for the content releases a document. The release check confirms that person in the eHVD, see [Identity and misdelivery](IDENTITY.md#who-may-release-a-document). Pending clinical sign-off, see [the review for issue #18](clinical-review/SIGNOFF_18_IDENTITY_AND_RELEASE.md). |
 | ID Austria terms | Real use needs a registered service provider. [Identity and misdelivery](IDENTITY.md) has the steps. |
 | eHVD terms | Real use needs a registration with the health ministry |
 
@@ -100,3 +102,9 @@ Short form for the application footer: "Prototype with synthetic data. ID Austri
 | AI rules | Dev 3 |
 | Disclaimer everywhere it belongs | Dev 1 in the README and the app, Doc 2 in the video |
 | Final safety sign-off | Doc 1 |
+
+## Clinical review
+
+Rules that need a clinician's decision wait in [`clinical-review/`](clinical-review/README.md), one file per issue. A clinician fills in the answer boxes by hand, and the file is committed with the answers. Open reviews:
+
+- [Issue #18: identity rules and release check](clinical-review/SIGNOFF_18_IDENTITY_AND_RELEASE.md)

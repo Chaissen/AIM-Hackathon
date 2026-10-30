@@ -37,7 +37,7 @@ const ACTIONS = {
 
 const HELD: Partial<Record<RequestState, string>> = {
   identity_held: "The identity check held for the person who signed in. Accept lets that person answer, Reject cancels the request.",
-  answer_held: "The answer arrived, but the eHVD could not confirm the sender's role. Reject cancels the request. Filing a held answer on Accept is not built yet.",
+  answer_held: "The answer arrived, but the eHVD could not confirm the sender's role. Accept files it as accepted by you, Reject cancels the request and deletes the answer.",
 };
 
 const CHANNEL_LABEL: Record<ListedRequest["channel"], string> = { email: "Email", sms: "SMS" };

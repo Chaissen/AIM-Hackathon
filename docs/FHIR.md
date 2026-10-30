@@ -143,6 +143,8 @@ The filing (T13) lives in `src/server/fhir/`. `filing.ts` is pure and builds the
 3. `buildFilingBundle()` adds the Provenance and the completed Task and returns the Bundle with the references the audit entry needs.
 4. `fileAnswer()` POSTs the Bundle to the server base, reads the server ids from the `transaction-response`, and writes `answer_filed`.
 
+The answer flow (T09) calls it through `fhirFiling` with its own `audit` and writes `answer_filed` in the database transaction that sets the request to `filed`. It keeps an answer whose outcome is unknown in `kept_answers`, which covers the two rules for the caller under [Retries](#retries) ([Architecture](ARCHITECTURE.md#the-answer)).
+
 Order of the entries: Practitioners, Organizations, the DiagnosticReport or DocumentReference, the Observations, the Provenance, the Task.
 
 ### Retries
@@ -227,7 +229,7 @@ The ID token is the proof of the identity check. Anyone can verify its signature
 | `restriction.period.end` | The link expiry |
 | `output` | The DiagnosticReport or the DocumentReference, once filed, with `type.text` "Lab result" or "Rehab discharge report" |
 
-The Task id is `ordy-request-<request id>`, and every write is a `PUT`, so the same Task follows the request from sent to filed. The filing Bundle PUTs it with status `completed` and the output. Its status comes from `taskStatus()` in `src/server/requests/lifecycle.ts`, the table in [Architecture](ARCHITECTURE.md#request-lifecycle). For the other state changes, `syncTask()` in `src/server/fhir/file-answer.ts` PUTs it; until the outside person has a Practitioner, `owner` is a reference with only `display`. Wiring `syncTask()` into the request service's state changes is left for T09 (#13).
+The Task id is `ordy-request-<request id>`, and every write is a `PUT`, so the same Task follows the request from sent to filed. The filing Bundle PUTs it with status `completed` and the output. Its status comes from `taskStatus()` in `src/server/requests/lifecycle.ts`, the table in [Architecture](ARCHITECTURE.md#request-lifecycle). For the other state changes, `syncTask()` in `src/server/fhir/file-answer.ts` PUTs it; until the outside person has a Practitioner, `owner` and `requester` are references with only `display`. The request service calls it through `mirrorTask()` in `src/server/requests/task.ts` after each state change committed: on creation, after a login, after an event such as **Cancel** or a hold, and on expiry. A patient mismatch keeps the request `verified` and sets `businessStatus`. A failed PUT is logged and changes nothing; the next state change PUTs the Task again.
 
 The Task stays on the clinic's FHIR server. It is the only place outside the request service database where the request appears with its document type.
 
