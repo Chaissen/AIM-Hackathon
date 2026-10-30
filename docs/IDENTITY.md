@@ -133,7 +133,7 @@ The extra test set adds two senders with double names this way, Sophie Lindner-P
  Browser                      Request service                    Keycloak
     |-- GET /r/{token} --------->| link_opened                      |
     |<-- neutral page -----------|                                  |
-    |-- GET /auth/login -------->|                                  |
+    |-- POST /auth/login ------->|                                  |
     |<-- redirect (state, nonce, PKCE S256, prompt=login) ----------|
     |-- username + password ----------------------------------------->|
     |<-- redirect to /auth/callback?code=...&state=... --------------|
@@ -168,6 +168,7 @@ The logout matters when several people log in through the same browser, as jury 
 - Discovery runs once per server process. A failed discovery is not kept, so the next login tries again.
 - openid-client allows plain http only when `OIDC_METADATA_URL` is `http:` on `localhost` or `127.0.0.1`, which is the simulator. Real ID Austria is https.
 - `/auth/login` puts the link token, `state`, `nonce`, and the PKCE verifier into the cookie `ordy_eid_login`. It is a JWT signed with `ORDY_SECRET`, like the session, and expires after 10 minutes. Its flags are `HttpOnly`, `SameSite=Lax`, `Secure` when `PUBLIC_URL` is https, and `Path=/auth/callback`. `Lax` lets the cookie through on the redirect back from real ID Austria, a cross-site top-level GET. With the simulator on `localhost`, the redirect is same-site. The callback deletes it on every outcome.
+- The landing page starts the login with a POST form, so link prefetching and other sites cannot start one. `/auth/login` refuses a POST whose `Origin` is not the origin of `PUBLIC_URL`, and sends every redirect with 303.
 - `/auth/login` also deletes any `ordy_eid_session`, so a new login drops the previous person's session.
 - The callback builds the URL for the code swap from `PUBLIC_URL`, not from the request URL. openid-client sends that URL without its query as `redirect_uri`, which must equal the one from `/auth/login`.
 - The callback looks up the request again after the code swap, because it may have been answered, locked, or expired during the login.
@@ -177,7 +178,7 @@ A failed login lands on one of three pages. When a step throws, the request serv
 
 | Failure | Lands on |
 |---|---|
-| `/auth/login` has no `token`, or the callback has no valid `ordy_eid_login` | `/auth/failed`, "This login has expired" |
+| `/auth/login` has no `token` or a foreign `Origin`, or the callback has no valid `ordy_eid_login` | `/auth/failed`, "This login has expired" |
 | The link token finds no open request, at login or again at the callback | `/r/{token}`, "This link does not work" |
 | Discovery, the code swap, or a token check fails, or a claim is malformed | `/r/{token}?login=failed`, "The login did not work. Try again." above the login button |
 
