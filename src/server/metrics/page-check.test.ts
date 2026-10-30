@@ -1,12 +1,46 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { birthDateFormats, pageText, revealedOnPage } from "./page-check";
+import { birthDateFormats, flightData, pageText, revealedOnPage } from "./page-check";
 
 const maria = { name: "Maria Beispiel", birthDate: "1961-03-12" };
 
-test("the birth date in the three documented formats", () => {
-  assert.deepEqual(birthDateFormats("1961-03-12"), ["1961-03-12", "12.03.1961", "12 March 1961"]);
+test("the birth date in the documented formats and the en-US and en-GB forms", () => {
+  assert.deepEqual(birthDateFormats("1961-03-12"), [
+    "1961-03-12",
+    "12.03.1961",
+    "12 March 1961",
+    "March 12, 1961",
+    "3/12/1961",
+    "03/12/1961",
+    "12/03/1961",
+    "12/3/1961",
+  ]);
+  // Day and month without a leading zero give each slash form once.
+  assert.deepEqual(birthDateFormats("1970-12-24").filter((f) => f.includes("/")), ["12/24/1970", "24/12/1970"]);
+});
+
+test("a birth date in any of these forms counts, but not inside another date", () => {
+  const found = (text: string) => revealedOnPage(`<p>${text}</p>`, { name: "Nobody Here", birthDate: "1961-03-12" });
+  assert.deepEqual(found("born March 12, 1961"), ["March 12, 1961"]);
+  assert.deepEqual(found("born 3/12/1961"), ["3/12/1961"]);
+  assert.deepEqual(found("born 03/12/1961"), ["03/12/1961"]);
+  assert.deepEqual(found("born 12/03/1961"), ["12/03/1961"]);
+  assert.deepEqual(found("born 12 March 1961"), ["12 March 1961"]);
+  assert.deepEqual(found(`"$D1961-03-12T00:00:00.000Z"`), ["1961-03-12"]);
+  assert.deepEqual(found("born 13/12/1961 or 3/12/19610"), []);
+});
+
+test("flight data cut into pieces is joined before the search", () => {
+  // React cuts the flight data every 4096 bytes, and each piece is its own JSON string in its own push script.
+  const pushes = (...pieces: string[]) =>
+    pieces.map((p) => `<script>self.__next_f.push([1,${JSON.stringify(p)}])</script>`).join("<div hidden></div>");
+  const page = (...pieces: string[]) => `<h1>This request is for someone else.</h1>${pushes(...pieces)}`;
+  assert.deepEqual(revealedOnPage(page('5:{"name":"Maria Bei', 'spiel"}'), maria), ["maria", "beispiel"]);
+  assert.deepEqual(revealedOnPage(page('5:{"docType":"lab-res', 'ult"}'), maria), ["lab-result"]);
+  assert.deepEqual(revealedOnPage(page('5:{"birthDate":"$D1961-0', '3-12T00:00:00.000Z"}'), maria), ["1961-03-12"]);
+  // Each piece is decoded as a JSON string, then the pieces are joined in order.
+  assert.equal(flightData(pushes('1:"x', 'y"', "\n")), '1:"xy"\n');
 });
 
 test("the refusal page after a wrong login reveals nothing, scripts included", () => {
