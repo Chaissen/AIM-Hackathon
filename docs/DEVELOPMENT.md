@@ -85,7 +85,7 @@ Test citizens for the ID Austria login: `eva.brandl` / `demo-eva`, `stefan.kern`
 | `pnpm build`, then `pnpm start` | Production build, then both processes without reload |
 | `pnpm typecheck` | Generates the Next.js route types, then runs `tsc` on ordy and on the eHVD mock |
 | `pnpm lint` | ESLint |
-| `pnpm test` | The `*.test.ts` files under `src/` and `services/`, with Node's test runner through tsx. The request tests use the Postgres and FHIR server at the default addresses from `src/env.ts`, because `pnpm test` does not read `.env`. They delete their rows afterwards and are skipped when the servers are not running. Request ids still move on, so run `pnpm reset` before a demo. The mail tests send request 1's email to Mailpit and read it back. They are skipped when Mailpit is not running or `SMTP_USER` is set. |
+| `pnpm test` | The `*.test.ts` files under `src/` and `services/`, with Node's test runner through tsx. The request tests use the Postgres and FHIR server at the default addresses from `src/env.ts`, because `pnpm test` does not read `.env`. They delete their rows afterwards and are skipped when the servers are not running. Request ids still move on, so run `pnpm reset` before a demo. The mail tests send request 1's email to Mailpit and read it back. They are skipped when Mailpit is not running or `SMTP_USER` is set. The request tests send no email. |
 | `pnpm reset` | Empties Postgres, HAPI, and Mailpit, and reloads the patient. Matrix users and the room stay. Run it before every demo. |
 | `pnpm db:generate --name <name>` | Writes a SQL migration to `drizzle/` from the schema |
 | `pnpm db:migrate` | Applies pending migrations |
