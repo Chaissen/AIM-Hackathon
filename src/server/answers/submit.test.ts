@@ -11,7 +11,7 @@ import { db } from "@/server/db";
 import { auditLog, bindings, heldAnswers, keptAnswers, requests } from "@/server/db/schema";
 import { uploadHash } from "@/server/documents/patient-check";
 import type { Notice } from "@/server/matrix/notices";
-import { applyEvent, bindPerson, createRequest, getRequest, type NewRequest, saveIdToken } from "@/server/requests/service";
+import { applyEvent, applyLoginTransition, createRequest, getRequest, type NewRequest, saveIdToken } from "@/server/requests/service";
 import type { AnswerDeps } from "./deps";
 import { acceptAnswer, rejectAnswer } from "./held";
 import { type AnswerToFile, NotFiled, type ReleaseCheckInput, type ReleaseCheckResult } from "./ports";
@@ -64,10 +64,10 @@ async function verifiedRequest(person: typeof EVA | typeof STEFAN, docType: NewR
       requester: "@lena.hofer:klinikum.example",
       requesterName: "Dr. Lena Hofer",
     },
-    { addressCheckPassed: true },
+    { passed: true },
   );
   created.push(request.id);
-  await applyEvent(db, request.id, "identity_pass", (tx) => bindPerson(tx, request.id, person.personNumber));
+  assert.ok(await applyLoginTransition(db, request.id, { from: "sent", to: "verified", personNumber: person.personNumber }));
   const idToken = idTokenOf(person.personNumber);
   await saveIdToken(db, request.id, idToken);
   // `idToken` is the session field before T07 moves the token to the request row; parse drops it afterwards.

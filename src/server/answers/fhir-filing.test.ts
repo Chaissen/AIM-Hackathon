@@ -13,7 +13,7 @@ import { auditLog, bindings, heldAnswers, requests } from "@/server/db/schema";
 import { parseDocument } from "@/server/documents/parse";
 import { capabilities, FhirError, fhirFetch } from "@/server/fhir/client";
 import type { AnswerFiled } from "@/server/fhir/file-answer";
-import { applyEvent, bindPerson, createRequest, getRequest, saveIdToken, type NewRequest, type RequestRow } from "@/server/requests/service";
+import { applyLoginTransition, createRequest, getRequest, saveIdToken, type NewRequest, type RequestRow } from "@/server/requests/service";
 import type { AnswerDeps } from "./deps";
 import { fhirFiling } from "./fhir-filing";
 import { type AnswerToFile, type MapClinical, mapClinicalNotConnected, NotFiled, type ReleaseCheckInput, type ReleaseCheckResult } from "./ports";
@@ -72,10 +72,10 @@ async function verifiedRequest(person: typeof EVA | typeof STEFAN, docType: NewR
       requester: "@lena.hofer:klinikum.example",
       requesterName: "Dr. Lena Hofer",
     },
-    { addressCheckPassed: true },
+    { passed: true },
   );
   created.push(request.id);
-  await applyEvent(db, request.id, "identity_pass", (tx) => bindPerson(tx, request.id, person.personNumber));
+  assert.ok(await applyLoginTransition(db, request.id, { from: "sent", to: "verified", personNumber: person.personNumber }));
   await saveIdToken(db, request.id, idTokenOf(person.personNumber));
   // `idToken` is the session field before T07 moves the token to the request row; parse drops it afterwards.
   const session = eidSession.parse({ requestId: request.id, level: "urn:eidgvat:eid.status.full", idToken: "", ...person });

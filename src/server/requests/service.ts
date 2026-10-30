@@ -1,10 +1,11 @@
-import { and, desc, eq, inArray, lte } from "drizzle-orm";
+import { and, desc, eq, inArray, lte, sql } from "drizzle-orm";
 
 import type { DocumentType } from "@/lib/document-types";
 import { type AuditActor, type AuditEntry, recordAudit } from "@/server/audit/record";
 import type { Db, Tx } from "@/server/db";
-import { heldAnswers, keptAnswers, requests } from "@/server/db/schema";
-import { initialState, OPEN_STATES, type RequestEvent, transition } from "./lifecycle";
+import { bindings, heldAnswers, keptAnswers, requests } from "@/server/db/schema";
+import type { LoginTransition } from "@/server/identity/login";
+import { initialState, MAX_FAILED_CHECKS, OPEN_STATES, type RequestEvent, transition, TransitionError } from "./lifecycle";
 import { hashLinkToken, isLinkToken, LINK_TTL_MS, newLinkToken } from "./link-token";
 
 // Reads and state changes of requests. Every caller goes through here: the tRPC router, the portal pages, and later the login and filing.
@@ -34,16 +35,32 @@ const requestSent = (request: RequestRow, actor: AuditActor): AuditEntry => ({
 
 const newExpiry = () => new Date(Date.now() + LINK_TTL_MS);
 
+/** The result of the address check (T15): the email domain against the organisation's domain in the eHVD. */
+export type AddressCheck = { passed: true } | { passed: false; domain: string; expectedDomain: string };
+
 /**
- * Stores a new request. If the address check passed, the request is `sent` and `request_sent` goes into the audit log
- * in the same transaction. Returns the link token, which exists only here: the database keeps its hash.
+ * Stores a new request, with its audit entry in the same transaction. If the address check passed, the request is
+ * `sent` with `request_sent`. Otherwise it waits in `awaiting_confirmation` with `misdelivery_caught: address_mismatch`.
+ * Returns the link token, which exists only here: the database keeps its hash.
  */
-export async function createRequest(db: Db, input: NewRequest, { addressCheckPassed }: { addressCheckPassed: boolean }) {
+export async function createRequest(db: Db, input: NewRequest, addressCheck: AddressCheck) {
   const { token, hash } = newLinkToken();
-  const state = initialState(addressCheckPassed);
+  const state = initialState(addressCheck.passed);
   const request = await db.transaction(async (tx) => {
     const [row] = await tx.insert(requests).values({ ...input, state, linkHash: hash, expiresAt: newExpiry() }).returning();
-    if (state === "sent") await recordAudit(tx, requestSent(row, { kind: "network_member", id: row.requester }));
+    const actor: AuditActor = { kind: "network_member", id: row.requester };
+    await recordAudit(
+      tx,
+      addressCheck.passed
+        ? requestSent(row, actor)
+        : {
+            event: "misdelivery_caught",
+            requestId: row.id,
+            actor,
+            outcome: "address_mismatch",
+            detail: { domain: addressCheck.domain, expectedDomain: addressCheck.expectedDomain },
+          },
+    );
     return row;
   });
   return { request, token };
@@ -66,7 +83,7 @@ export async function sendAnyway(db: Db, id: number, actor: AuditActor) {
 /**
  * Sets open requests past their expiry to `expired` ("7 days pass" in the lifecycle): the one with `id`, or all of them.
  * No job runs for this; every read below calls it first, so nobody sees an open request that has expired.
- * Returns the ids it expired.
+ * Returns the ids it expired. Inside a transaction that rolls back, the expiry rolls back too, and the next read redoes it.
  */
 export async function expireDueRequests(db: Db | Tx, id?: number): Promise<number[]> {
   const expired = await db
@@ -107,17 +124,11 @@ export async function listRequests(db: Db, requester: string, limit = 100): Prom
     .limit(limit);
 }
 
-/**
- * Stores the bPK of the person the request is bound to, in the `then` of `identity_pass` or `identity_hold`.
- * The answer page and the upload accept only this person afterwards.
- */
-export async function bindPerson(tx: Tx, id: number, personNumber: string): Promise<RequestRow> {
-  const [row] = await tx.update(requests).set({ personNumber }).where(eq(requests.id, id)).returning();
-  return row;
-}
+/** Every lifecycle event but a login's. Only `applyLoginTransition` applies those, so a login always stores the bPK. */
+export type NonLoginEvent = Exclude<RequestEvent, (typeof LOGIN_EVENT)[keyof typeof LOGIN_EVENT]>;
 
 /**
- * Stores the ID token of a login exactly as received, for the Provenance signature of the filing. Call it only for the
+* Stores the ID token of a login exactly as received, for the Provenance signature of the filing. Call it only for the
  * person the request is bound to, after the identity check passed, so a wrong person's login never replaces it.
  */
 export async function saveIdToken(db: Db | Tx, id: number, idToken: string): Promise<void> {
@@ -125,9 +136,9 @@ export async function saveIdToken(db: Db | Tx, id: number, idToken: string): Pro
 }
 
 /**
- * Applies a lifecycle event and stores the new state. Locks the row, so two events on one request run one after the other.
+ * Applies a lifecycle event and stores the new state: Dr. Hofer's decisions and the answer. A login goes through
+ * `applyLoginTransition` below. Locks the row, so two events on one request run one after the other.
  * Returns null for an unknown request and throws a TransitionError if the state does not accept the event.
- * `identity_fail` also counts the failed check, and the third one locks the link.
  *
  * `then` runs in the same transaction with the updated request: write the audit entry that belongs to the change there,
  * so the state and the log never disagree. It may update more columns and return the request it read back. Inside a
@@ -136,16 +147,17 @@ export async function saveIdToken(db: Db | Tx, id: number, idToken: string): Pro
 export async function applyEvent(
   db: Db | Tx,
   id: number,
-  event: RequestEvent,
+  event: NonLoginEvent,
   then?: (tx: Tx, request: RequestRow) => Promise<RequestRow | void>,
 ): Promise<RequestRow | null> {
   return db.transaction(async (tx) => {
     await expireDueRequests(tx, id);
     const [row] = await tx.select().from(requests).where(eq(requests.id, id)).for("update");
     if (!row) return null;
-    const failedChecks = row.failedChecks + (event === "identity_fail" ? 1 : 0);
-    const state = transition(row.state, event, failedChecks);
-    const [updated] = await tx.update(requests).set({ state, failedChecks }).where(eq(requests.id, id)).returning();
+    // The type already refuses a login's event; this holds for a caller that casts too.
+    if ((Object.values(LOGIN_EVENT) as RequestEvent[]).includes(event)) throw new TransitionError(row.state, event);
+    const state = transition(row.state, event, row.failedChecks);
+    const [updated] = await tx.update(requests).set({ state }).where(eq(requests.id, id)).returning();
     const result = (await then?.(tx, updated)) ?? updated;
     // A held answer lives only while the request is `answer_held`: Accept files it, Reject, Cancel, and expiry drop it.
     // A kept answer lives only while it is `verified`: filing it ends that, and so do Cancel and expiry.
@@ -153,4 +165,52 @@ export async function applyEvent(
     if (state !== "verified") await tx.delete(keptAnswers).where(eq(keptAnswers.requestId, id));
     return result;
   });
+}
+
+// The request service side of the identity check ports (docs/IDENTITY.md, "Identity checks"). identity-ports.ts wires them.
+
+/** Adds one failed identity check in one statement and returns the new count. The lock follows from it. */
+export async function incrementFailedChecks(db: Db, id: number): Promise<number> {
+  const [row] = await db
+    .update(requests)
+    .set({ failedChecks: sql`${requests.failedChecks} + 1` })
+    .where(eq(requests.id, id))
+    .returning({ failedChecks: requests.failedChecks });
+  if (!row) throw new Error(`Request ${id} does not exist`);
+  return row.failedChecks;
+}
+
+const LOGIN_EVENT = { verified: "identity_pass", identity_held: "identity_hold", locked: "identity_fail" } as const satisfies Record<
+  LoginTransition["to"],
+  RequestEvent
+>;
+
+/**
+ * Applies a login's state change only while the request is still in `change.from` and not expired, and stores the bPK
+ * in the same statement, so a request is bound to one person once and never rebound. Returns false when the state
+ * changed in between or the lifecycle refuses the change, for example a lock before the third failed check.
+ */
+export async function applyLoginTransition(db: Db, id: number, change: LoginTransition): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    await expireDueRequests(tx, id);
+    const [row] = await tx.select().from(requests).where(eq(requests.id, id)).for("update");
+    if (!row || row.state !== change.from) return false;
+    // Three counted failures lock a sent request. If the lock after the third one never ran, this login locks it instead.
+    const to = row.failedChecks >= MAX_FAILED_CHECKS ? "locked" : change.to;
+    if (transition(row.state, LOGIN_EVENT[to], row.failedChecks) !== to) return false;
+    await tx
+      .update(requests)
+      .set({ state: to, ...("personNumber" in change && to === change.to ? { personNumber: change.personNumber } : {}) })
+      .where(eq(requests.id, id));
+    return to === change.to;
+  });
+}
+
+/** The bPK bound to this person at this organisation in `bindings`, or null. */
+export async function findBinding(db: Db, key: { given: string; family: string; org: string }): Promise<string | null> {
+  const [row] = await db
+    .select({ personNumber: bindings.personNumber })
+    .from(bindings)
+    .where(and(eq(bindings.given, key.given), eq(bindings.family, key.family), eq(bindings.org, key.org)));
+  return row?.personNumber ?? null;
 }

@@ -4,6 +4,7 @@ import { env } from "@/env";
 import type { DocumentType } from "@/lib/document-types";
 import type { Actor } from "@/server/api/trpc";
 import { sessionSecret } from "@/server/auth/session-secret";
+import type { CheckResult, Verdict } from "@/server/identity/checks";
 import type { Db, Tx } from "@/server/db";
 import { auditLog } from "@/server/db/schema";
 import type { AnswerFiled } from "@/server/fhir/file-answer";
@@ -14,14 +15,13 @@ import type { RequestState } from "@/server/requests/lifecycle";
 
 export type AuditEvent = (typeof auditLog.$inferInsert)["event"];
 export type AuditActor = { kind: (typeof auditLog.$inferInsert)["actorKind"]; id: string };
-export type CheckResult = "pass" | "hold" | "fail";
-// The identity checks from docs/IDENTITY.md, "Identity checks".
-export type IdentityCheck = { check: "level" | "name" | "person_number"; result: CheckResult; reason: string };
+// One identity check as `identity_checked` stores it: the check names and reason codes from src/server/identity/checks.ts.
+export type IdentityCheck = { check: CheckResult["check"]; result: Verdict; reason: CheckResult["reason"] };
 
 type Entries = {
   request_sent: { outcome: "sent"; detail: { docType: DocumentType; channel: "email" | "sms"; address: string } };
   link_opened: { outcome: "shown" | "refused"; detail: { state: RequestState } };
-  identity_checked: { outcome: CheckResult; detail: { checks: IdentityCheck[] } };
+  identity_checked: { outcome: Verdict; detail: { checks: IdentityCheck[] } };
   answer_sent: { outcome: "received"; detail: { sha256: string; size: number } };
   // The ids from the filing (T13). `acceptedBy` is the network member who accepted a held answer; `at` says when.
   answer_filed: { outcome: "filed"; detail: AnswerFiled & { acceptedBy?: string } };

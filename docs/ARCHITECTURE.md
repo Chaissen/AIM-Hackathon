@@ -68,10 +68,8 @@ The request service stores each request with one state. The FHIR Task for the re
 | Dr. Hofer sends the request form and the address check fails | `initialState(false)` | none | `awaiting_confirmation` |
 | Dr. Hofer clicks **Send anyway** | `send_anyway` | `awaiting_confirmation` | `sent` |
 | Identity check passes | `identity_pass` | `sent` | `verified` |
-| The verified person logs in again, for example after the session expired | `identity_pass` | `verified` | `verified` |
 | Identity check holds: partial name, requested name without words, or eHVD unreachable | `identity_hold` | `sent` | `identity_held` |
-| Identity check fails for the first or second time | `identity_fail` | `sent` or `verified` | unchanged |
-| Identity check fails for the third time | `identity_fail` | `sent` or `verified` | `locked` |
+| Identity check fails for the third time | `identity_fail` | `sent` | `locked` |
 | Dr. Hofer clicks **Accept** | `accept` | `identity_held` | `verified` |
 | Answer passes the patient check and the role is confirmed | `answer_confirmed` | `verified` | `filed` |
 | Answer passes the patient check and the role is not confirmed | `answer_unconfirmed` | `verified` | `answer_held` |
@@ -81,11 +79,20 @@ The request service stores each request with one state. The FHIR Task for the re
 | Dr. Hofer clicks **Cancel** | `cancel` | any open state | `cancelled` |
 | 7 days pass | `expire` | any open state | `expired` |
 
-The open states are `awaiting_confirmation`, `sent`, `identity_held`, `verified`, and `answer_held`. Any other pair of state and event is refused. So a login while Dr. Hofer decides on a held identity or a held answer changes nothing.
+The open states are `awaiting_confirmation`, `sent`, `identity_held`, `verified`, and `answer_held`. Any other pair of state and event is refused.
 
-A failed identity check does not change the state, so the real person can still answer a forwarded link. The failure goes to the audit log and to Dr. Hofer. `failed_checks` counts the failures. If Keycloak cannot be reached, the check holds without a state change and does not count toward the lock. A login in any state other than `sent` changes no state. A hold stores the held person's bPK in `person_number`, and **Accept** keeps it, so only the accepted person can answer. [Identity checks](IDENTITY.md#identity-checks) has the details.
+A failed identity check does not change the state, so the real person can still answer a forwarded link. The failure goes to the audit log and to Dr. Hofer. If Keycloak cannot be reached, the check holds without a state change and does not count toward the lock. A login in any state other than `sent` changes no state. A hold stores the held person's bPK in `person_number`, and **Accept** keeps it, so only the accepted person can answer. [Identity checks](IDENTITY.md#identity-checks) has the details.
 
-No job watches the expiry. Before the request service reads a request, it sets that request to `expired` if it is open and past `expires_at`. Before it lists requests, it does the same for all of them (`expireDueRequests` in `src/server/requests/service.ts`). `applyEvent` in the same file locks the request row while it changes the state, so two events on one request never overlap. Its callback writes the audit entry for the change in the same transaction.
+`failed_checks` counts every failed identity check while the link works, but only a `sent` request locks on the third one.
+
+No job watches the expiry. Before the request service reads or changes a request, it sets that request to `expired` if it is open and past `expires_at`. Before it lists requests, it does the same for all of them (`expireDueRequests` in `src/server/requests/service.ts`). `applyEvent` in the same file locks the request row while it changes the state, so two events on one request never overlap. Its callback writes the audit entry for the change in the same transaction. It takes every event except a login's: `identity_pass`, `identity_hold`, and `identity_fail` go only through `applyLoginTransition` below, so a login always stores the bPK.
+
+The login changes a request through the five ports that `runIdentityChecks` in `src/server/identity/login.ts` takes. `identityCheckPorts(db, notify)` in `src/server/requests/identity-ports.ts` builds them from the request service:
+
+- `incrementFailedChecks` adds one to `failed_checks` in one statement and returns the new count.
+- `applyLoginTransition` applies `sent` to `verified`, `identity_held`, or `locked` only while the request is still `sent` and not expired. It stores the bPK in the same statement. It returns false when the state changed in between, and it refuses a change the lifecycle table does not allow, such as a lock before the third failure. If a `sent` request already has three failures counted because the lock after the third one never ran, the next login locks it instead of passing or holding. It then returns false, and the person sees "try again" once and "This link does not work" after that.
+- `findBinding` reads `bindings`. `recordAudit` parses the entry against the audit types before it writes it: `identity_checked` with `pass`, `hold`, or `fail`, or `misdelivery_caught` with `wrong_person`, each with check names, verdicts, and reason codes only. Anything else throws.
+- The caller passes `notify`, because the thread of a request belongs to T05.
 
 The link token and the 7 days start when the request goes out. **Send anyway** (`sendAnyway`) gives the request a new token and a new expiry and writes `request_sent` then, not when the request was created.
 
@@ -101,7 +108,7 @@ The link token and the 7 days start when the request goes out. **Send anyway** (
 
 Dr. Hofer sends requests and makes every decision about them in the ordy widget. `pnpm matrix:bootstrap` pins it in her room. There are no chat commands for requests.
 
-The widget uses `matrix-widget-api` to get a Matrix OpenID token from Element after the user approves identity sharing, and sends it as `Authorization: Bearer` with every clinic tRPC call. Patient and audit data come only from `clinic.patients` and `clinic.audit`, both protected by `clinicProcedure`; neither page embeds that data in its initial HTML or React server payload. Tokens and the clinic query cache stay in memory and are discarded on expiry or unmount. The widget includes an **Audit log** tab. The request service checks the token with Synapse (`verifyOpenIdToken` in `src/server/matrix/client.ts`). It accepts only users on its own homeserver, `MATRIX_SERVER_NAME`, which is `klinikum.example` in the demo. The checked Matrix ID is the actor in the audit log.
+The widget uses `matrix-widget-api` to get a Matrix OpenID token from Element after the user approves identity sharing, and sends it as `Authorization: Bearer` with every clinic tRPC call. Patient and audit data come only from `clinic.patients`, `clinic.audit`, and the `request` procedures, all protected by `clinicProcedure`; neither page embeds that data in its initial HTML or React server payload. Tokens and the clinic query cache stay in memory and are discarded on expiry or unmount. The widget includes an **Audit log** tab. The request service checks the token with Synapse (`verifyOpenIdToken` in `src/server/matrix/client.ts`). It accepts only users on its own homeserver, `MATRIX_SERVER_NAME`, which is `klinikum.example` in the demo. The checked Matrix ID is the actor in the audit log.
 
 | Part of the widget | Effect |
 |---|---|
@@ -234,7 +241,7 @@ The request service keeps five Postgres tables, defined with Drizzle in `src/ser
 | `bindings` | `given`, `family`, `org`, `person_number`, `practitioner_id`, `first_verified_at` |
 | `audit_log` | `id`, `at`, `event`, `request_id`, `actor_kind`, `actor`, `outcome`, `detail` |
 
-In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `org` are the person as Dr. Hofer typed them. `requester` is the Matrix ID of the network member who sent the request, and `requester_name` is their Matrix display name at that time, for example "Dr. Lena Hofer", as one line of at most 100 characters. The portal and the messages use it. Members set their display name themselves, so one member could pose as another in a message; the audit log always keeps the Matrix ID. A production version takes the name from a directory the members cannot edit, or sets `enable_set_displayname: false` in Synapse. `link_hash` is the hex SHA-256 of the link token. `person_number` is the bPK of the person who passed the identity check, or who was held and then accepted; the login stores it with `bindPerson` in the same transaction as the event. Only that person sees the answer page and may answer. `id_token` is the ID token of that person's login, exactly as received, for the Provenance signature; the login stores it with `saveIdToken` only for the bound person, and the answer flow files only with a token whose bPK is `person_number`. `matrix_room` and `matrix_event` hold the room and the first notice of the request's thread (T05).
+In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `org` are the person as Dr. Hofer typed them. `requester` is the Matrix ID of the network member who sent the request, and `requester_name` is their Matrix display name at that time, for example "Dr. Lena Hofer", as one line of at most 100 characters. The portal and the messages use it. Members set their display name themselves, so one member could pose as another in a message; the audit log always keeps the Matrix ID. A production version takes the name from a directory the members cannot edit, or sets `enable_set_displayname: false` in Synapse. `link_hash` is the hex SHA-256 of the link token. `person_number` is the bPK of the person who passed the identity check, or who was held; after **Accept** it names the accepted person. Only that person sees the answer page and may answer. `id_token` is the ID token of that person's login, exactly as received, for the Provenance signature; the login stores it with `saveIdToken` only for the bound person, and the answer flow files only with a token whose bPK is `person_number`. `matrix_room` and `matrix_event` hold the room and the first notice of the request's thread (T05).
 
 `held_answers` keeps an answer that passed the patient check while the release check holds it: the text, its SHA-256, the sender's name and eHVD OID from the login, their ID token, and the reason Dr. Hofer got. It exists only while the request is `answer_held`. **Accept** files it, and **Reject**, **Cancel**, and expiry delete it. An answer for the wrong patient never gets here.
 
@@ -242,7 +249,7 @@ In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `
 
 `bindings` remembers which ID Austria person number answered as a given person at a given organisation. Its key is `given`, `family`, and `org`, so each person at an organisation has one person number. The first filed answer stores it, with the sender's Practitioner id when the eHVD does not list them. The audit log never holds document text.
 
-`src/server/requests/service.ts` is the only code that writes `requests`: `createRequest`, `sendAnyway`, `applyEvent`, `bindPerson`, `saveIdToken`, and `expireDueRequests`. The tRPC router `request` (`create`, `get`, `list`, `cancel`, all `clinicProcedure`) and the portal pages use it. A network member sees and changes only the requests they sent; for anyone else, `get` and `cancel` answer "not found", and `list` leaves the request out. `get` returns the request's audit entries, which name the outside person and their person number. The widget's **Audit log** tab (`clinic.audit`) still shows the whole log to every network member, for the demo.
+`src/server/requests/service.ts` is the only code that writes `requests`: `createRequest`, `sendAnyway`, `applyEvent`, `incrementFailedChecks`, `applyLoginTransition`, `saveIdToken`, and `expireDueRequests`. The tRPC router `request` (`create`, `get`, `list`, `cancel`, all `clinicProcedure`) and the portal pages use it. A network member sees and changes only the requests they sent; for anyone else, `get` and `cancel` answer "not found", and `list` leaves the request out. `get` returns the request's audit entries, which name the outside person and their person number. The widget's **Audit log** tab (`clinic.audit`) still shows the whole log to every network member, for the demo.
 
 ## Audit log
 
@@ -255,9 +262,20 @@ In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `
 | `answer_filed` | The request service | `filed` | FHIR resource ids and the Provenance id, and `acceptedBy`, the Matrix ID of the network member who accepted a held answer |
 | `misdelivery_caught` | Whoever triggered it | `address_mismatch`, `wrong_person`, or `patient_mismatch` | The two domains, the failed checks, or the upload's SHA-256 and which part of the patient did not match |
 
-Every entry has a UTC timestamp in `at`. The widget and `GET /audit` show the entries.
+Every entry has a UTC timestamp in `at`. The `outcome` column holds the short result: `pass`, `hold`, or `fail` for `identity_checked`, and the kind for `misdelivery_caught`. The What sits in `detail`, with these fields, which `pnpm audit:check` requires:
 
-`recordAudit()` in `src/server/audit/record.ts` writes every entry. Its types fix the outcome and the detail fields for each event and each misdelivery reason, and they hold ids, hashes, and check results only, never document text or the data of a wrong patient. An entry that belongs to a state change goes into the same transaction.
+| Event | `detail` fields |
+|---|---|
+| `request_sent` | `docType`, `channel`, `address` |
+| `link_opened` | `state` |
+| `identity_checked` | `checks`, one entry per check with its result and reason |
+| `answer_sent` | `sha256`, `size` |
+| `answer_filed` | `output`, `targets`, `provenance`, `task`, `sender`, `author`, `organization`, and `resources` (every resource in the transaction as `Type/id`, which `pnpm validate` reads); `AnswerFiled` in `src/server/fhir/file-answer.ts` |
+| `misdelivery_caught` | `address_mismatch`: `domain`, `expectedDomain`. `wrong_person`: `checks`. `patient_mismatch`: `sha256`, `size`, `nameMatches`, `birthDateMatches`. |
+
+The widget and `GET /audit` show the entries.
+
+`recordAudit()` in `src/server/audit/record.ts` writes the entries. Its types fix the outcome and the detail fields for each event and each misdelivery reason, and they hold ids, hashes, and check results only, never document text or the data of a wrong patient. An entry that belongs to a state change goes into the same transaction. `fileAnswer` in `src/server/fhir/file-answer.ts` (T13) still inserts `answer_filed` directly, with the same fields, until it switches to `recordAudit()`.
 
 The IP hash is an HMAC-SHA256 with a key derived from `ORDY_SECRET`, cut to 16 hex characters, because a plain hash of an IPv4 address can be reversed by trying all of them. Without a private `ORDY_SECRET`, the entry says `ip unknown` instead. Next.js fills `X-Forwarded-For` from the connection only when the client sent none. Without a proxy in front, the client can set it, so the hash is a hint, not proof.
 
@@ -334,9 +352,9 @@ src/
     ehvd/oid.ts               OID check shared by the login and pnpm citizen
     ehvd/                     eHVD SOAP client, planned (T15)
     fhir/filing.ts            one answer as a transaction Bundle with Provenance and Task; fhir/file-answer.ts posts it (T13)
-    requests/lifecycle.ts     request states and the Task status they map to (T04 adds the transitions)
     matrix/client.ts          Matrix client-server API
     matrix/notices.ts         notice texts and notifyRoom for Dr. Hofer's room
+    metrics/                  metrics from audit rows, validator runner, metrics table (T17, T18)
     auth/eid-session.ts       outside person's session cookie
     portal/data.ts            data loaders for the portal and SMS pages, the SMS log is a stub until T06
     portal/answer-page.ts     what the answer page shows for a session: the form, held, filed, or closed
@@ -348,8 +366,9 @@ scripts/
   bootstrap-matrix.ts         room, invites, widget
   seed-fhir.ts                Maria Beispiel into HAPI
   citizen.ts                  add a test citizen to the simulated ID Austria
-  validate.ts                 planned, T18: HL7 validator on every filed resource
-  audit-check.ts              planned, T17: six event types per request
+  validate.ts                 HL7 validator on every filed resource or on given files (T18)
+  audit-check.ts              six event types per request, each with who, what, and when (T17)
+  scenario.ts                 request 1, M1 to M3, request 2, and the four metrics in one run (T17, T18)
 track/                        track brief, scenario, patient.json, test documents, and our extra set in scenario/extra/
 ```
 

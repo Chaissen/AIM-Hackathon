@@ -40,7 +40,7 @@ The check compares whole words. A substring check would block every message, bec
 
 | Data | Where | Why | How long |
 |---|---|---|---|
-| Requests | Postgres `requests` | Lifecycle and link checks | Until the demo reset |
+| Requests | Postgres `requests`: patient id, requested person, address, requester, state, link hash, and the person number (bPK) of the person who passed or was held | Lifecycle and link checks. The bPK makes sure only that person can answer. | Until the demo reset |
 | Person number bindings | Postgres `bindings` | Only the person who answered before can answer as that person again | Until the demo reset |
 | Audit log | Postgres `audit_log` | Who did what and when. No document text. | Until the demo reset |
 | Filed answers | HAPI FHIR | The clinical record | Until the demo reset |
@@ -48,7 +48,7 @@ The check compares whole words. A substring check would block every message, bec
 | Answers whose filing outcome is unknown | Postgres `kept_answers`: the parsed document, the parties, the sender's ID token, and the upload hash | After a timeout the FHIR server may have filed it, so a retry must file exactly this answer | Until it is filed or the FHIR server refuses it, or the request is cancelled or expires |
 | ID token of the sender | Provenance `signature.data`, and `requests.id_token` for the person the request is bound to | Proof of the identity check that anyone can verify later | With the record, and in `requests` until the demo reset |
 | Uploads for the wrong patient | Nowhere. Only the SHA-256 hash and the reason stay in the audit log. | Max Beispiel's data must not end up in Maria's record or anywhere else | Discarded after the check |
-| Name and person number of someone who failed the check | Audit log | The audit needs to say who tried | Until the demo reset |
+| Name and person number of everyone who logs in at a link, whether the check passes, holds, or fails | Audit log | The audit needs to say who tried and who answered | Until the demo reset |
 | IP address of whoever opens a link | Audit log, only as an HMAC with a key derived from `ORDY_SECRET`, cut to 16 hex characters. Nothing without a private `ORDY_SECRET`. | Hints which opens came from the same address without storing it. The client can forge the header it comes from, so it is no proof. | Until the demo reset |
 
 The ID token holds the sender's name, birth date, and person number. That is more than the record strictly needs. We keep it because it is the only proof of the identity check that does not depend on trusting our own database. A production version could keep only a hash of the token and keep the token itself in a separate archive with stricter access.

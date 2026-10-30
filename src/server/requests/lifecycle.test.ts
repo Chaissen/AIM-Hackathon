@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import * as login from "@/server/identity/login";
+
 import {
   initialState,
   isOpen,
   linkIsLive,
+  MAX_FAILED_CHECKS,
   OPEN_STATES,
   REQUEST_STATES,
   type RequestEvent,
@@ -18,8 +21,7 @@ import {
 const DOCUMENTED: [string, RequestState, RequestEvent, RequestState][] = [
   ["Send anyway", "awaiting_confirmation", "send_anyway", "sent"],
   ["identity check passes", "sent", "identity_pass", "verified"],
-  ["the verified person logs in again", "verified", "identity_pass", "verified"],
-  ["identity check matches the name partly", "sent", "identity_hold", "identity_held"],
+  ["identity check holds", "sent", "identity_hold", "identity_held"],
   ["Accept a held identity", "identity_held", "accept", "verified"],
   ["answer passes the patient check, role confirmed", "verified", "answer_confirmed", "filed"],
   ["answer passes the patient check, role not confirmed", "verified", "answer_unconfirmed", "answer_held"],
@@ -42,16 +44,14 @@ test("the address check picks the first state", () => {
   assert.equal(initialState(false), "awaiting_confirmation");
 });
 
-test("the first two failed identity checks keep the state, the third locks the link", () => {
-  for (const state of ["sent", "verified"] as const) {
-    assert.equal(transition(state, "identity_fail", 1), state);
-    assert.equal(transition(state, "identity_fail", 2), state);
-    assert.equal(transition(state, "identity_fail", 3), "locked");
-  }
+test("the first two failed identity checks keep the request sent, the third locks it", () => {
+  assert.equal(transition("sent", "identity_fail", 1), "sent");
+  assert.equal(transition("sent", "identity_fail", 2), "sent");
+  assert.equal(transition("sent", "identity_fail", 3), "locked");
 });
 
 test("every other state and event pair is refused", () => {
-  const allowed = new Set([...DOCUMENTED.map(([, from, event]) => `${from} ${event}`), "sent identity_fail", "verified identity_fail"]);
+  const allowed = new Set([...DOCUMENTED.map(([, from, event]) => `${from} ${event}`), "sent identity_fail"]);
   const events = [...new Set(DOCUMENTED.map(([, , event]) => event)), "identity_fail"] as RequestEvent[];
   let refused = 0;
   for (const from of REQUEST_STATES) {
@@ -74,6 +74,11 @@ test("filed, cancelled, expired, and locked are final", () => {
 test("the link works only once it went out and while the request is open", () => {
   const live = REQUEST_STATES.filter(linkIsLive);
   assert.deepEqual(live, ["sent", "identity_held", "verified", "answer_held"]);
+});
+
+test("the login uses the same live states and lock count as the lifecycle", () => {
+  assert.deepEqual([...login.LIVE_STATES].sort(), REQUEST_STATES.filter(linkIsLive).sort());
+  assert.equal(login.MAX_FAILED_CHECKS, MAX_FAILED_CHECKS);
 });
 
 test("the FHIR Task status mirrors each state", () => {

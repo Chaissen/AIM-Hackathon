@@ -9,8 +9,8 @@ import type { Db } from "@/server/db";
 import { auditLog } from "@/server/db/schema";
 import { nameWords } from "@/server/identity/names";
 import { displayName } from "@/server/matrix/client";
-import { type RequestEvent, taskStatus, TransitionError } from "@/server/requests/lifecycle";
-import { applyEvent, createRequest, getRequest, listRequests, type RequestRow } from "@/server/requests/service";
+import { taskStatus, TransitionError } from "@/server/requests/lifecycle";
+import { applyEvent, createRequest, getRequest, listRequests, type NonLoginEvent, type RequestRow } from "@/server/requests/service";
 
 // Postgres `serial` ends at 2^31 - 1; a larger id would reach the database as an error.
 const byId = z.object({ id: z.number().int().positive().max(2_147_483_647) });
@@ -44,7 +44,7 @@ const ownRequestProcedure = clinicProcedure.input(byId).use(async ({ ctx, input,
   return next({ ctx: { ...ctx, request } });
 });
 
-async function change(ctx: { db: Db; request: RequestRow }, event: RequestEvent) {
+async function change(ctx: { db: Db; request: RequestRow }, event: NonLoginEvent) {
   try {
     const request = await applyEvent(ctx.db, ctx.request.id, event);
     if (!request) throw notFound(ctx.request.id);
@@ -81,10 +81,10 @@ export const requestRouter = createTRPCRouter({
         requesterName: (await displayName(ctx.actor.mxid)) ?? ctx.actor.mxid,
       },
       // TODO(T15): the address check against the eHVD decides this.
-      { addressCheckPassed: true },
+      { passed: true },
     );
     // TODO(T06): send the link by email or SMS. Until then, print it in development so the portal can be tried.
-    if (env.NODE_ENV === "development") console.info(`Request ${request.id}: ${env.PUBLIC_URL}/r/${token}`);
+    if (env.NODE_ENV === "development" && request.state === "sent") console.info(`Request ${request.id}: ${env.PUBLIC_URL}/r/${token}`);
     return summary(request);
   }),
 
