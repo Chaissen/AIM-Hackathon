@@ -47,6 +47,7 @@ async function loggedIn(to: "verified" | "identity_held") {
       requesterName: "Dr. Lena Hofer",
     },
     { passed: true },
+    async () => {},
   );
   created.push(request.id);
   assert.ok(await applyLoginTransition(db, request.id, { from: "sent", to, personNumber: EVA.personNumber }));
