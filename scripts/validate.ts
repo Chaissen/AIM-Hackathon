@@ -10,8 +10,8 @@ import { and, eq, gte } from "drizzle-orm";
 import { db } from "@/server/db";
 import { auditLog } from "@/server/db/schema";
 import { filedReferences } from "@/server/metrics/audit";
-import { METRICS_DIR, validationPassed } from "@/server/metrics/report";
-import { exportResources, runValidator, totalErrors, type FileResult } from "@/server/metrics/validator";
+import { METRICS_DIR, totalErrors, validationPassed } from "@/server/metrics/report";
+import { exportResources, runValidator, type FileResult } from "@/server/metrics/validator";
 
 const { values, positionals } = parseArgs({ options: { since: { type: "string" } }, allowPositionals: true });
 const since = values.since === undefined ? undefined : new Date(values.since);
@@ -31,26 +31,27 @@ async function jsonFiles(args: string[]): Promise<string[]> {
   return files;
 }
 
-async function exportFiled(): Promise<string[]> {
+async function exportFiled(): Promise<{ files: string[]; references: string[] }> {
   try {
     const filed = eq(auditLog.event, "answer_filed");
     const rows = await db.select().from(auditLog).where(since ? and(filed, gte(auditLog.at, since)) : filed);
     const refs = filedReferences(rows);
     const scope = since ? `since ${since.toISOString()}` : "in the whole audit log";
     console.log(`${rows.length} answer_filed entries ${scope} name ${refs.length} resources. Exporting them from FHIR to out/filed/.`);
-    return await exportResources(refs);
+    return { files: await exportResources(refs), references: refs };
   } finally {
     await db.$client.end();
   }
 }
 
-let files: string[];
+let scope: Awaited<ReturnType<typeof exportFiled>>;
 try {
-  files = positionals.length ? await jsonFiles(positionals) : await exportFiled();
+  scope = positionals.length ? { files: await jsonFiles(positionals), references: [] } : await exportFiled();
 } catch (e) {
   console.error(e instanceof Error ? e.message : String(e));
   process.exit(1);
 }
+const { files, references } = scope;
 if (!files.length) {
   console.error("Nothing to validate. File an answer first, or pass JSON files: pnpm validate path/to/resource.json");
   process.exit(1);
@@ -70,7 +71,7 @@ for (const r of results) {
   for (const i of r.issues.filter((i) => i.severity === "error" || i.severity === "fatal")) console.log(`      ${i.location}: ${i.message}`);
 }
 const errors = totalErrors(results);
-await writeFile(path.join(METRICS_DIR, "validate.json"), JSON.stringify({ at: new Date(), errors, results }, null, 2));
+await writeFile(path.join(METRICS_DIR, "validate.json"), JSON.stringify({ at: new Date(), files: files.length, references, errors, results }, null, 2));
 console.log(`\nFHIR validation: ${errors} errors in ${results.length} resources (target 0).`);
 if (results.length !== files.length) console.log(`The validator reported on ${results.length} of ${files.length} files.`);
 process.exit(validationPassed(files.length, results) ? 0 : 1);

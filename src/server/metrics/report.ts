@@ -3,7 +3,7 @@
 import path from "node:path";
 
 import { TRACK_EVENTS, type RequestCoverage } from "./audit";
-import { totalErrors, type FileResult } from "./validator";
+import type { FileResult } from "./validator";
 
 export type MetricStatus = "met" | "missed" | "blocked";
 export type Metric = { name: string; target: string; result: string; status: MetricStatus };
@@ -25,6 +25,8 @@ export function metricsMarkdown(metrics: Metric[], at: Date): string {
     "",
   ].join("\n");
 }
+
+export const totalErrors = (results: FileResult[]) => results.reduce((n, r) => n + r.errors, 0);
 
 // The validator must have reported on every exported file. A missing result is not a pass.
 export const validationPassed = (files: number, results: FileResult[]) => results.length === files && totalErrors(results) === 0;

@@ -3,6 +3,7 @@
 import type { WidgetApi } from "matrix-widget-api";
 import { useEffect, useState } from "react";
 
+import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { TRPCReactProvider } from "@/trpc/react";
 
@@ -74,7 +75,28 @@ export function ClinicAccess({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  if (error) return <div className="grid gap-3"><p role="alert">{error}</p><Button onClick={() => window.location.reload()}>Reload</Button></div>;
-  if (!token) return <p>Confirm your identity in Element to continue …</p>;
+  if (error)
+    return (
+      <SignIn>
+        <p role="alert" className="text-base leading-relaxed text-dim">{error}</p>
+        <Button variant="outline" onClick={() => window.location.reload()}>Reload</Button>
+      </SignIn>
+    );
+  if (!token)
+    return (
+      <SignIn>
+        <p className="text-base leading-relaxed text-dim">Confirm your identity in Element to continue …</p>
+      </SignIn>
+    );
   return <TRPCReactProvider key={token} clinicToken={token}>{children}</TRPCReactProvider>;
+}
+
+/** What the frame shows before the clinic data can load: the logo and one message, padded like a view. */
+function SignIn({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mx-auto grid w-full max-w-md justify-items-start gap-4 p-6">
+      <Logo />
+      {children}
+    </div>
+  );
 }

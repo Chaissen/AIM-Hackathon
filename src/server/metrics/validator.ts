@@ -48,8 +48,6 @@ export function summarizeOutput(output: unknown): FileResult[] {
     });
 }
 
-export const totalErrors = (results: FileResult[]) => results.reduce((n, r) => n + r.errors, 0);
-
 async function fileSha256(file: string): Promise<string> {
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(file)) hash.update(chunk as Buffer);

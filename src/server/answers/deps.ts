@@ -1,4 +1,4 @@
-import type { Patient } from "fhir/r4";
+import { z } from "zod";
 
 import type { ExpectedPatient } from "@/server/documents/patient-check";
 import type { Db } from "@/server/db";
@@ -14,6 +14,12 @@ import { type FileAnswer, type ReleaseCheck } from "./ports";
 /** The requested patient from the FHIR server: what the patient check compares, and the name for notices. */
 export type RequestedPatient = ExpectedPatient & { display: string };
 
+const patientResource = z.object({
+  resourceType: z.literal("Patient"),
+  name: z.array(z.object({ use: z.string().optional(), given: z.array(z.string()).optional(), family: z.string().optional() })).optional(),
+  birthDate: z.string().optional(),
+});
+
 /** Everything the answer flow talks to. Tests pass stand-ins; the portal uses `answerDeps`. */
 export type AnswerDeps = {
   db: Db;
@@ -26,7 +32,7 @@ export type AnswerDeps = {
 
 /** Reads the patient by id. The official name if the resource has one, otherwise the first. */
 export async function readFhirPatient(patientId: string): Promise<RequestedPatient> {
-  const patient = await fhirFetch<Patient>(`Patient/${encodeURIComponent(patientId)}`);
+  const patient = patientResource.parse(await fhirFetch<unknown>(`Patient/${encodeURIComponent(patientId)}`));
   const name = patient.name?.find((n) => n.use === "official") ?? patient.name?.[0];
   const given = name?.given ?? [];
   const family = name?.family ?? "";

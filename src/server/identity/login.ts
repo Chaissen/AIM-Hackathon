@@ -1,3 +1,4 @@
+import { outsidePersonActor } from "@/lib/audit-actor";
 import type { auditLog } from "@/server/db/schema";
 import type { Notice } from "@/server/matrix/notices";
 
@@ -74,7 +75,7 @@ export function decideLogin(
   result: IdentityResult,
 ): LoginDecision {
   const actor = login
-    ? { actorKind: "outside_person" as const, actor: `${fullName(login)} (${login.personNumber ?? "no person number"})` }
+    ? { actorKind: "outside_person" as const, actor: outsidePersonActor(fullName(login), login.personNumber) }
     : { actorKind: "anonymous" as const, actor: "ID Austria login" };
   const checked: AuditEntry = { event: "identity_checked", requestId: request.id, ...actor, outcome: result.verdict, detail: checkDetail(result.checks) };
   const none = { transition: null, countsTowardLock: false, notice: null };

@@ -3,32 +3,34 @@ import { asc, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { env } from "@/env";
-import { requestInput } from "@/lib/request-input";
+import { addressWarning, type AddressCheck as EhvdAddressCheck } from "@/lib/address-check";
+import { patientId, requestInput } from "@/lib/request-input";
+import { notFound, ownRequestProcedure } from "@/server/api/own-request";
 import { type Actor, clinicProcedure, createTRPCRouter } from "@/server/api/trpc";
 import { answerDeps, readFhirPatient } from "@/server/answers/deps";
 import { logReason } from "@/server/answers/file";
 import { acceptAnswer, FilingOutcomeOpen, NoHeldAnswer, rejectAnswer } from "@/server/answers/held";
 import { auditActor, recordAudit } from "@/server/audit/record";
 import type { Db } from "@/server/db";
-import { auditLog } from "@/server/db/schema";
-import { type AddressCheck as EhvdAddressCheck, addressWarning, checkAddress } from "@/server/ehvd/address-check";
+import { auditLog, heldAnswers, keptAnswers } from "@/server/db/schema";
+import { checkAddress, checkRecipient } from "@/server/ehvd/address-check";
 import { FhirError } from "@/server/fhir/client";
 import { nameWords } from "@/server/identity/names";
+import { forbiddenContent, requestEmail, requestSms } from "@/server/mail/message";
 import { IncompletePatient, MessageRefused, sendRequestEmail } from "@/server/mail/send";
 import { displayName } from "@/server/matrix/client";
 import { taskStatus, TransitionError } from "@/server/requests/lifecycle";
+import { LINK_TTL_MS } from "@/server/requests/link-token";
+import { pendingDecision } from "@/server/requests/pending";
 import {
   type AddressCheck,
   applyEvent,
   createRequest,
-  getRequest,
+  findBinding,
   listRequests,
   type RequestRow,
   sendAnyway,
 } from "@/server/requests/service";
-
-// Postgres `serial` ends at 2^31 - 1; a larger id would reach the database as an error.
-const byId = z.object({ id: z.number().int().positive().max(2_147_483_647) });
 
 // What network members see of a request. An allowlist, so the link hash never leaves the server.
 const summary = (r: RequestRow) => ({
@@ -49,16 +51,6 @@ const summary = (r: RequestRow) => ({
   expiresAt: r.expiresAt,
 });
 
-const notFound = (id: number) => new TRPCError({ code: "NOT_FOUND", message: `Request ${id} does not exist` });
-
-// A network member sees and changes only the requests they sent. Someone else's request reads as not found,
-// so its existence does not leak either.
-const ownRequestProcedure = clinicProcedure.input(byId).use(async ({ ctx, input, next }) => {
-  const request = await getRequest(ctx.db, input.id);
-  if (request?.requester !== ctx.actor.mxid) throw notFound(input.id);
-  return next({ ctx: { ...ctx, request } });
-});
-
 /** The eHVD's answer as the request service stores it (docs/EHVD.md, "The address check"). */
 const stored = (check: EhvdAddressCheck): AddressCheck =>
   check.result === "pass"
@@ -66,19 +58,6 @@ const stored = (check: EhvdAddressCheck): AddressCheck =>
     : check.result === "mismatch"
       ? { passed: false, domain: check.domain, expectedDomain: check.expectedDomain }
       : { passed: false, unchecked: true };
-
-/**
- * The warning next to Send anyway for a request that waits for it. A mismatch is rebuilt from its audit entry. Why
- * the eHVD could not confirm an address is not stored, so a reload says only that.
- */
-function pendingWarning(request: RequestRow, audit: (typeof auditLog.$inferSelect)[]): string | null {
-  if (request.state !== "awaiting_confirmation") return null;
-  const caught = audit.find((a) => a.event === "misdelivery_caught" && a.outcome === "address_mismatch");
-  const detail = caught?.detail as { domain: string; expectedDomain: string } | undefined;
-  return detail
-    ? addressWarning({ result: "mismatch", domain: detail.domain, expectedDomain: detail.expectedDomain }, request.org)
-    : "The eHVD could not confirm the address, so the request has not been sent.";
-}
 
 function conflict(e: unknown): never {
   if (e instanceof TransitionError) throw new TRPCError({ code: "CONFLICT", message: e.message, cause: e });
@@ -131,6 +110,33 @@ async function decideHeldAnswer(ctx: DecideContext, event: "accept" | "reject") 
 
 const auditOf = (db: Db, ids: number[]) =>
   db.select().from(auditLog).where(inArray(auditLog.requestId, ids)).orderBy(asc(auditLog.at), asc(auditLog.id));
+
+/**
+ * Each request with its audit entries and the decision it waits for. Of a held answer only the sender, the reason, and
+ * the time leave the server; its text and ID token stay (`document.forRequest` shows the text).
+ */
+async function withPending(db: Db, rows: RequestRow[]) {
+  const ids = rows.map((r) => r.id);
+  const [audit, held, kept] = await Promise.all([
+    auditOf(db, ids),
+    db
+      .select({ requestId: heldAnswers.requestId, sender: heldAnswers.sender, reason: heldAnswers.reason, sentAt: heldAnswers.sentAt })
+      .from(heldAnswers)
+      .where(inArray(heldAnswers.requestId, ids)),
+    db.select({ requestId: keptAnswers.requestId }).from(keptAnswers).where(inArray(keptAnswers.requestId, ids)),
+  ]);
+  return rows.map((r) => {
+    const own = audit.filter((a) => a.requestId === r.id);
+    const pending = pendingDecision(r, own, held.find((h) => h.requestId === r.id) ?? null, kept.some((k) => k.requestId === r.id));
+    return { ...summary(r), pending, audit: own };
+  });
+}
+
+/** The email or SMS as the outside person gets it. ordy keeps only the link's hash, so the link ends in "…". */
+function message(requester: string, expiresAt: Date, channel: RequestRow["channel"]): { subject: string | null; text: string } {
+  const content = { requester, clinic: env.CLINIC_NAME, link: `${env.PUBLIC_URL}/r/…`, expiresAt };
+  return channel === "email" ? requestEmail(content) : { subject: null, ...requestSms(content) };
+}
 
 export const linkDeps = { readPatient: readFhirPatient, sendRequestEmail };
 
@@ -206,18 +212,45 @@ export const requestRouter = createTRPCRouter({
   }),
 
   get: ownRequestProcedure.query(async ({ ctx }) => {
-    const audit = await auditOf(ctx.db, [ctx.request.id]);
-    return { ...summary(ctx.request), addressWarning: pendingWarning(ctx.request, audit), audit };
+    const [item] = await withPending(ctx.db, [ctx.request]);
+    return { ...item, message: message(ctx.request.requesterName, ctx.request.expiresAt, ctx.request.channel) };
   }),
 
-  list: clinicProcedure.query(async ({ ctx }) => {
-    const listed = await listRequests(ctx.db, ctx.actor.mxid);
-    const audit = await auditOf(ctx.db, listed.map((r) => r.id));
-    return listed.map((r) => {
-      const own = audit.filter((a) => a.requestId === r.id);
-      return { ...summary(r), addressWarning: pendingWarning(r, own), audit: own };
-    });
-  }),
+  list: clinicProcedure.query(async ({ ctx }) => withPending(ctx.db, await listRequests(ctx.db, ctx.actor.mxid))),
+
+  /** The email or SMS a new request would send, with the content check for the patient run on it. */
+  preview: clinicProcedure
+    .input(z.object({ channel: z.enum(["email", "sms"]), patient: patientId }))
+    .query(async ({ ctx, input }) => {
+      const [patient, requester] = await Promise.all([
+        readFhirPatient(input.patient).catch((error: unknown) => {
+          if (error instanceof FhirError && error.status === 404) throw new TRPCError({ code: "NOT_FOUND", message: `Patient ${input.patient} does not exist` });
+          throw error;
+        }),
+        displayName(ctx.actor.mxid),
+      ]);
+      const shown = message(requester ?? ctx.actor.mxid, new Date(Date.now() + LINK_TTL_MS), input.channel);
+      return { ...shown, refused: forbiddenContent({ subject: shown.subject ?? "", text: shown.text }, patient) };
+    }),
+
+  /**
+   * What the eHVD and the bindings say about a recipient while Dr. Hofer types. Advisory and read only: the address check
+   * in `create` still decides, and writes `misdelivery_caught`.
+   */
+  checkRecipient: clinicProcedure
+    .input(
+      z.object({
+        given: z.string().trim().max(128),
+        family: z.string().trim().max(128),
+        org: z.string().trim().min(1).max(128),
+        channel: z.enum(["email", "sms"]),
+        address: z.string().trim().max(254),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const [check, binding] = await Promise.all([checkRecipient(input), findBinding(ctx.db, input)]);
+      return { ...check, knownSender: binding !== null };
+    }),
 
   /** Dr. Hofer confirms the address after the warning. The request goes out with a new 7-day link. */
   sendAnyway: ownRequestProcedure.mutation(async ({ ctx }) => {

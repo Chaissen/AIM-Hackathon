@@ -1,6 +1,6 @@
 # FHIR model
 
-This page lists the FHIR R4 resources the request service files, how they reference each other, and how we validate them.
+This page lists the FHIR R4 resources the request service files, how they reference each other, how the widget reads them back, and how we validate them.
 
 ## Resources we file
 
@@ -257,12 +257,22 @@ The Task stays on the clinic's FHIR server. It is the only place outside the req
 
 The request service puts `track/scenario/patient.json` on the server with `PUT Patient/maria-beispiel`. On the public test server `https://hapi.fhir.org/baseR4`, use an id with a team prefix, such as `aim-t2-<team>-maria-beispiel`, so the data does not mix with other teams' data. We prefer a local HAPI server.
 
+## Reading filed documents back
+
+The widget reads filed answers back from HAPI in three places:
+
+- The request page fetches the resource that the request's `answer_filed` entry names as `output` (`document.forRequest`).
+- **Technical details** on the request page fetches every resource that the request's `answer_filed` entries reference, read with `filedReferences()` as `pnpm validate` does, and shows each as JSON (`document.filedResources`).
+- The patient page searches `DiagnosticReport?subject=Patient/<id>&_sort=-issued` and `DocumentReference?subject=Patient/<id>&_sort=-date`, 20 of each (`document.forPatient`). The search finds every DiagnosticReport and DocumentReference about the patient, not only the ones ordy filed. A match without a Markdown attachment shows only its title and date.
+
+The request page and the patient page read the document with `readFiled()` in `src/server/documents/filed.ts`. It decodes the first attachment whose `contentType` starts with `text/markdown`, from base64 as UTF-8. A DiagnosticReport carries it in `presentedForm`, and a DocumentReference carries it in `content.attachment`. `toDocumentView()` in `view.ts` parses the text with `parseDocument()`, so a filed answer shows exactly as a held one. Text that is not a lab result or a rehab report reads as unreadable.
+
 ## Validation
 
 1. After a run, `pnpm validate` (`scripts/validate.ts`) reads the ids of the filed resources from the `answer_filed` audit entries, all of them or with `--since <time>` those of one run. `detail.resources` lists every resource in the transaction, the Task included. A Practitioner known from `bindings` is only referenced, not part of the transaction, so it appears in `sender` or `author` but not in `resources`. `detail` also names `output`, `targets`, `provenance`, `task`, `sender`, `author`, and `organization`.
 2. It fetches each resource from HAPI into `out/filed/`.
 3. It runs the validator on all files at once, as the scenario README says: `java -jar validator_cli.jar <files> -version 4.0`, with `-locale en-US` so the messages are in English.
-4. It counts the issues with severity `error` or `fatal`. The target is 0. Warnings do not count. Every file must have a result. It prints each error, writes the raw validator result to `out/metrics/validator-output.json` and the counts to `out/metrics/validate.json`, and exits with 1 on any error or missing result, or with a short message when the validator cannot run (no Java, a jar with another hash).
+4. It counts the issues with severity `error` or `fatal`. The target is 0. Warnings do not count. Every file must have a result. It prints each error, writes the raw validator result to `out/metrics/validator-output.json` and the counts to `out/metrics/validate.json`, and exits with 1 on any error or missing result, or with a short message when the validator cannot run (no Java, a jar with another hash). The saved counts include the completion time, expected file count, and exported resource references. Validation of local files records no FHIR references. `pnpm scenario` saves the same validation evidence in `scenario.json`, separately from its start time. The Metrics view requires this evidence and does not infer success from older files or summary text.
 
 `pnpm validate path/to/file.json path/to/folder` validates hand-made resources instead, without Postgres or HAPI. `pnpm scenario` runs the same check on the resources filed during its run. After a change to the parser or the mappers, validate their output this way: write the resources for the three scenario documents (fixtures in `src/server/documents/scenario-fixtures.ts`), and the Bundle `buildFilingBundle()` makes of them, to JSON files with a short `pnpm exec tsx` script. The target for the mapper's resources and for the Bundle is 0 errors and only the `dom-6` warning.
 

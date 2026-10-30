@@ -10,6 +10,7 @@ export type Email = { subject: string; text: string };
 const longDate = (timeZone: string) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone });
 const viennaDate = longDate("Europe/Vienna");
 const utcDate = longDate("UTC");
+const viennaShortDate = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "Europe/Vienna" });
 
 export function requestEmail({ requester, clinic, link, expiresAt }: RequestEmail): Email {
   return {
@@ -25,6 +26,11 @@ export function requestEmail({ requester, clinic, link, expiresAt }: RequestEmai
       "",
     ].join("\n"),
   };
+}
+
+/** The SMS takes the same content as the email. The content check runs on it as `forbiddenContent({ subject: "", text }, patient)`. */
+export function requestSms({ requester, clinic, link, expiresAt }: RequestEmail): { text: string } {
+  return { text: `${clinic}: ${requester} sent you a secure request. Open it with ID Austria: ${link} (valid until ${viennaShortDate.format(expiresAt)})` };
 }
 
 export type ContentCategory = "patient-name" | "birth-date" | "document-type";

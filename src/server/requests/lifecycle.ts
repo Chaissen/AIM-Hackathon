@@ -73,8 +73,8 @@ const TRANSITIONS: Record<RequestEvent, Partial<Record<RequestState, RequestStat
   expire: open("expired"),
 };
 
-export const REQUESTER_EVENTS = ["send_anyway", "accept", "reject", "cancel"] as const satisfies RequestEvent[];
-export type RequesterEvent = (typeof REQUESTER_EVENTS)[number];
+/** The four events Dr. Hofer triggers from the widget. */
+export type RequesterEvent = Extract<RequestEvent, "send_anyway" | "accept" | "reject" | "cancel">;
 
 export const accepts = (state: RequestState, event: RequestEvent) => TRANSITIONS[event][state] !== undefined;
 

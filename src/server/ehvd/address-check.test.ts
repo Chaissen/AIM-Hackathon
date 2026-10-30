@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 
-import { addressWarning, checkAddress } from "./address-check";
+import { addressWarning } from "@/lib/address-check";
+
+import { checkAddress } from "./address-check";
 import { createEhvdClient, type EhvdClient } from "./client";
 import { startEhvdMock } from "./start-mock";
 

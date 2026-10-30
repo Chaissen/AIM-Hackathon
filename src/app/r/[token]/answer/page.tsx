@@ -57,11 +57,11 @@ async function Answer({ params }: { params: PageProps<"/r/[token]/answer">["para
   const { context } = page;
   return (
     <PortalFrame aside={`Logged in as ${session.givenName} ${session.familyName}`}>
-      <section className="grid gap-2 rounded-xl border bg-card p-6">
-        <p className="text-sm text-muted-foreground">
+      <section className="crop-marks relative grid gap-3 border border-border bg-card p-6 sm:p-8">
+        <p className="eyebrow">
           {context.requester}, {context.clinic} asks for
         </p>
-        <h1 className="text-xl font-semibold text-balance">
+        <h1 className="text-2xl leading-tight text-balance">
           {DOCUMENT_TYPES[context.docType].label} for {context.patient.name}, born {formatDate(context.patient.birthDate)}
         </h1>
       </section>

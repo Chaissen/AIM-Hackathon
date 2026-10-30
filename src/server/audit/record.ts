@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 
 import { env } from "@/env";
+import { outsidePersonActor } from "@/lib/audit-actor";
 import type { DocumentType } from "@/lib/document-types";
 import type { Actor } from "@/server/api/trpc";
 import { sessionSecret } from "@/server/auth/session-secret";
@@ -65,7 +66,7 @@ export function auditActor(actor: Actor): AuditActor {
     case "clinic":
       return { kind: "network_member", id: actor.mxid };
     case "eid":
-      return { kind: "outside_person", id: `${actor.session.givenName} ${actor.session.familyName} (${actor.session.personNumber})` };
+      return { kind: "outside_person", id: outsidePersonActor(`${actor.session.givenName} ${actor.session.familyName}`, actor.session.personNumber) };
     case "anonymous":
       return { kind: "anonymous", id: "anonymous" };
   }

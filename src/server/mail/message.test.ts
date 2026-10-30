@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { forbiddenContent, requestEmail } from "./message";
+import { forbiddenContent, requestEmail, requestSms } from "./message";
 
 const maria = { family: "Beispiel", given: ["Maria"], birthDate: "1961-03-12" };
 const check = (text: string, patient = maria) => forbiddenContent({ subject: "Secure request from Klinikum Beispielstadt", text }, patient);
@@ -24,6 +24,21 @@ test("request 1's email follows the template, dates the expiry in Vienna, and pa
   });
   assert.deepEqual(forbiddenContent(email, maria), []);
   assert.deepEqual(forbiddenContent({ ...email, text: `${email.text}Maria` }, maria), ["patient-name"]);
+});
+
+test("request 2's SMS names the requester as given, dates the expiry in Vienna, and passes the check", () => {
+  const sms = requestSms({
+    requester: "Dr. Lena Hofer",
+    clinic: "Klinikum Beispielstadt",
+    link: "http://localhost:3010/r/q3Vt8sQ0bA1xY7nK2mZ9pL4rW6eT5uH0jF8dC3gB1iE",
+    expiresAt: new Date("2026-11-04T23:30:00Z"),
+  });
+  assert.deepEqual(sms, {
+    text:
+      "Klinikum Beispielstadt: Dr. Lena Hofer sent you a secure request. " +
+      "Open it with ID Austria: http://localhost:3010/r/q3Vt8sQ0bA1xY7nK2mZ9pL4rW6eT5uH0jF8dC3gB1iE (valid until 5 Nov)",
+  });
+  assert.deepEqual(forbiddenContent({ subject: "", text: sms.text }, maria), []);
 });
 
 test("a text with Maria or lab is refused", () => {
