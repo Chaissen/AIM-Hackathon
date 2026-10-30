@@ -44,7 +44,8 @@ export const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 // `firstname` and `surname`, with two letters A to Z besides it, as the handbook's wildcard rule says. The release check
 // wraps a name from the document as `*name*`, so a `*` in the name itself lands inside and is refused.
 const WILDCARD_FIELDS = new Set(["firstname", "surname"]);
-const NAME_TEXT = /^[\p{Script=Latin}0-9 .\-~_+=/]+$/u;
+// Latin letters, not every Latin-script character: U+2163 ROMAN NUMERAL FOUR is Latin script but not a letter.
+const NAME_TEXT = /^(?:(?=\p{L})\p{Script=Latin}|[0-9 .\-~_+=/])+$/u;
 const STREET_NUMBER = /^[\p{L}0-9 .\-~_+=/]+$/u;
 const RULES: Record<string, { pattern: RegExp; max?: number }> = {
   oidIssuingAuthority: { pattern: /^[0-9.]+$/, max: 24 },

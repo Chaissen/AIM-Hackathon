@@ -42,6 +42,8 @@ export type ReleaseHoldReason =
   | "too_many_matches"
   /** The eHVD entry for the OID in the sender's login names someone else than the document, or has another OID. */
   | "claim_differs"
+  /** The eHVD has no person entry for the OID in the sender's login. */
+  | "claim_not_listed"
   /** A name or organisation with characters the eHVD search does not allow. */
   | "not_searchable"
   /** No connection, no answer in time, or a refused connection. */
@@ -55,7 +57,7 @@ export type ReleaseCheck =
       via: "claim" | "search";
       practitioner: GdaDescriptor;
       organisation: GdaDescriptor;
-      /** The sender's login carries the responsible person's name. Always true via the claim. */
+      /** The GDA claim in the sender's login proves that the sender is the responsible person: true only via the claim. */
       senderIsResponsible: boolean;
     }
   | {
@@ -63,7 +65,7 @@ export type ReleaseCheck =
       /** A code for the audit entry, and `sentence` for the held notice (docs/ARCHITECTURE.md, "Matrix bot"). */
       reason: ReleaseHoldReason;
       sentence: string;
-      /** What the check found before it held, for the filing if Dr. Hofer accepts the answer. Null if nothing. */
+      /** What the check found before it held, for the filing if Dr. Hofer accepts the answer. Null if nothing, or if ambiguous. */
       organisation: GdaDescriptor | null;
       practitioner: GdaDescriptor | null;
     };
@@ -88,7 +90,9 @@ const ORGANISATION_HOLDS = {
   ehvd_error: "ehvd_error",
 } as const satisfies Record<Extract<OrganisationLookup, { ok: false }>["reason"], ReleaseHoldReason>;
 
-const displayName = (person: PersonLine) => [...person.titles, person.given, person.family].filter(Boolean).join(" ");
+/** Text from the document or the request goes into the notice, so it is cut to a length a notice can carry. */
+const clip = (text: string) => (text.length > 100 ? `${text.slice(0, 99)}…` : text);
+const displayName = (person: PersonLine) => clip([...person.titles, person.given, person.family].filter(Boolean).join(" ").replace(/[.,;:]+$/, ""));
 
 type NameWords = { given: Set<string>; family: Set<string> };
 
@@ -110,14 +114,15 @@ const hasRequiredRole = (type: "lab-result" | "rehab-report", gda: GdaDescriptor
 /** `person` is null when the hold is about the organisation, so the sentence names the organisation. */
 function sentence(reason: ReleaseHoldReason, input: ReleaseInput, person: PersonLine | null): string {
   const name = person ? displayName(person) : "";
-  const { org, document } = input;
+  const org = clip(input.org);
+  const { document } = input;
   switch (reason) {
     case "no_responsible_person":
       return `The document names nobody under ${document.type === "lab-result" ? "Validated by" : "Written by"}.`;
     case "incomplete_name":
       return `The document does not give the full name of ${name}.`;
     case "organisation_differs":
-      return `The document comes from ${document.organisation}, but the request went to ${org}.`;
+      return `The document comes from ${clip(document.organisation)}, but the request went to ${org}.`;
     case "organisation_not_listed":
       return `The eHVD does not list ${org} as an active organisation.`;
     case "several_organisations":
@@ -137,9 +142,11 @@ function sentence(reason: ReleaseHoldReason, input: ReleaseInput, person: Person
     case "several_matches":
       return `The eHVD lists more than one ${name} at ${org}.`;
     case "too_many_matches":
-      return `The eHVD lists too many people named ${person?.family ?? ""} to confirm ${name}.`;
+      return `The eHVD lists too many people named ${clip(person?.family ?? "")} to confirm ${name}.`;
     case "claim_differs":
       return `The eHVD entry of the sender's ID Austria login is not ${name}.`;
+    case "claim_not_listed":
+      return `The eHVD has no person entry for the sender's ID Austria login, so it cannot confirm ${name}.`;
     case "not_searchable":
       return `The eHVD cannot be searched for ${name || org}.`;
     case "ehvd_unreachable":
@@ -157,8 +164,30 @@ function judge(type: "lab-result" | "rehab-report", person: GdaDescriptor, organ
   return null;
 }
 
-/** The first part of a given name, so "Karl-Heinz" and "Karl Heinz" in the eHVD both match `*Karl*`. */
-const firstGivenName = (given: string) => given.split(/[\s-]+/)[0];
+/** A name's parts as the document writes them, split where name words split, so "Brandl." gives "Brandl". */
+const nameParts = (text: string) => text.split(/[\s.,-]+/).filter(Boolean);
+
+type PeopleSearch = { ok: true; people: GdaDescriptor[] } | { ok: false; reason: ReleaseHoldReason };
+
+/**
+ * Everyone in the eHVD, active or not, who carries the document's name. The search asks for the family name's longest
+ * part as a substring, so "Brandl-Huber" and "Huber-Brandl" both count for "Brandl", and for any given name, so
+ * "Eva Maria" counts for "Eva". `Inaktiv` returns both statuses, so the notice can say that a physician is not active.
+ * Only when that is more than 200 entries does it add the first given name, again as a substring, and when that is
+ * still too many it holds instead of narrowing further. Every hit must carry the document's name. Spellings the eHVD
+ * does not fold, such as "Mueller" for "Müller", are not found, so they are not counted either.
+ */
+async function searchPeople(client: EhvdClient, person: PersonLine, name: NameWords): Promise<PeopleSearch> {
+  const family = nameParts(person.family).reduce((a, b) => (b.length > a.length ? b : a), "");
+  const search = (query: Partial<GdaSearchQuery>) =>
+    client.gdaSearch({ surname: `*${family}*`, maxResults: PERSON_RESULTS, ehvdstatus: "Inaktiv", ...query });
+  const tooMany = (r: Awaited<ReturnType<typeof search>>) => !r.ok && r.failure.kind === "fault" && r.failure.code === 6005;
+  let result = await search({});
+  if (tooMany(result)) result = await search({ firstname: `*${nameParts(person.given)[0]}*` });
+  if (tooMany(result)) return { ok: false, reason: "too_many_matches" };
+  if (!result.ok) return { ok: false, reason: serviceReason(result.failure) };
+  return { ok: true, people: result.value.filter((gda) => isPerson(gda) && sameName(name, entryName(gda))) };
+}
 
 export async function checkRelease(input: ReleaseInput, client: EhvdClient = ehvd): Promise<ReleaseCheck> {
   const { document, org, sender } = input;
@@ -178,7 +207,7 @@ export async function checkRelease(input: ReleaseInput, client: EhvdClient = ehv
   if (!sameOrganisationName(document.organisation, org)) return hold("organisation_differs");
 
   // The name as Dr. Hofer typed it, else as the heading writes it: the eHVD matches exactly, and the two have the same
-  // words but may differ in spelling, such as "Kanalstrasse" and "Kanalstraße".
+  // words in the same order but may differ in spelling, such as "Kanalstrasse" and "Kanalstraße".
   let lookup: OrganisationLookup = await findOrganisation(client, org);
   if (!lookup.ok && lookup.reason === "not_listed" && document.organisation.trim() !== org.trim()) {
     lookup = await findOrganisation(client, document.organisation);
@@ -189,40 +218,35 @@ export async function checkRelease(input: ReleaseInput, client: EhvdClient = ehv
   if (document.type === "rehab-report" && !hasCode(organisation.roles.role, GTELV_ROLE, ["300", "301"])) {
     return hold("organisation_not_hospital", { about: null });
   }
-  const senderIsResponsible = sameName(name, { given: sender.givenName, family: sender.familyName });
+  const members = (people: GdaDescriptor[]) => people.filter((gda) => gda.relations.memberof.includes(organisationOid));
 
   // The responsible person is the sender, and the login carried the GDA claim: the OID links the person through the state.
-  if (sender.gdaOid && senderIsResponsible) {
+  if (sender.gdaOid && sameName(name, { given: sender.givenName, family: sender.familyName })) {
     const result = await client.getGda({ id: sender.gdaOid });
     if (!result.ok) return hold(serviceReason(result.failure));
     const entry = result.value;
-    if (!entry || !isPerson(entry)) return hold("not_listed");
+    if (!entry || !isPerson(entry)) return hold("claim_not_listed");
     if (entry.id.id !== sender.gdaOid || !sameName(name, entryName(entry))) return hold("claim_differs");
     const reason = judge(document.type, entry, organisationOid);
-    return reason ? hold(reason, { practitioner: entry }) : { verdict: "pass", via: "claim", practitioner: entry, organisation, senderIsResponsible };
+    if (reason) return hold(reason, { practitioner: entry });
+    // The document's name must still point to the sender alone: another active member with it could have signed.
+    const namesakes = await searchPeople(client, person, name);
+    if (!namesakes.ok) return hold(namesakes.reason, { practitioner: entry });
+    if (members(namesakes.people).some((gda) => isActive(gda) && gda.id.id !== entry.id.id)) return hold("several_matches");
+    return { verdict: "pass", via: "claim", practitioner: entry, organisation, senderIsResponsible: true };
   }
 
-  // Otherwise the name is the only link: exactly one active member of the organisation with that name. The search asks
-  // for every family name that contains the document's, so a double name such as "Brandl-Huber" counts too, and for any
-  // given name, so "Eva Maria" counts for "Eva". It has no status filter, so the notice can say that a physician is not
-  // active. Only when that is more than 200 entries does it add the first given name, again as a substring, and when
-  // that is still too many it holds instead of narrowing further. Every hit must carry the document's name. Spellings
-  // the eHVD does not fold, such as "Mueller" for "Müller", are not found, so they are not counted either.
-  const search = (query: Partial<GdaSearchQuery>) => client.gdaSearch({ surname: `*${person.family}*`, maxResults: PERSON_RESULTS, ...query });
-  let result = await search({});
-  const tooMany = (r: typeof result) => !r.ok && r.failure.kind === "fault" && r.failure.code === 6005;
-  if (tooMany(result)) result = await search({ firstname: `*${firstGivenName(person.given)}*` });
-  if (tooMany(result)) return hold("too_many_matches");
-  if (!result.ok) return hold(serviceReason(result.failure));
-
-  const people = result.value.filter((gda) => isPerson(gda) && sameName(name, entryName(gda)));
+  // Otherwise the name is the only link: exactly one active member of the organisation with that name.
+  const found = await searchPeople(client, person, name);
+  if (!found.ok) return hold(found.reason);
+  const { people } = found;
   if (people.length === 0) return hold("not_listed");
-  const members = people.filter((gda) => gda.relations.memberof.includes(organisationOid));
-  if (members.length === 0) return hold("not_member", { practitioner: people.length === 1 ? people[0] : undefined });
-  const active = members.filter(isActive);
+  const atOrganisation = members(people);
+  if (atOrganisation.length === 0) return hold("not_member", { practitioner: people.length === 1 ? people[0] : undefined });
+  const active = atOrganisation.filter(isActive);
   if (active.length > 1) return hold("several_matches");
-  // No active member: judge gives not_active for the inactive one.
-  const practitioner = active[0] ?? members[0];
+  if (active.length === 0) return hold("not_active", { practitioner: atOrganisation.length === 1 ? atOrganisation[0] : undefined });
+  const [practitioner] = active;
   const reason = judge(document.type, practitioner, organisationOid);
-  return reason ? hold(reason, { practitioner }) : { verdict: "pass", via: "search", practitioner, organisation, senderIsResponsible };
+  return reason ? hold(reason, { practitioner }) : { verdict: "pass", via: "search", practitioner, organisation, senderIsResponsible: false };
 }
