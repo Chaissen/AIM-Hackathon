@@ -81,10 +81,10 @@ export const requestRouter = createTRPCRouter({
         requesterName: (await displayName(ctx.actor.mxid)) ?? ctx.actor.mxid,
       },
       // TODO(T15): the address check against the eHVD decides this.
-      { addressCheckPassed: true },
+      { passed: true },
     );
     // TODO(T06): send the link by email or SMS. Until then, print it in development so the portal can be tried.
-    if (env.NODE_ENV === "development") console.info(`Request ${request.id}: ${env.PUBLIC_URL}/r/${token}`);
+    if (env.NODE_ENV === "development" && request.state === "sent") console.info(`Request ${request.id}: ${env.PUBLIC_URL}/r/${token}`);
     return summary(request);
   }),
 

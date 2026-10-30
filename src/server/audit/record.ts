@@ -4,6 +4,7 @@ import { env } from "@/env";
 import type { DocumentType } from "@/lib/document-types";
 import type { Actor } from "@/server/api/trpc";
 import { sessionSecret } from "@/server/auth/session-secret";
+import type { CheckResult as IdentityCheckResult, Verdict } from "@/server/identity/checks";
 import type { Db, Tx } from "@/server/db";
 import { auditLog } from "@/server/db/schema";
 import type { RequestState } from "@/server/requests/lifecycle";
@@ -13,9 +14,9 @@ import type { RequestState } from "@/server/requests/lifecycle";
 
 export type AuditEvent = (typeof auditLog.$inferInsert)["event"];
 export type AuditActor = { kind: (typeof auditLog.$inferInsert)["actorKind"]; id: string };
-export type CheckResult = "pass" | "hold" | "fail";
-// The identity checks from docs/IDENTITY.md, "Identity checks".
-export type IdentityCheck = { check: "level" | "name" | "person_number"; result: CheckResult; reason: string };
+export type CheckResult = Verdict;
+// One identity check as `identity_checked` stores it: the check names and reason codes from src/server/identity/checks.ts.
+export type IdentityCheck = { check: IdentityCheckResult["check"]; result: Verdict; reason: IdentityCheckResult["reason"] };
 
 type Entries = {
   request_sent: { outcome: "sent"; detail: { docType: DocumentType; channel: "email" | "sms"; address: string } };

@@ -44,8 +44,9 @@ export const initialState = (addressCheckPassed: boolean): RequestState => (addr
 
 export type RequestEvent =
   | "send_anyway" // Dr. Hofer clicks Send anyway
-  | "identity_pass" // also when the verified person logs in again, for example after the session expired
-  | "identity_hold" // the name matched only partly
+  // The identity events start only from `sent`. A login in any other state changes no state (docs/IDENTITY.md).
+  | "identity_pass"
+  | "identity_hold" // partial name, requested name without words, or eHVD unreachable
   | "identity_fail"
   | "accept" // Dr. Hofer accepts a held identity or a held answer
   | "reject" // Dr. Hofer rejects a held identity or a held answer
@@ -59,10 +60,10 @@ const open = (to: RequestState) => Object.fromEntries(OPEN_STATES.map((s) => [s,
 
 const TRANSITIONS: Record<RequestEvent, Partial<Record<RequestState, RequestState>>> = {
   send_anyway: { awaiting_confirmation: "sent" },
-  identity_pass: { sent: "verified", verified: "verified" },
+  identity_pass: { sent: "verified" },
   identity_hold: { sent: "identity_held" },
   // A failed check keeps the state, so the real person can still answer a forwarded link. The third one locks.
-  identity_fail: { sent: "sent", verified: "verified" },
+  identity_fail: { sent: "sent" },
   accept: { identity_held: "verified", answer_held: "filed" },
   reject: { identity_held: "cancelled", answer_held: "cancelled" },
   answer_confirmed: { verified: "filed" },
@@ -79,7 +80,7 @@ export class TransitionError extends Error {
 }
 
 /**
- * The state after `event`. `failedChecks` is the number of failed identity checks including this event,
+ * The state after `event`. `failedChecks` is the number of failed identity checks so far, this one included,
  * so it only matters for `identity_fail`. Throws a TransitionError for an event the state does not accept.
  */
 export function transition(from: RequestState, event: RequestEvent, failedChecks = 0): RequestState {
