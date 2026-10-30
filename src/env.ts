@@ -27,6 +27,8 @@ const schema = z.object({
   SMTP_PORT: z.coerce.number().int().default(1025),
   MAIL_FROM: z.string().default("ordy · Klinikum Beispielstadt <ordy@klinikum.example>"),
   MAILPIT_API_URL: z.url().default("http://localhost:8025"),
+  // eHVD web service (task T15): the mock from T23, or the real eHVD from an address BRZ has allowed.
+  EHVD_URL: z.url().default("http://localhost:8095/"),
   ANTHROPIC_API_KEY: z.string().optional(),
 });
 
