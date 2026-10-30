@@ -1,16 +1,17 @@
 import { TRPCError } from "@trpc/server";
-import { asc, eq } from "drizzle-orm";
+import { asc, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { env } from "@/env";
 import { requestInput } from "@/lib/request-input";
-import { clinicProcedure, createTRPCRouter } from "@/server/api/trpc";
+import { type Actor, clinicProcedure, createTRPCRouter } from "@/server/api/trpc";
+import { auditActor, recordAudit } from "@/server/audit/record";
 import type { Db } from "@/server/db";
 import { auditLog } from "@/server/db/schema";
 import { nameWords } from "@/server/identity/names";
 import { displayName } from "@/server/matrix/client";
 import { taskStatus, TransitionError } from "@/server/requests/lifecycle";
-import { applyEvent, createRequest, getRequest, listRequests, type NonLoginEvent, type RequestRow } from "@/server/requests/service";
+import { applyEvent, createRequest, getRequest, listRequests, type RequestRow, sendAnyway } from "@/server/requests/service";
 
 // Postgres `serial` ends at 2^31 - 1; a larger id would reach the database as an error.
 const byId = z.object({ id: z.number().int().positive().max(2_147_483_647) });
@@ -44,15 +45,37 @@ const ownRequestProcedure = clinicProcedure.input(byId).use(async ({ ctx, input,
   return next({ ctx: { ...ctx, request } });
 });
 
-async function change(ctx: { db: Db; request: RequestRow }, event: NonLoginEvent) {
-  try {
-    const request = await applyEvent(ctx.db, ctx.request.id, event);
-    if (!request) throw notFound(ctx.request.id);
-    return request;
-  } catch (e) {
-    if (e instanceof TransitionError) throw new TRPCError({ code: "CONFLICT", message: e.message, cause: e });
-    throw e;
-  }
+function conflict(e: unknown): never {
+  if (e instanceof TransitionError) throw new TRPCError({ code: "CONFLICT", message: e.message, cause: e });
+  throw e;
+}
+
+const DECIDED = { accept: "accepted", reject: "rejected", cancel: "cancelled" } as const;
+
+async function decide(ctx: { db: Db; actor: Actor; request: RequestRow }, event: keyof typeof DECIDED) {
+  const request = await applyEvent(ctx.db, ctx.request.id, event, async (tx, changed, from) => {
+    if (event === "accept" && from === "answer_held") {
+      // TODO(T09): file the kept answer here, then write request_decided.
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Filing a held answer is not built yet." });
+    }
+    await recordAudit(tx, {
+      event: "request_decided",
+      requestId: changed.id,
+      actor: auditActor(ctx.actor),
+      outcome: DECIDED[event],
+      detail: { from, to: changed.state },
+    });
+  }).catch(conflict);
+  if (!request) throw notFound(ctx.request.id);
+  return request;
+}
+
+const auditOf = (db: Db, ids: number[]) =>
+  db.select().from(auditLog).where(inArray(auditLog.requestId, ids)).orderBy(asc(auditLog.at), asc(auditLog.id));
+
+// TODO(T06): send the link by email or SMS. Until then, print it in development so the portal can be tried.
+function printLink(request: RequestRow, token: string) {
+  if (env.NODE_ENV === "development") console.info(`Request ${request.id}: ${env.PUBLIC_URL}/r/${token}`);
 }
 
 export const requestRouter = createTRPCRouter({
@@ -83,17 +106,28 @@ export const requestRouter = createTRPCRouter({
       // TODO(T15): the address check against the eHVD decides this.
       { passed: true },
     );
-    // TODO(T06): send the link by email or SMS. Until then, print it in development so the portal can be tried.
-    if (env.NODE_ENV === "development" && request.state === "sent") console.info(`Request ${request.id}: ${env.PUBLIC_URL}/r/${token}`);
+    if (request.state === "sent") printLink(request, token);
     return summary(request);
   }),
 
-  get: ownRequestProcedure.query(async ({ ctx }) => {
-    const audit = await ctx.db.select().from(auditLog).where(eq(auditLog.requestId, ctx.request.id)).orderBy(asc(auditLog.at), asc(auditLog.id));
-    return { ...summary(ctx.request), audit };
+  get: ownRequestProcedure.query(async ({ ctx }) => ({ ...summary(ctx.request), audit: await auditOf(ctx.db, [ctx.request.id]) })),
+
+  list: clinicProcedure.query(async ({ ctx }) => {
+    const listed = await listRequests(ctx.db, ctx.actor.mxid);
+    const audit = await auditOf(ctx.db, listed.map((r) => r.id));
+    return listed.map((r) => ({ ...summary(r), audit: audit.filter((a) => a.requestId === r.id) }));
   }),
 
-  list: clinicProcedure.query(async ({ ctx }) => (await listRequests(ctx.db, ctx.actor.mxid)).map(summary)),
+  sendAnyway: ownRequestProcedure.mutation(async ({ ctx }) => {
+    const sent = await sendAnyway(ctx.db, ctx.request.id, auditActor(ctx.actor)).catch(conflict);
+    if (!sent) throw notFound(ctx.request.id);
+    printLink(sent.request, sent.token);
+    return summary(sent.request);
+  }),
 
-  cancel: ownRequestProcedure.mutation(async ({ ctx }) => summary(await change(ctx, "cancel"))),
+  accept: ownRequestProcedure.mutation(async ({ ctx }) => summary(await decide(ctx, "accept"))),
+
+  reject: ownRequestProcedure.mutation(async ({ ctx }) => summary(await decide(ctx, "reject"))),
+
+  cancel: ownRequestProcedure.mutation(async ({ ctx }) => summary(await decide(ctx, "cancel"))),
 });
