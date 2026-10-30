@@ -140,14 +140,14 @@ Short answers to the five questions of the track. They describe our design, and 
 
 ### 1. How does an outside person prove who they are if they are in no directory?
 
-They log in with ID Austria. ordy is built on its real OpenID Connect interface and reads its claims under their official names, so moving from our Keycloak simulation to real ID Austria changes only the URL and the client credentials.
+They log in with ID Austria. ordy is built on its real OpenID Connect interface and reads its claims under their official names, so moving from our Keycloak simulation to real ID Austria changes the URL, the client credentials, and the provider name ordy writes into the Provenance, today "ID Austria (simulation)".
 
 | ID Austria claim | What ordy does with it |
 |---|---|
-| `given_name`, `family_name` | Must match the person Dr. Hofer named, so a forwarded link fails here |
-| `urn:pvpgvat:oidc.eid_ida_level` | Must be `urn:eidgvat:eid.status.full`: the identity was officially confirmed |
-| `urn:pvpgvat:oidc.bpk` | The person number. After the first filed answer, only this bPK may answer as that person at that organisation. ordy never uses the transient `sub`. |
-| `urn:eidgvat:attributes.gda` | Only for healthcare professionals: their eHVD entry. ordy looks up its OID in the eHVD (`GetGDA`) to confirm the person, their role, and their organisation. |
+| `given_name`, `family_name` | Must match the person Dr. Hofer named. A different family name fails, so a forwarded link fails here. A name that shares only part of the family name waits for Dr. Hofer. |
+| `urn:pvpgvat:oidc.eid_ida_level` | Must be `urn:eidgvat:eid.status.full`: the identity was officially confirmed. A basic-level login fails. |
+| `urn:pvpgvat:oidc.bpk` | The person number. After the first filed answer, only this bPK may answer as that person at that organisation, with the name and the organisation as Dr. Hofer typed them. ordy never uses the transient `sub`. |
+| `urn:eidgvat:attributes.gda` | Only for healthcare professionals: their eHVD entry. At login, ordy only checks that the claim can be read. On upload, if the sender is the physician who must release the document (question 2), ordy looks up the OID in the eHVD (`GetGDA`) to confirm the person, their role, and that they belong to the organisation. |
 
 Someone in no directory, such as Stefan Kern, passes on the first three. The eHVD check then falls on the physician who wrote the report (question 2). Nobody needs an account with us. The link goes only to the email address or phone number Dr. Hofer gave, so the person also needs that inbox or phone.
 
@@ -157,25 +157,26 @@ Every sender needs the full check from question 1, because every sender sees the
 
 | Document | eHVD must confirm | Why |
 |---|---|---|
-| Lab result | `Validated by`: an active lab medicine specialist at the lab | A specialist answers for the values |
-| Rehab report | `Written by`: an active physician at an active rehab clinic | The physician signs the report; the discharge manager only sends it |
+| Lab result | `Validated by`: an active specialist in laboratory medicine who belongs to the organisation | A specialist answers for the values |
+| Rehab report | `Written by`: an active physician who belongs to the organisation, which the eHVD lists as a hospital | The physician signs the report; the discharge manager only sends it |
 
-If the eHVD cannot confirm the physician, Dr. Hofer decides.
+The organisation is the one active eHVD entry with the name Dr. Hofer typed. For a lab result, ordy does not check what kind of organisation it is. If the eHVD cannot confirm the physician, Dr. Hofer decides.
 
 ### 3. Which FHIR resources do you create and how do they reference each other and the patient?
 
 - **Lab result:** one `Observation` per test with its LOINC code, grouped by a `DiagnosticReport`.
 - **Rehab report:** a `DocumentReference` with the text attached.
-- **Every answer:** a `Provenance` (who sent it, when, and how ID Austria checked them) and a `Task` for the request.
+- **Every answer:** a `Provenance` (who sent it, when, and how ID Austria checked them, with the signed ID Austria token), and `Practitioner` and `Organization` resources for the people and organisations involved, including ID Austria, which signed the token.
+- **Every request:** one `Task`, created with the request and updated on each state change. Filing completes it.
 
-All point at the Patient. The report lists its Observations, the Task points at the report, and the Provenance targets everything filed, all in one transaction Bundle.
+The clinical resources point at the Patient through `subject`, and the Task through `for`. The report lists its Observations, the Task points at the report, and the Provenance targets the clinical resources. One answer is filed as one transaction Bundle.
 
 ### 4. How do you notice a misdelivery?
 
 At three points, each logged as `misdelivery_caught` and shown to Dr. Hofer:
 
 1. **Before sending:** the email domain must match the organisation's domain in the eHVD, so `labor-kanaI.example` needs her confirmation.
-2. **At login:** the ID Austria name must match the person she named. A wrong address (M1) or a forwarded link (M2) fails here, before anything is shown.
+2. **At login:** every check from question 1 must pass. A wrong address (M1) or a forwarded link (M2) fails the name match here, before anything is shown. Any failed check counts as a misdelivery, a basic-level login too. A name that shares only part of the family name is held for Dr. Hofer and logged as a held identity check, not as a misdelivery.
 3. **On upload:** the patient in the document must match her patient record, so another patient's result (M3) is never filed.
 
 ### 5. Where does your service run: at the clinic, at the outside organisation or at a third party?
