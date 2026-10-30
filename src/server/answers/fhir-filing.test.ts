@@ -53,7 +53,7 @@ after(async () => {
 
 const idTokenOf = (personNumber: string) =>
   new UnsecuredJWT({ "urn:pvpgvat:oidc.bpk": personNumber, "urn:pvpgvat:oidc.eid_ida_level": "urn:eidgvat:eid.status.full" })
-    .setIssuer("http://localhost:8080/realms/id-austria")
+    .setIssuer("http://localhost:8080/realms/idaustria-sim")
     .setIssuedAt()
     .encode();
 
