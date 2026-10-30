@@ -180,3 +180,15 @@ Two things differ from a real run:
 The login route handlers sign cookies with `ORDY_SECRET`. Without one in `.env`, the script uses a random key of its own, and the cookies never leave its process.
 
 The script prints only request ids, states, and document types. At the end it checks the [data rules](COMPLIANCE_AND_SAFETY.md#data-we-keep) on what it stored: no closed request keeps an ID token, a held answer exists only for a request in `answer_held`, the Max Beispiel upload left only its hash in the audit log, and no audit entry holds document text. It exits with an error if one fails.
+
+## The recorded video
+
+The finished video is [`docs/video/ordy-product-video.mp4`](video/ordy-product-video.mp4): 1 min 59.7 s, 1920x1080, 60 fps, with text overlays and no voice. A scripted browser recorded the running app on `main` at commit `5e75122` on 30 October 2026. It is a real run: the requests, logins, checks, and filing all happened as shown.
+
+What differs from a plain run:
+
+- **Addresses.** For the recording, the eHVD mock and the form examples used `.at` addresses instead of the reserved `.example` domains, and the browser displayed `klinikum-beispielstadt.at` in place of `klinikum.example` and `localhost`. All these domains are fictional here. The code on `main` keeps `.example`.
+- **Added in the edit.** The browser frame and its address line, the cursor, the captions, the zooms, and the check animations. The music and sounds are synthetic.
+- **Order.** M2 ran on request 1 before the filing, as [Order of the story](#order-of-the-story) requires. The video shows M3 in the flow, and M1 and M2 after request 2, so the notices on screen already name Thomas Wagner before his scene.
+
+The numbers on its closing card, measured on the data of this recording: `pnpm validate` found 0 errors in 18 resources, `pnpm audit:check` found 6 of 6 event types on request 1. The closing card shows the status at 13:40 CET on that day, including "AI fallback parser: built, not connected" and "Stopwatch test with a new user: still open". If either changes, the card is out of date.
