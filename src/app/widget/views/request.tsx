@@ -63,7 +63,7 @@ export function RequestView({ id }: { id: number }) {
         </Empty>
       ) : request.error ? (
         <LoadError title={`Could not load request ${id}`} onRetry={() => request.refetch()}>
-          Check your Element sign-in and the database, then try again.
+          Check your network sign-in and the database, then try again.
         </LoadError>
       ) : (
         <div className="grid gap-6">

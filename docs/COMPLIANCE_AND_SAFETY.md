@@ -34,8 +34,8 @@ The check compares whole words. A substring check would block every message, bec
 - The outside person sees nothing about the patient or the document type until the identity check passes. That includes page titles, error messages, and file names.
 - Error pages for a failed check say only that the request is for someone else.
 - If Keycloak or the eHVD cannot be reached, the request service holds the request. It never treats a missing answer as a pass.
-- A held identity or a held answer needs Dr. Hofer to click **Accept** in the widget. The audit log records who accepted and when, as `request_decided`.
-- The widget shows a held answer's text only to the network member who sent the request, so they can read it before they accept or reject it. Only `document.forRequest` returns it. It never goes into Matrix or the audit log.
+- A held identity or a held answer needs Dr. Hofer to click **Accept** in the workspace or optional widget. The audit log records who accepted and when, as `request_decided`.
+- The workspace and optional widget show a held answer's text only to the network member who sent the request, so they can read it before they accept or reject it. Only `document.forRequest` returns it. It never goes into Matrix or the audit log.
 - Three failed identity checks lock the link.
 
 ## Data we keep
@@ -51,12 +51,16 @@ The check compares whole words. A substring check would block every message, bec
 | ID token of the sender | Provenance `signature.data`, and `requests.id_token` for the person the request is bound to | Proof of the identity check that anyone can verify later | With the record. In `requests` only while the request is open: filing, cancelling, rejecting, and expiry clear it |
 | Uploads for the wrong patient | Nowhere. Only the SHA-256 hash and the reason stay in the audit log. | Max Beispiel's data must not end up in Maria's record or anywhere else | Discarded after the check |
 | Name and person number of everyone who logs in at a link, whether the check passes, holds, or fails | Audit log | The audit needs to say who tried and who answered | Until the demo reset |
+| Workspace Matrix access token | Authenticated encrypted `ordy_workspace_session` cookie, HttpOnly and SameSite=Lax. No JavaScript or browser-storage copy. | Authenticate an existing network member as a separate workspace device | At most eight hours; logout clears the cookie and requests revocation of that device only |
+| Member chat messages | Synapse, in rooms the member has joined | Plaintext conversations alongside ordy notices. Synthetic data only. No E2EE or media support in the workspace. | Until the room is deleted; not copied into the request database |
 | Notices in Dr. Hofer's Matrix room | Synapse: the requested person's name and organisation, and the ID Austria name of each person whose check failed or was held. Never a person number. | Dr. Hofer decides about held people and sees misdeliveries | Until the room is deleted. `pnpm reset` keeps the room. |
 | IP address of whoever opens a link | Audit log, only as an HMAC with a key derived from `ORDY_SECRET`, cut to 16 hex characters. Nothing without a private `ORDY_SECRET`. | Hints which opens came from the same address without storing it. The client can forge the header it comes from, so it is no proof. | Until the demo reset |
 
 The ID token holds the sender's name, birth date, and person number. That is more than the record strictly needs. We keep it because it is the only proof of the identity check that does not depend on trusting our own database. A production version could keep only a hash of the token and keep the token itself in a separate archive with stricter access.
 
-Application logs hold request ids, timings, check results, and validator outcomes, never document text or patient names.
+Application logs hold request ids, timings, check results, and validator outcomes, never document text or patient names. The workspace gateway disables access logs and limits nginx errors to critical diagnostics, because request URLs can contain bearer links or clinical query inputs. External proxies must follow the logging guidance in [Deployment](DEPLOYMENT.md).
+
+Workspace calls explicitly select their clinic cookie with `x-ordy-workspace: 1`. Outside-person requests retain the separate ID Austria path, including when both sessions exist in one browser. Joined-room checks apply to every chat read and send. Existing requester ownership and clinical release rules are unchanged.
 
 `pnpm reset` (`scripts/reset.sh`) empties Postgres, HAPI, and Mailpit and reloads `patient.json`. We run it before the pitch.
 
@@ -66,14 +70,14 @@ AI is optional in this project. If we build the AI fallback parser:
 
 - The model only reads documents. It never decides identity, the patient match, or whether an answer gets filed.
 - Every value and every LOINC code it returns must appear word for word in the document. Otherwise the answer is held.
-- An answer that the model read always waits until Dr. Hofer accepts it in the widget.
+- An answer that the model read always waits until Dr. Hofer accepts it in the workspace or optional widget.
 - We send only synthetic documents to the model provider and record the provider and model version in the README.
 
 ## Production alignment
 
 | Rule | How the design maps to it |
 |---|---|
-| GDPR Art. 5, data minimisation | Messages carry no patient data. Uploads for the wrong patient are discarded. Logs hold no document text. |
+| GDPR Art. 5, data minimisation | Outgoing email and SMS carry no patient data. Matrix chat uses synthetic data only. Uploads for the wrong patient are discarded. Logs hold no document text. |
 | GDPR Art. 9, health data | Production needs a legal basis for healthcare provision and a processing agreement with any hosting party |
 | GDPR Art. 25, privacy by design | The patient appears only after the identity check. The check fails closed. |
 | GDPR Art. 32, security | Signed ID tokens, hashed link tokens, link expiry, a lock after three failed checks, and an audit log |

@@ -8,12 +8,15 @@ Prototype on synthetic data only. Not a medical device. Not for clinical use. Re
 
 ## Status
 
-Status on `main` at commit `06abdc9`, 30 October 2026, 03:20 CET. Request 1 with M1 to M3, and the rehab request, run end to end by hand, with one gap in the flow: ordy did not send the email or the SMS yet, so the links came from the `pnpm dev` log. The metric results in [Metrics](#metrics) come from that run. Since then, #4 sends the request email. The SMS is still not sent: in development, `pnpm dev` prints an SMS request's link in its log, and that link stands in for the message.
+Historical metric evidence on `main` at commit `06abdc9`, 30 October 2026, 03:20 CET. Request 1 with M1 to M3, and the rehab request, run end to end by hand, with one gap in the flow: ordy did not send the email or the SMS yet, so the links came from the `pnpm dev` log. The metric results in [Metrics](#metrics) come from that run. Since then, #4 sends the request email. The SMS is still not sent: in development, `pnpm dev` prints an SMS request's link in its log, and that link stands in for the message.
+
+The feature table describes this checkout. The workspace gateway and hostname migration are documented below; the public deployment is a separate action.
 
 | Part | State |
 |---|---|
-| Stack: Synapse, Element, HAPI FHIR, Mailpit, Postgres, Keycloak, eHVD mock, ordy web and bot | **Works.** `./scripts/setup.sh` and `pnpm dev` start it. |
-| Dr. Hofer's room with the pinned ordy widget | Works: Matrix sign-in and the views Overview, Requests, a request's page, New request, Patients, a patient's page, Contacts with the eHVD directory search, Audit log, and Metrics, each with its own hash route. The navigation is a sidebar from 1024px of width and a top bar with a menu below that. A request's page shows its state, history, progress, the document once it arrives, and the decision it waits for (**Send anyway**, **Accept** or **Add to record**, **Reject**, **Cancel**). New request has examples, checks the recipient in the eHVD while Dr. Hofer types, and previews the email or SMS. |
+| Stack: Synapse, workspace gateway, HAPI FHIR, Mailpit, Postgres, Keycloak, eHVD mock, ordy web and bot | **Works.** `./scripts/setup.sh` and `pnpm dev` start it. |
+| ordy workspace | **Works.** The app root provides ordy's own sign-in, shared document workflows, and Messages in one design. Existing Matrix accounts sign in without Element. Messages shows joined plaintext rooms, text and bot notices, older history, and a composer. The document views remain Overview, Requests, a request's page, New request, Patients, a patient's page, Contacts, Audit log, and Metrics. Each view has a hash route. |
+| Optional Element client and legacy widget | **Compatibility.** Enable the `legacy-element` Compose profile and open port 8082. The legacy widget remains at `/widget`; the primary workspace has no Element iframe. |
 | Address check before sending, against the eHVD | **Works.** An email domain that does not match the organisation's domain in the eHVD holds the request until Dr. Hofer clicks **Send anyway** (M1). |
 | Outside portal: landing page, ID Austria login, identity checks, answer page, upload | **Works.** The landing page shows only the requesting doctor and clinic. A wrong person (M1, M2) is refused at login and sees neither the patient nor the document type. The right person uploads the document and confirms the patient's name and birth date. |
 | Answer: parser, patient check, eHVD release check, FHIR filing | **Works.** A document about another patient (M3) is not filed. The release check confirms the responsible physician in the eHVD; if it cannot, the answer waits for Dr. Hofer's **Accept**. The lab result is filed as four Observations and a DiagnosticReport, the rehab report as a DocumentReference, each in one transaction Bundle with Provenance, Task, Practitioner, and Organization. |
@@ -29,21 +32,22 @@ Status on `main` at commit `06abdc9`, 30 October 2026, 03:20 CET. Request 1 with
 
 ## Run it
 
-Requirements: Docker with Compose v2, Node.js 22.9 or newer, and pnpm 10 (`corepack enable`, or `npm install -g pnpm@10` on Node.js 25 and newer, which no longer ship Corepack). The HL7 validator also needs Java 17 or newer and internet access, because it checks LOINC codes against tx.fhir.org. These ports must be free: 3010, 5433, 8008, 8081, 8090, 8025, 1025, 8080, and 8095. [Development](docs/DEVELOPMENT.md) has the full guide and troubleshooting.
+Requirements: Docker with Compose v2, Node.js 22.9 or newer, and pnpm 10 (`corepack enable`, or `npm install -g pnpm@10` on Node.js 25 and newer, which no longer ship Corepack). The HL7 validator also needs Java 17 or newer and internet access, because it checks LOINC codes against tx.fhir.org. These ports must be free: 3010, 5433, 8008, 8081, 8090, 8025, 1025, 8080, and 8095. Optional Element compatibility uses 8082. [Development](docs/DEVELOPMENT.md) has the full guide and troubleshooting. [Deployment](docs/DEPLOYMENT.md) covers the public chat hostname and existing Element installations.
 
 ```bash
 git clone https://github.com/Chaissen/AIM-Hackathon.git
 cd AIM-Hackathon
 ./scripts/setup.sh   # once: .env, containers, Matrix users, database, FHIR patient, Matrix room and widget
-pnpm dev             # Next.js on http://localhost:3010 and the Matrix bot
+pnpm dev             # Next.js on 3010 and the bot; open the workspace through 8081
 ```
 
 `setup.sh` is safe to run again. The first run downloads the container images, and HAPI FHIR needs about a minute to start.
 
 | What | URL | Login |
 |---|---|---|
-| ordy status page | http://localhost:3010 | |
-| Element (Dr. Hofer) | http://localhost:8081 | `lena.hofer` / `hofer-demo-2026` |
+| ordy workspace | http://localhost:8081 | `lena.hofer` / `hofer-demo-2026` |
+| ordy app and outside portal | http://localhost:3010 | the same workspace is available here |
+| Optional Element compatibility | http://localhost:8082 | enable the `legacy-element` profile; same Matrix account |
 | Mailpit (outside emails) | http://localhost:8025 | |
 | SMS screen | http://localhost:3010/sms | Empty for now: ordy sends no SMS yet |
 | HAPI FHIR | http://localhost:8090 (web UI), API base http://localhost:8090/fhir | |
@@ -51,13 +55,15 @@ pnpm dev             # Next.js on http://localhost:3010 and the Matrix bot
 | Postgres | `postgres://ordy:ordy@localhost:5433/ordy` | `ordy` / `ordy` |
 | eHVD mock (WSDL) | http://localhost:8095/ehvd.wsdl | |
 
+For an existing installation whose port 8081 serves Element, follow [the workspace migration](docs/DEPLOYMENT.md#migrate-an-existing-element-entry). Deployment of the public hostname is a separate step from merging this code.
+
 Check that it works:
 
-1. http://localhost:3010 shows three green dots for the database, the FHIR server, and Matrix.
-2. In Element, open the room "Dr. Hofer · Outside documents". `!help` lists the bot commands. `!status` checks the database, the FHIR server, and Matrix.
-3. Open the ordy widget in the room and approve Element's identity request. The request form lists Maria Beispiel.
+1. http://localhost:3010/api/healthz returns the database, FHIR, and Matrix health checks.
+2. Open http://localhost:8081 and sign in as `lena.hofer` / `hofer-demo-2026`. This is ordy's own workspace, with the same design as the document views.
+3. Open **Messages** and choose "Dr. Hofer · Outside documents". `!help` lists the bot commands; `!status` checks the database, the FHIR server, and Matrix.
 4. http://localhost:8095/healthz shows `{"status":"ok","entries":313}`, the eHVD mock.
-5. In the widget, open **New request**, choose **Examples**, then **Lab result from Dr. Brandl**, and click **Send request**. The email arrives in Mailpit at http://localhost:8025, or in the recipient's inbox at http://localhost:3010/inbox. Open its link in a private window, log in as `eva.brandl` / `demo-eva`, upload `track/scenario/documents/lab-result-maria-beispiel.md`, and enter Maria Beispiel and 12 March 1961. The answer is filed on HAPI FHIR, and a notice arrives in the room. Log in as `thomas.wagner` / `demo-thomas` instead, and the page says "This request is for someone else". The request's history in the widget shows the blocked login.
+5. Open **New request**, choose **Examples**, then **Lab result from Dr. Brandl**, and click **Send request**. The email arrives in Mailpit at http://localhost:8025, or in the recipient's inbox at http://localhost:3010/inbox. Open its link in a private window, log in as `eva.brandl` / `demo-eva`, upload `track/scenario/documents/lab-result-maria-beispiel.md`, and enter Maria Beispiel and 12 March 1961. The answer is filed on HAPI FHIR, and a notice appears in **Messages**. Log in as `thomas.wagner` / `demo-thomas` instead, and the page says "This request is for someone else". The request's history shows the blocked login.
 
 ## Commands
 
@@ -75,27 +81,27 @@ Check that it works:
 ## Architecture
 
 ```
-Element (Dr. Hofer) ──Matrix──▶ Synapse ◀──sync── ordy bot (tsx) ──createCaller──┐
-   └─ widget (iframe, React) ──tRPC + Matrix OpenID token────────────────────────┤
-Outside person ──email/SMS link──▶ Next.js pages (React) ──tRPC──────────────────┤
-   └─ login ──▶ Keycloak (simulated ID Austria) ──ID token──▶ /auth/callback ────┤
-                                                                                 ▼
-                              ordy server: appRouter (tRPC v11, zod), /auth routes
-                                ├─ Postgres (Drizzle)
-                                ├─ eHVD mock (SOAP 1.2)
-                                └─ HAPI FHIR, Mailpit, Synapse
+Dr. Hofer -> workspace gateway -> ordy workspace (Next.js)
+                                    +-> tRPC -> Synapse <- ordy bot
+                                    +-> tRPC -> Postgres, eHVD, HAPI, SMTP
+
+Outside sender -> request link -> outside portal (Next.js)
+                                    +-> ID Austria -> /auth/callback
+                                    +-> tRPC -> the same request service
 ```
 
 This section describes the design. [Status](#status) says which parts work today.
 
-Dr. Hofer fills in the request form in the ordy widget inside her Matrix room. The widget calls ordy with a Matrix OpenID token, which ordy checks with Synapse. Before sending, ordy checks the email domain against the organisation in the eHVD. It sends the outside person a link by email or SMS that contains no patient name, no birth date, and no document type. The outside person logs in with the simulated ID Austria over OpenID Connect. ordy runs the identity checks before it shows the patient, parses the uploaded Markdown document, checks that it is about the right patient, checks in the eHVD that the physician responsible for the content may release it, and files it on HAPI FHIR as one transaction Bundle. ordy posts notices in Dr. Hofer's room as the bot user. The bot itself is a second Node.js process that answers `!help` and `!status` and calls the same tRPC router in-process. Every step writes an audit entry to Postgres.
+Dr. Hofer signs in to the ordy workspace with her existing Matrix account. An encrypted HttpOnly cookie keeps that workspace session; the server checks it with Synapse. The shared clinical views call the same guarded tRPC procedures, and Messages uses her own Matrix identity. The optional Element widget keeps its Matrix OpenID-token flow. Before sending, ordy checks the email domain against the organisation in the eHVD. It sends the outside person a link by email or SMS that contains no patient name, no birth date, and no document type. The outside person logs in with the simulated ID Austria over OpenID Connect. ordy runs the identity checks before it shows the patient, parses the uploaded Markdown document, checks that it is about the right patient, checks in the eHVD that the physician responsible for the content may release it, and files it on HAPI FHIR as one transaction Bundle. ordy posts notices in Dr. Hofer's room as the bot user. The bot itself is a second Node.js process that answers `!help` and `!status` and calls the same tRPC router in-process. Every step writes an audit entry to Postgres.
 
 | Component | Built or reused | Role |
 |---|---|---|
-| ordy web | Built: Next.js 16, tRPC v11, zod, Drizzle, shadcn/ui | Widget for Dr. Hofer, outside portal, identity checks, parser, patient check, FHIR mapping, audit log, SMS screen |
+| ordy web | Built: Next.js 16, tRPC v11, zod, Drizzle, shadcn/ui | Workspace and Messages for Dr. Hofer, optional widget, outside portal, identity checks, parser, patient check, FHIR mapping, audit log, SMS screen |
 | ordy bot | Built: Node.js process with a small Matrix client on `fetch` | `!help` and `!status` in Dr. Hofer's room |
 | eHVD mock | Built: Node.js service in `services/ehvd-mock/` | Our mock of the eHVD with the real SOAP interface and synthetic entries |
-| Synapse and Element Web | Reused | Matrix server for `klinikum.example` and Dr. Hofer's chat client |
+| Synapse | Reused | Matrix server for `klinikum.example` |
+| Workspace gateway | Reused: nginx | Same-origin entry for the Next.js workspace on 8081 |
+| Element Web | Reused, optional | Legacy Matrix client on 8082 |
 | Keycloak | Configured | Simulated ID Austria with the real claim names |
 | HAPI FHIR | Reused | FHIR R4 server |
 | Postgres | Reused | Requests, person number bindings, audit log |
@@ -162,7 +168,7 @@ Every clinical resource points at the Patient through `subject`, and the Task po
 
 ### 4. How do you notice a misdelivery?
 
-ordy checks at three points. Each catch writes a `misdelivery_caught` audit entry. Dr. Hofer sees the first in the widget and gets a Matrix notice for the other two.
+ordy checks at three points. Each catch writes a `misdelivery_caught` audit entry. Dr. Hofer sees the first in the workspace and gets a Matrix notice for the other two.
 
 1. Before sending: an email domain that differs from the organisation's domain in the eHVD, such as `labor-kanaI.example`, needs Dr. Hofer's confirmation.
 2. At login: the ID Austria name must match the requested person. A stranger at a mistyped address (M1) and a colleague with a forwarded email (M2) fail here: they see neither the patient nor the document type, and they cannot answer.
@@ -189,6 +195,7 @@ We measure the four track metrics on the scenario. `pnpm scenario` is meant to r
 |---|---|
 | [Whitepaper](docs/WHITEPAPER.md) | The problem, the solution, our answers to the five design questions, and how we measure the metrics |
 | [Development](docs/DEVELOPMENT.md) | Set up, start, reset, and extend the stack; troubleshooting |
+| [Deployment](docs/DEPLOYMENT.md) | Workspace hostname, proxy settings, HTTPS, and migration from Element on 8081 |
 | [Architecture](docs/ARCHITECTURE.md) | Components, ports, the request lifecycle, the Matrix bot, messages, parsing, and the audit log |
 | [eHVD](docs/EHVD.md) | The real eHVD SOAP interface, what is public about it, our mock, and how ordy uses it |
 | [Identity and misdelivery](docs/IDENTITY.md) | Real ID Austria and eHVD, the Keycloak simulation, the identity checks, and the three misdelivery tests |

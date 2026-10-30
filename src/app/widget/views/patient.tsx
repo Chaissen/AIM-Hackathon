@@ -50,7 +50,7 @@ export function PatientView({ id }: { id: string }) {
         </Empty>
       ) : patient.error ? (
         <LoadError title="Could not load the patient" onRetry={() => patient.refetch()}>
-          Check your Element sign-in and the FHIR server, then try again.
+          Check your network sign-in and the FHIR server, then try again.
         </LoadError>
       ) : (
         <div className="grid gap-6">
@@ -183,7 +183,7 @@ function PatientRequests({ patient }: { patient: Patient }) {
   if (requests.error) {
     return (
       <LoadError title="Could not load your requests" onRetry={() => requests.refetch()}>
-        Check your Element sign-in and the database, then try again.
+        Check your network sign-in and the database, then try again.
       </LoadError>
     );
   }

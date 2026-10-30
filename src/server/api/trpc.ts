@@ -2,9 +2,11 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { z, ZodError } from "zod";
 
+import { WORKSPACE_HEADER } from "@/lib/workspace";
+import { requireWorkspaceOrigin, verifiedWorkspaceSession, WorkspaceAccessError } from "@/server/auth/workspace-session";
 import { EID_SESSION_COOKIE, readEidSession, type EidSession } from "@/server/auth/eid-session";
 import { db } from "@/server/db";
-import { verifyOpenIdToken } from "@/server/matrix/client";
+import { type MatrixClient, verifyOpenIdToken } from "@/server/matrix/client";
 
 /**
  * Who is calling:
@@ -14,10 +16,25 @@ import { verifyOpenIdToken } from "@/server/matrix/client";
  */
 export type Actor = { kind: "clinic"; mxid: string } | { kind: "eid"; session: EidSession } | { kind: "anonymous" };
 
-export const createContext = (actor: Actor) => ({ db, actor });
+export const createContext = (actor: Actor, matrix: MatrixClient | null = null) => ({ db, actor, matrix });
 export type Context = ReturnType<typeof createContext>;
 
 export async function createContextFromRequest(req: Request): Promise<Context> {
+  if (req.headers.get(WORKSPACE_HEADER) === "1") {
+    try {
+      if (req.method === "POST") requireWorkspaceOrigin(req);
+      const verified = await verifiedWorkspaceSession(req);
+      return verified
+        ? createContext({ kind: "clinic", mxid: verified.session.userId }, verified.client)
+        : createContext({ kind: "anonymous" });
+    } catch (error) {
+      if (error instanceof WorkspaceAccessError) {
+        throw new TRPCError({ code: error.status === 403 ? "FORBIDDEN" : "SERVICE_UNAVAILABLE", message: error.message });
+      }
+      throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "The network service is unavailable. Try again shortly." });
+    }
+  }
+
   const bearer = req.headers.get("authorization")?.match(/^Bearer (.+)$/)?.[1];
   const clinic = bearer ? await verifyOpenIdToken(bearer) : null;
   if (clinic) return createContext({ kind: "clinic", mxid: clinic });
@@ -45,6 +62,11 @@ export const publicProcedure = t.procedure;
 export const clinicProcedure = t.procedure.use(({ ctx, next }) => {
   if (ctx.actor.kind !== "clinic") throw new TRPCError({ code: "UNAUTHORIZED", message: "Network members only" });
   return next({ ctx: { ...ctx, actor: ctx.actor } });
+});
+
+export const workspaceProcedure = clinicProcedure.use(({ ctx, next }) => {
+  if (!ctx.matrix) throw new TRPCError({ code: "UNAUTHORIZED", message: "Sign in to the ordy workspace first" });
+  return next({ ctx: { ...ctx, matrix: ctx.matrix } });
 });
 
 export const eidProcedure = t.procedure.use(({ ctx, next }) => {
