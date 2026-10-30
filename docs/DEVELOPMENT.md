@@ -8,6 +8,7 @@ How to set up, start, reset, and extend ordy. [Architecture](ARCHITECTURE.md) ex
 - Everything we write is TypeScript. Only third-party servers (Synapse, HAPI, Mailpit, Keycloak) and the HL7 validator are not.
 - Synthetic data only. No secrets in git: use `.env`, and add a placeholder to `.env.example`.
 - New dependencies must have been public for at least 7 days. `minimumReleaseAge` in `pnpm-workspace.yaml` enforces this. Do not lower it.
+- Clinical rules that wait for a clinician's decision are marked "pending clinical sign-off". Their questions are in [`clinical-review/`](clinical-review/README.md). Do not change such a rule before its review file is signed.
 
 ## Prerequisites
 
