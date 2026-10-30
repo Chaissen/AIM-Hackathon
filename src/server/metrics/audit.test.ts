@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import type { DocumentType } from "@/lib/document-types";
+
 import {
   auditCoverage,
   bestCoverage,
   coverageLines,
+  effortLines,
   effortSeconds,
+  effortSpan,
   filedReferences,
+  latestRequest1,
   misdeliveryCaught,
   missingFields,
   requestCoverage,
@@ -186,4 +191,51 @@ test("filed references come from answer_filed entries only, without history and 
   ]);
   const odd = row({ event: "answer_filed", at: at("14:05:00"), detail: { note: "filed fine", ids: { nested: ["Observation/abc-1"] }, url: "http://x/Observation/1" } });
   assert.deepEqual(filedReferences([odd]), ["Observation/abc-1"]);
+});
+
+test("the effort span names the opening that starts the clock and the upload that was filed", () => {
+  const span = effortSpan(request1, 1)!;
+  assert.equal(span.opened, request1[4]);
+  assert.equal(span.sent, request1[8]);
+  assert.equal(effortSpan(request1.slice(0, 9), 1), undefined);
+});
+
+test("the newest request 1 goes to Dr. Brandl's exact address", () => {
+  const request = (id: number, createdAt: string, address = "eva.brandl@labor-kanal.example", docType: DocumentType = "lab-result") => ({
+    id,
+    docType,
+    address,
+    createdAt: at(createdAt),
+  });
+  const rows = [
+    request(1, "09:00:00"),
+    request(2, "10:00:00"),
+    // M1's mistyped address, request 2, and a lab result for someone else do not count.
+    request(3, "11:00:00", "eva.brandl@labor-kanaI.example"),
+    request(4, "11:30:00", "+43 660 000 0101", "rehab-report"),
+    request(5, "11:45:00", "anna.huber@example.org"),
+  ];
+  assert.equal(latestRequest1(rows), 2);
+  assert.equal(latestRequest1([...rows, request(6, "12:00:00", " Eva.Brandl@labor-kanal.example ")]), 6);
+  assert.equal(latestRequest1(rows.slice(2)), undefined);
+});
+
+test("the effort timeline marks start and stop and gives the seconds the stopwatch is compared with", () => {
+  const lines = effortLines(request1, 1);
+  assert.match(lines[0], /^Request 1: seconds since the link_opened that starts the clock/);
+  // The colleague's opening at 13:05 lies 55 minutes before the start.
+  assert.match(lines.find((l) => l.includes("13:05:00"))!, /-3300\.0 s {2}link_opened/);
+  assert.match(lines.find((l) => l.includes("<- start"))!, /14:00:00\.000Z +0\.0 s {2}link_opened {9}shown/);
+  assert.match(lines.find((l) => l.includes("<- stop"))!, /14:02:10\.000Z +130\.0 s {2}answer_sent/);
+  assert.equal(lines.filter((l) => l.includes("<-")).length, 2);
+  assert.equal(lines.at(-1), "Effort: 130 s (130.0 s) from link_opened to the answer_sent that was filed.");
+});
+
+test("the effort timeline before filing counts from the first entry and measures nothing", () => {
+  const lines = effortLines(request1.slice(0, 9), 1);
+  assert.match(lines[0], /since the first entry/);
+  assert.match(lines.find((l) => l.includes("14:02:10"))!, /3730\.0 s {2}answer_sent/);
+  assert.ok(lines.every((l) => !l.includes("<-")));
+  assert.equal(lines.at(-1), "Effort: not measured, because no answer was filed.");
+  assert.deepEqual(effortLines(request1, 2), ["Request 2: no audit entries"]);
 });
