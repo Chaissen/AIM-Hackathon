@@ -328,8 +328,8 @@ The release check runs when the answer arrives, after the patient check.
 
 How the request service finds the responsible person in the eHVD:
 
-- If the responsible person is the sender and the login carried the GDA claim, it uses the OID from the claim. That is the usual case for lab results.
-- Otherwise it searches the eHVD for the name from the document and keeps active entries that are members of the organisation. Exactly one hit counts. [eHVD](EHVD.md#how-ordy-uses-the-ehvd-t15) has the calls.
+- If the responsible person is the sender and the login carried the GDA claim, it uses the OID from the claim. The entry must carry the name from the document, and no other active member of the organisation may carry it too. That is the usual case for lab results. If the sender may not release the document themselves, the check goes on as below.
+- Otherwise it searches the eHVD for the name from the document and keeps active entries that carry that name and are members of the organisation. Exactly one hit counts. [eHVD](EHVD.md#how-ordy-uses-the-ehvd-t15) has the calls.
 
 The Provenance names the responsible person as `author` and the sender as `informant` when they differ. [FHIR model](FHIR.md#provenance) has the details.
 
@@ -338,7 +338,7 @@ The Provenance names the responsible person as `author` and the sender as `infor
 The two kinds of checks fail differently:
 
 - **Block**, when the identity checks fail. The wrong person opened the link, for example in M1 and M2. They see nothing, cannot answer, and nothing is stored. Dr. Hofer gets a message.
-- **Hold**, when the release check does not pass. The right person answered, but the eHVD does not confirm that the responsible person may release this document. Reasons: not listed, not active, another specialty, not a member of the organisation, or several people with that name. The request service keeps the answer but files nothing. Dr. Hofer gets a Matrix message with the reason and accepts or rejects the answer in the widget.
+- **Hold**, when the release check does not pass. The right person answered, but the eHVD does not confirm that the responsible person may release this document. Reasons: not listed, not active, another specialty, not a member of the organisation, several people with that name or too many to tell, a name without a given or family name, a document from another organisation than the request went to, an eHVD entry for the sender's login with another name, or an eHVD that cannot be reached or answers with an error. [eHVD](EHVD.md#the-release-check) lists the reason codes. The request service keeps the answer but files nothing. Dr. Hofer gets a Matrix message with the reason and accepts or rejects the answer in the widget.
 
 We hold instead of blocking because the eHVD can be out of date, and a physician of another specialty can be responsible for some tests. Dr. Hofer, a physician, makes that call. If she accepts, the audit log records who accepted and when, and the Provenance carries the policy `urn:aim-t2:identity-policy:accepted-by-requester:v1`.
 

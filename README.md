@@ -117,6 +117,7 @@ Simulated in the demo: ID Austria (Keycloak, without the phone-app confirmation)
 | FHIR | `src/server/fhir/` | the mappers (`mappers.ts`) and the filing Bundle with Provenance and Task (`filing.ts`, `file-answer.ts`), typed with `@types/fhir` (R4) |
 | Documents | `src/server/documents/` | Markdown parser (markdown-it) and patient check |
 | Identity | `src/server/identity/` | name words for the name match and the patient check |
+| eHVD | `src/server/ehvd/` | SOAP client (fetch, saxes), address check, and release check |
 | Matrix | `src/server/matrix/client.ts` | small client-server API client, no E2EE (not required by the track) |
 | Bot | `src/bot/` | separate process for `!help` and `!status`. Requests go through the widget. |
 | Client | `src/trpc/` | `@trpc/tanstack-react-query`, superjson |
