@@ -1,22 +1,13 @@
 # Clinical review
 
-This folder holds the questions that only the clinical staff can decide. There is one file per GitHub issue, named `SIGNOFF_<issue>_<topic>.md`.
+Files in this folder are for the clinical staff. Each one prepares a decision or a test that needs a clinician or a real tester, so an agent or developer cannot close it alone.
 
-Each file states the rule as it stands, our recommended answer with its sources, and an answer box per question. The files use plain clinical language and no code.
+- One or more files per GitHub issue. The issue number is in the file name.
+- Fill in the answer blocks by hand, then commit the file. The linked issue closes only after that.
+- Until then, every rule the file asks about stays as described in the other docs, marked "pending clinical sign-off" where it was changed.
 
-## How to answer
-
-1. Read the file. Each one says how long it takes.
-2. Tick one box per question: **Confirm as written**, or **Change to** with the rule you want.
-3. Add your name and the date under each answer.
-4. Commit the filled-in file, or hand it to a developer who commits it for you. The commit is the record of the sign-off.
-
-A developer then applies any change to the docs and the code and closes the issue.
-
-Until a file is signed, the rules it covers are marked "pending clinical sign-off" in the docs.
-
-## Open reviews
-
-| File | Issue | Topic |
+| File | Issue | What to do |
 |---|---|---|
-| [SIGNOFF_18_IDENTITY_AND_RELEASE.md](SIGNOFF_18_IDENTITY_AND_RELEASE.md) | [#18](https://github.com/Chaissen/AIM-Hackathon/issues/18) | Who may release a lab result, hold or block, and the legal basis |
+| [SIGNOFF_18_IDENTITY_AND_RELEASE.md](SIGNOFF_18_IDENTITY_AND_RELEASE.md) | #18 | Confirm or change the identity and release rules |
+| [REVIEW_19_FHIR_DATA.md](REVIEW_19_FHIR_DATA.md) | #19 | Grade each filed answer: correct, acceptable, or unsafe |
+| [TIMED_TEST_20.md](TIMED_TEST_20.md) | #20 | Run the timed test with someone new |
