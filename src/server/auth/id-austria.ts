@@ -2,7 +2,8 @@ import * as oidc from "openid-client";
 import { z } from "zod";
 
 import { env } from "@/env";
-import { eidSession, type EidSession, gdaOidFromClaim, type LoginTransaction } from "@/server/auth/eid-session";
+import { gdaOidFromClaim, type LoginTransaction } from "@/server/auth/eid-session";
+import type { LoginIdentity } from "@/server/identity/checks";
 
 const metadataUrl = new URL(env.OIDC_METADATA_URL);
 const redirectUri = new URL("/auth/callback", env.PUBLIC_URL);
@@ -74,25 +75,33 @@ export async function endKeycloakSession(refreshToken: string | undefined) {
   }
 }
 
+const UNAVAILABLE = new Set([502, 503, 504]);
+
+export function providerUnreachable(error: unknown): boolean {
+  if (error instanceof oidc.ClientError) {
+    if (error.code === "OAUTH_TIMEOUT" || error.code === "OAUTH_ABORT") return true;
+    return error.cause instanceof Response && UNAVAILABLE.has(error.cause.status);
+  }
+  // fetch rejects with a TypeError whose cause is the network error. openid-client's own TypeErrors carry a code instead.
+  return error instanceof TypeError && !("code" in error) && error.cause instanceof Error;
+}
+
 const idAustriaClaims = z.object({
-  "urn:pvpgvat:oidc.bpk": z.string(),
+  "urn:pvpgvat:oidc.bpk": z.string().nullish(),
   given_name: z.string(),
   family_name: z.string(),
-  "urn:pvpgvat:oidc.eid_ida_level": eidSession.shape.level.unwrap().optional(),
-  "urn:eidgvat:attributes.gda": z.unknown(),
+  "urn:pvpgvat:oidc.eid_ida_level": z.unknown().optional(),
+  "urn:eidgvat:attributes.gda": z.unknown().optional(),
 });
 
-export function sessionFromClaims(claims: unknown, requestId: number): EidSession | Error {
+export function loginFromClaims(claims: unknown): LoginIdentity | Error {
   const parsed = idAustriaClaims.safeParse(claims);
   if (!parsed.success) return new Error(`The ID token claims are malformed: ${z.prettifyError(parsed.error)}`);
-  const gdaOid = gdaOidFromClaim(parsed.data["urn:eidgvat:attributes.gda"]);
-  if (gdaOid instanceof Error) return gdaOid;
   return {
-    requestId,
-    personNumber: parsed.data["urn:pvpgvat:oidc.bpk"],
     givenName: parsed.data.given_name,
     familyName: parsed.data.family_name,
-    level: parsed.data["urn:pvpgvat:oidc.eid_ida_level"] ?? null,
-    gdaOid,
+    personNumber: parsed.data["urn:pvpgvat:oidc.bpk"] ?? null,
+    level: parsed.data["urn:pvpgvat:oidc.eid_ida_level"],
+    gdaOid: gdaOidFromClaim(parsed.data["urn:eidgvat:attributes.gda"]),
   };
 }
