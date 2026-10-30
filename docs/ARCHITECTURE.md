@@ -54,7 +54,7 @@ The request service stores each request with one state. The FHIR Task for the re
 |---|---|---|
 | `awaiting_confirmation` | The address check failed and Dr. Hofer has not confirmed yet | `draft` |
 | `sent` | The email or SMS went out | `requested` |
-| `identity_held` | The name matched only partly, and Dr. Hofer decides | `on-hold` |
+| `identity_held` | The identity check held: the name matched only partly, the requested name had no words, or the eHVD could not be reached. Dr. Hofer decides. | `on-hold` |
 | `verified` | The identity check passed, and the outside person can answer | `in-progress` |
 | `answer_held` | The answer arrived, but the eHVD could not confirm the role, and Dr. Hofer decides | `on-hold` |
 | `filed` | The answer is on the FHIR server | `completed` |
@@ -68,7 +68,7 @@ The request service stores each request with one state. The FHIR Task for the re
 | Dr. Hofer sends the request form and the address check fails | none | `awaiting_confirmation` |
 | Dr. Hofer clicks **Send anyway** | `awaiting_confirmation` | `sent` |
 | Identity check passes | `sent` | `verified` |
-| Identity check matches the name partly | `sent` | `identity_held` |
+| Identity check holds: partial name, requested name without words, or eHVD unreachable | `sent` | `identity_held` |
 | Identity check fails for the third time | `sent` | `locked` |
 | Dr. Hofer clicks **Accept** | `identity_held` | `verified` |
 | Answer passes the patient check and the role is confirmed | `verified` | `filed` |
@@ -79,20 +79,20 @@ The request service stores each request with one state. The FHIR Task for the re
 | Dr. Hofer clicks **Cancel** | any open state | `cancelled` |
 | 7 days pass | any open state | `expired` |
 
-A failed identity check does not change the state, so the real person can still answer a forwarded link. The failure goes to the audit log and to Dr. Hofer.
+A failed identity check does not change the state, so the real person can still answer a forwarded link. The failure goes to the audit log and to Dr. Hofer. If Keycloak cannot be reached, the check holds without a state change and does not count toward the lock. A login in any state other than `sent` changes no state. A hold stores the held person's bPK in `person_number`, and **Accept** keeps it, so only the accepted person can answer. [Identity checks](IDENTITY.md#identity-checks) has the details.
 
 ## Link rules
 
 - The link token is 32 random bytes, encoded URL-safe. The database stores only its SHA-256 hash.
 - The link is valid for 7 days. It accepts one filed answer.
-- Three failed identity checks lock the link. Dr. Hofer can send a new request.
+- Three failed identity checks lock a link that is still `sent`. Dr. Hofer can send a new request. In the other states the failures are counted and logged, but only `sent` has a transition to `locked`.
 - Until the identity check passes, the page shows only the requesting doctor and clinic.
 
 ## Widget
 
 Dr. Hofer sends requests and makes every decision about them in the ordy widget. `pnpm matrix:bootstrap` pins it in her room. There are no chat commands for requests.
 
-The widget gets a Matrix OpenID token from Element through the widget API and sends it as `Authorization: Bearer` with every tRPC call. The request service checks the token with Synapse (`verifyOpenIdToken` in `src/server/matrix/client.ts`). It accepts only users on its own homeserver, `MATRIX_SERVER_NAME`, which is `klinikum.example` in the demo. The checked Matrix ID is the actor in the audit log.
+The widget uses `matrix-widget-api` to get a Matrix OpenID token from Element after the user approves identity sharing, and sends it as `Authorization: Bearer` with every clinic tRPC call. Patient and audit data come only from `clinic.patients` and `clinic.audit`, both protected by `clinicProcedure`; neither page embeds that data in its initial HTML or React server payload. Tokens and the clinic query cache stay in memory and are discarded on expiry or unmount. The widget includes an **Audit log** tab. The request service checks the token with Synapse (`verifyOpenIdToken` in `src/server/matrix/client.ts`). It accepts only users on its own homeserver, `MATRIX_SERVER_NAME`, which is `klinikum.example` in the demo. The checked Matrix ID is the actor in the audit log.
 
 | Part of the widget | Effect |
 |---|---|
@@ -124,13 +124,14 @@ The request service posts notices in Dr. Hofer's room as the bot user, with `not
 | When | Notice |
 |---|---|
 | The request goes out | "Request 1 sent to Dr. Eva Brandl (Labor Kanalstraße) by email." |
-| An identity check fails (M1, M2) | "Request 1 was opened by someone who is not Dr. Eva Brandl (ID Austria name: Anna Huber). Nothing was shown or filed. Check the address." |
+| The name check fails (M1, M2) | "Request 1 was opened by someone who is not Dr. Eva Brandl (ID Austria name: Anna Huber). Nothing was shown or filed. Check the address." |
+| Another identity check fails, the name matched | "Request 1 was opened by Eva Brandl, but the identity check failed. The ID Austria login has only basic function, and a request needs full function. Nothing was shown or filed." |
 | The patient check fails (M3) | "The answer to request 1 is about a different patient. Name and birth date do not match Maria Beispiel. Nothing was filed." |
 | The name matches only partly | "Request 1 is on hold. The ID Austria name Petra Brandl matches Dr. Eva Brandl only in part. Accept or reject the person in the widget." |
 | The release check does not pass | "The answer to request 1 is on hold. The eHVD does not list Dr. Eva Brandl as a member of Labor Kanalstraße. Accept or reject the answer in the widget." |
 | The answer is filed | "Lab result for Maria Beispiel from Dr. Eva Brandl is filed. Identity checked with ID Austria. 4 values, all within the reference range." |
 
-The caller writes the reason sentence of a held notice. A filed lab result with values outside the reference range says how many, for example "4 values, 1 outside the reference range." A rehab discharge report has no values, so its filed notice ends after "Identity checked with ID Austria."
+The caller writes the reason sentence of a held notice and of a failed identity check whose name matched. A filed lab result with values outside the reference range says how many, for example "4 values, 1 outside the reference range." A rehab discharge report has no values, so its filed notice ends after "Identity checked with ID Austria."
 
 ## Outgoing messages
 
@@ -164,7 +165,7 @@ Before sending, the request service compares the words of the message with the p
 | `GET /r/{token}/answer` | Shows the patient, the requested document, the upload field, and fields for the patient's name and birth date. Only after the identity check passes. |
 | `POST /r/{token}/answer` | Writes `answer_sent`, parses the document, runs the patient check, files the resources, and writes `answer_filed`. |
 | `GET /sms` | Shows every SMS the request service would have sent, like a phone screen. |
-| `GET /audit` | Shows the audit log for the demo. Bound to localhost. |
+| `GET /audit` | Audit UI; data requires a verified Matrix clinic identity. Use the widget's **Audit log** tab in Element. |
 
 The pages are Next.js routes. `/auth/login` and `/auth/callback` are route handlers, because they need real redirects and cookies. The answer page loads its data and sends the upload through tRPC (`eidProcedure`, the upload as `FormData`).
 
@@ -183,7 +184,9 @@ The parser reads headings and tables from markdown-it tokens and splits `Key: va
 
 The document kind picks the mapper. `lab report` goes to the lab mapper and `discharge report` goes to the rehab mapper. Any other kind becomes a DocumentReference with the text attached, held for Dr. Hofer.
 
-The parser lives in `src/server/documents/`. `parseDocument()` returns a typed `LabResult`, `RehabReport`, or generic document (`types.ts`), or a list of reasons the uploader can act on; it never throws on content. It converts the unit `10^9/L` to UCUM `10*9/L`, computes `N`, `H`, or `L` from the reference range, and reads a stay that names the month once, twice, or crosses a year. `checkAnswerPatient()` in `patient-check.ts` runs `samePatient()` on the document and on the form, and `uploadHash()` gives the SHA-256 that stays in the audit log when an upload is discarded.
+The parser lives in `src/server/documents/`. `parseDocument()` returns a typed `LabResult`, `RehabReport`, or generic document (`types.ts`), or a list of reasons the uploader can act on; it never throws on content and never returns a half-read document. It refuses a document without a heading or a readable `Patient` line, a known key on more than one line with different values (a second `Patient` line could slip past the patient check), a lab report without exactly one result table, a result that is not a number (also `1,245`, which could mean 1245 or 1.245), a LOINC code with a wrong format or check digit, and a missing or unreadable date or stay line that the kind needs. Inside a `##` section only known keys such as `Written by` count, so a sentence with a colon stays text. Outside the sections a line with an unknown key such as `Note:` is a field and free text, so it still reaches the conclusion. A byte order mark at the start is ignored. Person lines split off titles such as `Dr.`, `Dr.in`, or `Prim.` with the same rule as `nameWords`. It converts the unit `10^9/L` to UCUM `10*9/L`, computes `N`, `H`, or `L` from the reference range, and reads a stay that names the month once, twice, or crosses a year. `checkAnswerPatient()` in `patient-check.ts` runs `samePatient()` on the document and on the form. A patient record without a family name or birth date never matches. `uploadHash()` gives the SHA-256 that stays in the audit log when an upload is discarded.
+
+`extra.test.ts` runs our extra test documents from `track/scenario/extra/` through the parser and the patient check ([Development](DEVELOPMENT.md#extra-test-documents)). Their index lists the gaps the parser still has: one-sided ranges such as `< 5`, and units that need more than `^` to `*` to become UCUM (`µmol/L`, `µg/dL`, `mIU/L`).
 
 ### AI fallback (optional, cut first)
 
@@ -195,9 +198,11 @@ The request service keeps three Postgres tables, defined with Drizzle in `src/se
 
 | Table | Columns |
 |---|---|
-| `requests` | `id`, `doc_type`, `patient_id`, `given`, `family`, `org`, `channel`, `address`, `state`, `link_hash`, `failed_checks`, `created_at`, `expires_at`, `matrix_room`, `matrix_event` |
+| `requests` | `id`, `doc_type`, `patient_id`, `given`, `family`, `org`, `channel`, `address`, `state`, `link_hash`, `failed_checks`, `person_number`, `created_at`, `expires_at`, `matrix_room`, `matrix_event` |
 | `bindings` | `given`, `family`, `org`, `person_number`, `practitioner_id`, `first_verified_at` |
 | `audit_log` | `id`, `at`, `event`, `request_id`, `actor_kind`, `actor`, `outcome`, `detail` |
+
+`person_number` in `requests` is the bPK of the person who passed the identity check, or who was held; after **Accept** it names the accepted person. Only that person may answer.
 
 `bindings` remembers which ID Austria person number answered as a given person at a given organisation. The audit log never holds document text.
 
@@ -216,12 +221,12 @@ Every entry has a UTC timestamp in `at`. The widget and `GET /audit` show the en
 
 ## Configuration
 
-All variables are read and validated in `src/env.ts`. Each one has a demo default, so `.env` is optional. `.env.example` lists them.
+Configuration is read in `src/env.ts`. Service addresses and demo accounts have defaults. Outside-person sessions require a private `ORDY_SECRET`; an empty, short, or known placeholder key cannot sign or authenticate sessions. Setup generates a random key and preserves it across reruns. `.env.example` lists the variables.
 
 | Variable | Default |
 |---|---|
 | `PUBLIC_URL` | `http://localhost:3010` |
-| `ORDY_SECRET` | demo value, set your own in `.env` |
+| `ORDY_SECRET` | empty (outside-person sessions disabled); setup writes a private 32-byte random key to `.env` |
 | `DATABASE_URL` | `postgres://ordy:ordy@localhost:5433/ordy` |
 | `FHIR_BASE_URL` | `http://localhost:8090/fhir` |
 | `MATRIX_HOMESERVER_URL`, `MATRIX_SERVER_NAME` | `http://localhost:8008`, `klinikum.example` |
@@ -259,7 +264,7 @@ src/
     r/[token]/                outside portal: landing page and answer form. Data loading planned, T04, T07, T09
     auth/                     ID Austria login, planned, T07
     sms/page.tsx              SMS screen. Reading the SMS log planned, T06
-    audit/page.tsx            audit log for the demo, localhost only
+    audit/page.tsx            audit UI; authenticated data via clinic.audit
   components/ui/              shadcn/ui components, added with `pnpm dlx shadcn@4.22.1 add <name>`
   components/                 shared UI such as the portal frame
   lib/                        code shared by server and browser: document types, request input, `cn`
@@ -271,7 +276,9 @@ src/
     db/                       Drizzle schema and client
     fhir/                     FHIR client, filing (T13: transaction Bundle, Provenance, Task), mappers planned (T12, T14)
     documents/                parser and patient check (T10, T11), typed records in types.ts
-    identity/names.ts         name words and subset test from Identity, shared by the patient check and T08
+    identity/names.ts         name words, subset and shared-word tests from Identity, shared by the patient check and T08
+    identity/checks.ts        identity checks at login: level, name, person number, eHVD claim (T08)
+    identity/login.ts         what a check result does: state, audit entries, page, notice, and runIdentityChecks for the callback (T08)
     ehvd/oid.ts               OID check shared by the login and pnpm citizen
     ehvd/                     eHVD SOAP client, planned (T15)
     matrix/client.ts          Matrix client-server API
@@ -287,7 +294,7 @@ scripts/
   citizen.ts                  add a test citizen to the simulated ID Austria
   validate.ts                 planned, T18: HL7 validator on every filed resource
   audit-check.ts              planned, T17: six event types per request
-track/                        track brief, scenario, patient.json, and test documents
+track/                        track brief, scenario, patient.json, test documents, and our extra set in scenario/extra/
 ```
 
 ## Run it

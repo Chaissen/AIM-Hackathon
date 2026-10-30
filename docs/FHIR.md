@@ -93,7 +93,7 @@ The DiagnosticReport has `status` `final`, `category` `LAB` from `http://termino
 | Platelets | 777-3 | Platelets [#/volume] in Blood by Automated count | 245 | `10*9/L` | 150 to 400 |
 | Fibrinogen | 3255-7 | Fibrinogen [Mass/volume] in Platelet poor plasma by Coagulation assay | 3.1 | `g/L` | 2.0 to 4.0 |
 
-The document writes the platelet unit as `10^9/L`, which is not valid UCUM. The mapper replaces `^` with `*`. INR has no unit, so its `valueQuantity` and its range carry only values.
+The document writes the platelet unit as `10^9/L`, which is not valid UCUM. The parser replaces `^` with `*`, so the mapper gets `10*9/L`. INR has no unit, so its `valueQuantity` and its range carry only values.
 
 For Max Beispiel's result, INR 2.6 and aPTT 44 are above the range and get `H`. That result is never filed for Maria, because the patient check stops it first.
 
