@@ -1,11 +1,11 @@
 import { TRPCError } from "@trpc/server";
-import { asc, eq } from "drizzle-orm";
+import { asc, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { env } from "@/env";
 import { requestInput } from "@/lib/request-input";
-import { clinicProcedure, createTRPCRouter } from "@/server/api/trpc";
-import { auditActor } from "@/server/audit/record";
+import { type Actor, clinicProcedure, createTRPCRouter } from "@/server/api/trpc";
+import { auditActor, recordAudit } from "@/server/audit/record";
 import type { Db } from "@/server/db";
 import { auditLog } from "@/server/db/schema";
 import { type AddressCheck as EhvdAddressCheck, addressWarning, checkAddress } from "@/server/ehvd/address-check";
@@ -18,7 +18,6 @@ import {
   createRequest,
   getRequest,
   listRequests,
-  type NonLoginEvent,
   type RequestRow,
   sendAnyway,
 } from "@/server/requests/service";
@@ -76,20 +75,37 @@ function pendingWarning(request: RequestRow, audit: (typeof auditLog.$inferSelec
     : "The eHVD could not confirm the address, so the request has not been sent.";
 }
 
-// TODO(T06): send the link by email or SMS. Until then, print it in development so the portal can be tried.
-function printLink(request: RequestRow, token: string) {
-  if (env.NODE_ENV === "development" && request.state === "sent") console.info(`Request ${request.id}: ${env.PUBLIC_URL}/r/${token}`);
+function conflict(e: unknown): never {
+  if (e instanceof TransitionError) throw new TRPCError({ code: "CONFLICT", message: e.message, cause: e });
+  throw e;
 }
 
-async function change(ctx: { db: Db; request: RequestRow }, event: NonLoginEvent) {
-  try {
-    const request = await applyEvent(ctx.db, ctx.request.id, event);
-    if (!request) throw notFound(ctx.request.id);
-    return request;
-  } catch (e) {
-    if (e instanceof TransitionError) throw new TRPCError({ code: "CONFLICT", message: e.message, cause: e });
-    throw e;
-  }
+const DECIDED = { accept: "accepted", reject: "rejected", cancel: "cancelled" } as const;
+
+async function decide(ctx: { db: Db; actor: Actor; request: RequestRow }, event: keyof typeof DECIDED) {
+  const request = await applyEvent(ctx.db, ctx.request.id, event, async (tx, changed, from) => {
+    if (event === "accept" && from === "answer_held") {
+      // TODO(T09): file the kept answer here, then write request_decided.
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Filing a held answer is not built yet." });
+    }
+    await recordAudit(tx, {
+      event: "request_decided",
+      requestId: changed.id,
+      actor: auditActor(ctx.actor),
+      outcome: DECIDED[event],
+      detail: { from, to: changed.state },
+    });
+  }).catch(conflict);
+  if (!request) throw notFound(ctx.request.id);
+  return request;
+}
+
+const auditOf = (db: Db, ids: number[]) =>
+  db.select().from(auditLog).where(inArray(auditLog.requestId, ids)).orderBy(asc(auditLog.at), asc(auditLog.id));
+
+// TODO(T06): send the link by email or SMS. Until then, print it in development so the portal can be tried.
+function printLink(request: RequestRow, token: string) {
+  if (env.NODE_ENV === "development") console.info(`Request ${request.id}: ${env.PUBLIC_URL}/r/${token}`);
 }
 
 export const requestRouter = createTRPCRouter({
@@ -121,29 +137,35 @@ export const requestRouter = createTRPCRouter({
       },
       stored(check),
     );
-    printLink(request, token);
+    if (request.state === "sent") printLink(request, token);
     return { ...summary(request), addressWarning: check.result === "pass" ? null : addressWarning(check, input.org) };
   }),
 
   get: ownRequestProcedure.query(async ({ ctx }) => {
-    const audit = await ctx.db.select().from(auditLog).where(eq(auditLog.requestId, ctx.request.id)).orderBy(asc(auditLog.at), asc(auditLog.id));
+    const audit = await auditOf(ctx.db, [ctx.request.id]);
     return { ...summary(ctx.request), addressWarning: pendingWarning(ctx.request, audit), audit };
   }),
 
-  list: clinicProcedure.query(async ({ ctx }) => (await listRequests(ctx.db, ctx.actor.mxid)).map(summary)),
-
-  cancel: ownRequestProcedure.mutation(async ({ ctx }) => summary(await change(ctx, "cancel"))),
+  list: clinicProcedure.query(async ({ ctx }) => {
+    const listed = await listRequests(ctx.db, ctx.actor.mxid);
+    const audit = await auditOf(ctx.db, listed.map((r) => r.id));
+    return listed.map((r) => {
+      const own = audit.filter((a) => a.requestId === r.id);
+      return { ...summary(r), addressWarning: pendingWarning(r, own), audit: own };
+    });
+  }),
 
   /** Dr. Hofer confirms the address after the warning. The request goes out with a new 7-day link. */
   sendAnyway: ownRequestProcedure.mutation(async ({ ctx }) => {
-    try {
-      const sent = await sendAnyway(ctx.db, ctx.request.id, auditActor(ctx.actor));
-      if (!sent) throw notFound(ctx.request.id);
-      printLink(sent.request, sent.token);
-      return summary(sent.request);
-    } catch (e) {
-      if (e instanceof TransitionError) throw new TRPCError({ code: "CONFLICT", message: e.message, cause: e });
-      throw e;
-    }
+    const sent = await sendAnyway(ctx.db, ctx.request.id, auditActor(ctx.actor)).catch(conflict);
+    if (!sent) throw notFound(ctx.request.id);
+    printLink(sent.request, sent.token);
+    return summary(sent.request);
   }),
+
+  accept: ownRequestProcedure.mutation(async ({ ctx }) => summary(await decide(ctx, "accept"))),
+
+  reject: ownRequestProcedure.mutation(async ({ ctx }) => summary(await decide(ctx, "reject"))),
+
+  cancel: ownRequestProcedure.mutation(async ({ ctx }) => summary(await decide(ctx, "cancel"))),
 });
