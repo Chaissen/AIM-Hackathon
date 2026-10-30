@@ -8,12 +8,12 @@ This page describes what runs, how the parts talk, and what the request service 
 |---|---|---|---|---|
 | Synapse | Matrix homeserver for `klinikum.example` | Reused | [`matrixdotorg/synapse`](https://hub.docker.com/r/matrixdotorg/synapse) | 8008 |
 | Element Web | Dr. Hofer's chat client | Reused | [`vectorim/element-web`](https://hub.docker.com/r/vectorim/element-web) | 8081 |
-| Request service (ordy) | Outside portal, widget, identity checks, parser, FHIR mapper, audit log, SMS screen | Built | TypeScript: [Next.js](https://nextjs.org/docs) 16 (App Router), [tRPC](https://trpc.io/docs) v11, [zod](https://zod.dev/), [Drizzle](https://orm.drizzle.team/), [openid-client](https://github.com/panva/openid-client) (T07), [markdown-it](https://github.com/markdown-it/markdown-it) (T10), UI with [shadcn/ui](https://ui.shadcn.com/) on Tailwind CSS | 3010 |
+| Request service (ordy) | Outside portal, widget, identity checks, parser, FHIR mapper, audit log, SMS screen | Built | TypeScript: [Next.js](https://nextjs.org/docs) 16 (App Router), [tRPC](https://trpc.io/docs) v11, [zod](https://zod.dev/), [Drizzle](https://orm.drizzle.team/), [openid-client](https://github.com/panva/openid-client) (T07), [markdown-it](https://github.com/markdown-it/markdown-it) (T10), [Nodemailer](https://nodemailer.com/) (T06), UI with [shadcn/ui](https://ui.shadcn.com/) on Tailwind CSS | 3010 |
 | Matrix bot | Notices and `!status` in Dr. Hofer's room | Built | TypeScript process in `src/bot/`, small Matrix client on `fetch` in `src/server/matrix/client.ts` | none |
 | Postgres | Requests, bindings, audit log | Reused | [`postgres:17-alpine`](https://hub.docker.com/_/postgres) | 5433, mapped to 5432 in the container |
 | Simulated ID Austria | OpenID Connect login with fake citizens | Configured (T02) | [Keycloak](https://www.keycloak.org/server/containers) | 8080 |
 | eHVD mock | Directory of healthcare people and organisations, same SOAP interface as the real eHVD | Built (T23) | TypeScript service on `node:24-alpine` with [`saxes`](https://github.com/lddubeau/saxes), in `services/ehvd-mock/`, see [eHVD](EHVD.md) | 8095 |
-| Mailpit | Catches every outgoing email | Reused | [`axllent/mailpit`](https://hub.docker.com/r/axllent/mailpit) | 1025 SMTP, 8025 web |
+| Mailpit | Catches every outgoing email in local development. For the demo, email goes through Gmail SMTP as ordysoftware@gmail.com to the team inboxes instead, see [Outgoing messages](#outgoing-messages). | Reused | [`axllent/mailpit`](https://hub.docker.com/r/axllent/mailpit) | 1025 SMTP, 8025 web |
 | HAPI FHIR | FHIR R4 server | Reused | [`hapiproject/hapi`](https://hub.docker.com/r/hapiproject/hapi) | 8090, mapped to 8080 in the container |
 | HL7 validator | Validates every filed resource | Reused | [`validator_cli.jar`](https://github.com/hapifhir/org.hl7.fhir.core/releases) | none |
 
@@ -34,17 +34,17 @@ Every reused part can be replaced. Synapse can be any Matrix homeserver, Keycloa
                                |   |   |   +--> HAPI FHIR
                                |   |   +------> Postgres: requests, bindings, audit log
                                |   +----------> eHVD mock (SOAP 1.2)
-                               +--------------> Mailpit (email), /sms page (SMS)
+                               +--------------> Mailpit or Gmail SMTP (email), /sms page (SMS)
 ```
 
 ## Document types
 
 One table in the request service, `DOCUMENT_TYPES` in `src/lib/document-types.ts`, defines each document type. To add a type, add a row there and here. The database stores the key as text, so a new type needs no migration.
 
-| Key | Default channel | eHVD check | Mapper | Name in Matrix messages |
-|---|---|---|---|---|
-| `lab-result` | email | Release check: the physician under `Validated by` is active, has the lab medicine specialty, and is a member of the named organisation | Lab mapper: Observations and DiagnosticReport | lab result |
-| `rehab-report` | SMS | Release check: the physician under `Written by` is active and a member of the named organisation, which is an active hospital | Rehab mapper: DocumentReference | rehab discharge report |
+| Key | Default channel | eHVD check | Mapper | Name in Matrix messages | Words no outgoing message may contain |
+|---|---|---|---|---|---|
+| `lab-result` | email | Release check: the physician under `Validated by` is active, has the lab medicine specialty, and is a member of the named organisation | Lab mapper: Observations and DiagnosticReport | lab result | `lab`, `labor`, `result`, `befund` |
+| `rehab-report` | SMS | Release check: the physician under `Written by` is active and a member of the named organisation, which is an active hospital | Rehab mapper: DocumentReference | rehab discharge report | `rehab`, `discharge`, `report` |
 
 ## Request lifecycle
 
@@ -79,7 +79,9 @@ The request service stores each request with one state. The FHIR Task for the re
 | Dr. Hofer clicks **Cancel** | `cancel` | any open state | `cancelled` |
 | 7 days pass | `expire` | any open state | `expired` |
 
-The open states are `awaiting_confirmation`, `sent`, `identity_held`, `verified`, and `answer_held`. Any other pair of state and event is refused.
+The open states are `awaiting_confirmation`, `sent`, `identity_held`, `verified`, and `answer_held`. Any other pair of state and event is refused. `accepts(state, event)` reads the same table, and `REQUESTER_EVENTS` lists the four events Dr. Hofer triggers: `send_anyway`, `accept`, `reject`, and `cancel`. The widget imports both in the browser, so `lifecycle.ts` must not import server code at runtime.
+
+Until T09 keeps a held answer, `request.accept` refuses **Accept** on `answer_held` with "Filing a held answer is not built yet." and leaves the state. Moving to `filed` would claim a filing that never happened.
 
 A failed identity check does not change the state, so the real person can still answer a forwarded link. The failure goes to the audit log and to Dr. Hofer. If Keycloak cannot be reached, the check holds without a state change and does not count toward the lock. A login in any state other than `sent` changes no state. A hold stores the held person's bPK in `person_number`, and **Accept** keeps it, so only the accepted person can answer. [Identity checks](IDENTITY.md#identity-checks) has the details.
 
@@ -108,13 +110,13 @@ The link token and the 7 days start when the request goes out. **Send anyway** (
 
 Dr. Hofer sends requests and makes every decision about them in the ordy widget. `pnpm matrix:bootstrap` pins it in her room. There are no chat commands for requests.
 
-The widget uses `matrix-widget-api` to get a Matrix OpenID token from Element after the user approves identity sharing, and sends it as `Authorization: Bearer` with every clinic tRPC call. Patient and audit data come only from `clinic.patients`, `clinic.audit`, and the `request` procedures, all protected by `clinicProcedure`; neither page embeds that data in its initial HTML or React server payload. Tokens and the clinic query cache stay in memory and are discarded on expiry or unmount. The widget includes an **Audit log** tab. The request service checks the token with Synapse (`verifyOpenIdToken` in `src/server/matrix/client.ts`). It accepts only users on its own homeserver, `MATRIX_SERVER_NAME`, which is `klinikum.example` in the demo. The checked Matrix ID is the actor in the audit log.
+The widget uses `matrix-widget-api` to get a Matrix OpenID token from Element after the user approves identity sharing. It takes Element's origin from the `parentUrl` parameter that Element appends to the widget URL, because Element sends no referrer. The widget sends the token as `Authorization: Bearer` with every clinic tRPC call. Patient and audit data come only from `clinic.patients`, `clinic.audit`, and the `request` procedures, all protected by `clinicProcedure`; neither page embeds that data in its initial HTML or React server payload. Tokens and the clinic query cache stay in memory and are discarded on expiry or unmount. The widget includes an **Audit log** tab. The request service checks the token with Synapse (`verifyOpenIdToken` in `src/server/matrix/client.ts`). It accepts only users on its own homeserver, `MATRIX_SERVER_NAME`, which is `klinikum.example` in the demo. The checked Matrix ID is the actor in the audit log.
 
 | Part of the widget | Effect |
 |---|---|
 | Request form | Creates a request and sends the email or SMS |
 | **Send anyway** | Sends a request despite the address warning |
-| **Accept** | Accepts a held identity or a held answer |
+| **Accept** | Accepts a held identity or a held answer. A held answer is refused until T09 keeps it (see [Request lifecycle](#request-lifecycle)) |
 | **Reject** | Rejects a held identity or a held answer |
 | **Cancel** | Cancels an open request |
 | Request list | Shows each request with its state and its audit entries |
@@ -169,7 +171,21 @@ If you did not expect this message, you can ignore it.
 Klinikum Beispielstadt: Dr. L. Hofer sent you a secure request. Open it with ID Austria: http://localhost:3010/r/<link token> (valid until 5 Nov)
 ```
 
-Before sending, the request service compares the words of the message with the patient's name words, the birth date in the formats `1961-03-12`, `12.03.1961`, and `12 March 1961`, and the document type words. It compares whole words, not substrings. A substring check would block every message, because the patient's family name "Beispiel" is part of "Klinikum Beispielstadt". [Compliance and safety](COMPLIANCE_AND_SAFETY.md) has the rule.
+`sendRequestEmail` in `src/server/mail/send.ts` renders the email and sends it over SMTP with Nodemailer. The email is plain text with no HTML part. The requester's name is a Matrix display name that the member sets themselves, so it never goes into HTML. The expiry date is the day in the `Europe/Vienna` time zone. Nothing calls it yet. `request.create` and `sendAnyway` still print the link in development (`TODO(T06)` in `src/server/api/routers/request.ts`), and a follow-up sends it there.
+
+Locally every email goes to Mailpit, which catches any address. For the demo, it goes through Gmail as ordysoftware@gmail.com, on `smtp.gmail.com` port 465 with TLS from the start. The scenario's `.example` addresses cannot receive mail. With `MAIL_TEAM_INBOXES` set, every email goes to the team inboxes instead of the request's address. The `To` header still names the request's address, so the email for request 1 reads as sent to `eva.brandl@labor-kanal.example`. If `SMTP_USER` is set and `MAIL_TEAM_INBOXES` is empty, the request service sends nothing. A real relay would deliver to any address typed in the widget. [Development](DEVELOPMENT.md#send-email-through-gmail) has the setup.
+
+Before sending, the request service compares the words of the subject and the text with three kinds of forbidden words:
+
+- the patient's name words
+- the birth date in the formats `1961-03-12`, `12.03.1961`, and `12 March 1961`
+- the words of every document type in the table above, not only the requested one
+
+It compares whole words, not substrings. A substring check would block every message, because the patient's family name "Beispiel" is part of "Klinikum Beispielstadt".
+
+A word is a run of digits and letters that have an upper and a lower case, such as Latin, Greek, or Cyrillic letters. Every other character separates words. So "Maria's", "(Maria)", and "maria.beispiel" all contain the word "maria". Case does not matter. The Turkish dotless ı counts as i, and the Greek final sigma ς counts as σ. Umlauts are spelled out (ü as ue), also with a tone mark as in "Lǚ". Other accents and marks that join the letter before them are dropped, so they do not split a word. A name word of one letter, such as the initial "R.", does not count. One letter names nobody, and every link has the word "r". A number loses its leading zeros. A birth date counts as its sequence of words, so `12.3.1961` and `12/03/1961` match `12.03.1961`. The check cannot find whole words in a script without case, such as Chinese. So if a patient's name has a letter without case, the check refuses every email for that patient. Modifier letters, such as the apostrophe ʼ in "Лукʼян", do not count.
+
+On a hit, nothing is sent. `MessageRefused` names only the kinds of data it found: `patient-name`, `birth-date`, or `document-type`. It never names the words, so logging the error cannot leak the patient's name. The link token is random, so in rare cases it holds a forbidden word between `-` or `_`. The email is then refused too. A given name that is also an English month, such as August, refuses the email when the link expires in that month. Avoiding that needs a change to the template, which Doc 1 approves. [Compliance and safety](COMPLIANCE_AND_SAFETY.md) has the rule.
 
 ## Outside portal
 
@@ -260,7 +276,7 @@ In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `
 
 `bindings` remembers which ID Austria person number answered as a given person at a given organisation. Its key is `given`, `family`, and `org`, so each person at an organisation has one person number. The audit log never holds document text.
 
-`src/server/requests/service.ts` is the only code that writes `requests`: `createRequest`, `sendAnyway`, `applyEvent`, `incrementFailedChecks`, `applyLoginTransition`, `expireDueRequests`, and `saveIdToken`, which the login callback calls for the bound person. The tRPC router `request` (`create`, `get`, `list`, `cancel`, all `clinicProcedure`) and the portal pages use it. A network member sees and changes only the requests they sent; for anyone else, `get` and `cancel` answer "not found", and `list` leaves the request out. `get` returns the request's audit entries, which name the outside person and their person number. The widget's **Audit log** tab (`clinic.audit`) still shows the whole log to every network member, for the demo.
+`src/server/requests/service.ts` is the only code that writes `requests`: `createRequest`, `sendAnyway`, `applyEvent`, `incrementFailedChecks`, `applyLoginTransition`, `expireDueRequests`, and `saveIdToken`, which the login callback calls for the bound person. The tRPC router `request` (`create`, `get`, `list`, `cancel`, `sendAnyway`, `accept`, `reject`, all `clinicProcedure`) and the portal pages use it. A network member sees and changes only the requests they sent; for anyone else, `get`, `cancel`, `sendAnyway`, `accept`, and `reject` answer "not found", and `list` leaves the request out. `get` and `list` return each request's audit entries, which name the outside person and their person number. `accept`, `reject`, and `cancel` write `request_decided` in the transaction that changes the state. `sendAnyway` writes `request_sent`. The widget's **Audit log** tab (`clinic.audit`) still shows the whole log to every network member, for the demo.
 
 ## Audit log
 
@@ -272,8 +288,11 @@ In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `
 | `answer_sent` | The verified person | `received` | SHA-256 and size of the upload |
 | `answer_filed` | The request service | `filed` | FHIR resource ids and the Provenance id |
 | `misdelivery_caught` | Whoever triggered it | `address_mismatch`, `wrong_person`, or `patient_mismatch` | The two domains, the failed checks, or the upload's SHA-256 and which part of the patient did not match |
+| `request_decided` | Dr. Hofer's Matrix ID | `accepted`, `rejected`, or `cancelled` | The state before and after the decision |
 
-Every entry has a UTC timestamp in `at`. The `outcome` column holds the short result: `pass`, `hold`, or `fail` for `identity_checked`, and the kind for `misdelivery_caught`. The What sits in `detail`, with these fields, which `pnpm audit:check` requires:
+The jury counts the first six, the track events from the track README ("Audit coverage"). `request_decided` is ordy's own: it records who accepted, rejected, or cancelled a request and when, as [Compliance and safety](COMPLIANCE_AND_SAFETY.md#identity-rules) requires. `pnpm audit:check` and `pnpm scenario` leave it out, so audit coverage stays 6 of 6. **Send anyway** writes no `request_decided`, because its `request_sent` already names Dr. Hofer.
+
+Every entry has a UTC timestamp in `at`. The `outcome` column holds the short result: `pass`, `hold`, or `fail` for `identity_checked`, the kind for `misdelivery_caught`, and the decision for `request_decided`. The What sits in `detail`, with these fields. `pnpm audit:check` requires them for the six track events:
 
 | Event | `detail` fields |
 |---|---|
@@ -283,6 +302,7 @@ Every entry has a UTC timestamp in `at`. The `outcome` column holds the short re
 | `answer_sent` | `sha256`, `size` |
 | `answer_filed` | `resources` (every filed resource as `Type/id`, which `pnpm validate` reads), `provenance` |
 | `misdelivery_caught` | `address_mismatch`: `domain`, `expectedDomain`. `wrong_person`: `checks`. `patient_mismatch`: `sha256`, `size`, `nameMatches`, `birthDateMatches`. |
+| `request_decided` | `from`, `to`: the request states before and after |
 
 The widget and `GET /audit` show the entries.
 
@@ -309,7 +329,10 @@ Configuration is read in `src/env.ts`. Service addresses and demo accounts have 
 | `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | `request-service`, `request-service-demo-2026` |
 | `KEYCLOAK_ADMIN_USER`, `KEYCLOAK_ADMIN_PASSWORD` | `admin`, demo value (`pnpm citizen` only) |
 | `EHVD_URL` | `http://localhost:8095/` (planned, T15) |
-| `SMTP_HOST`, `SMTP_PORT`, `MAILPIT_API_URL` | `localhost`, `1025`, `http://localhost:8025` |
+| `SMTP_HOST`, `SMTP_PORT`, `MAILPIT_API_URL` | `localhost`, `1025`, `http://localhost:8025`. Port 465 uses TLS from the start. Any other port upgrades with STARTTLS when the server offers it, and requires it when `SMTP_USER` is set. |
+| `SMTP_USER`, `SMTP_PASSWORD` | empty, no login, which is what Mailpit wants. For Gmail: `ordysoftware@gmail.com` and an app password. |
+| `MAIL_FROM` | `ordy · Klinikum Beispielstadt <ordy@klinikum.example>` |
+| `MAIL_TEAM_INBOXES` | empty, so the email goes to the request's address, which is safe only with Mailpit. Comma-separated addresses; required when `SMTP_USER` is set. |
 | `ANTHROPIC_API_KEY` | unset, only for the optional AI fallback; unset turns it off |
 | `AI_FALLBACK_MODEL` | `claude-opus-5-5` |
 
@@ -328,6 +351,7 @@ docker/element/config.json    Element config
 docker/synapse/               generated homeserver.yaml (git ignores it)
 docker/keycloak/idaustria-sim-realm.json   simulated ID Austria: client, mappers, test citizens
 docs/ehvd/eHVD.wsdl           the real eHVD WSDL, version 2 from BRZ
+docs/clinical-review/         review files the clinicians fill in by hand, one per issue
 services/ehvd-mock/           eHVD mock service and its synthetic directory (T23)
   src/                        SOAP wire format, field rules, queries, directory, HTTP server
   test/                       tests over real HTTP, run by pnpm test
@@ -339,10 +363,10 @@ src/
   app/                        Next.js pages and route handlers
     api/trpc/[trpc]/route.ts  tRPC endpoint
     api/healthz/route.ts      health check for scripts and containers
-    widget/                   request form inside Element. Sending is planned, T05
+    widget/                   request form, request list, and decisions inside Element (T05)
     r/[token]/                outside portal: landing page and answer form. Answer planned, T09
     auth/                     ID Austria login and callback route handlers, expired-login page. The callback runs the identity checks (T08)
-    sms/page.tsx              SMS screen. Reading the SMS log planned, T06
+    sms/page.tsx              SMS screen, a stub. No task builds the SMS log, because T06 sends email only
     audit/page.tsx            audit UI; authenticated data via clinic.audit
   components/ui/              shadcn/ui components, added with `pnpm dlx shadcn@4.22.1 add <name>`
   components/                 shared UI such as the portal frame
@@ -354,7 +378,7 @@ src/
     api/routers/              one router per area
     db/                       Drizzle schema and client
     requests/                 request lifecycle, link tokens, and the request service
-    audit/record.ts           recordAudit() for the six audit events
+    audit/record.ts           recordAudit() for the six track audit events and request_decided
     fhir/                     FHIR client, lab and rehab mappers (T12, T14)
     documents/                parser and patient check (T10, T11), typed records in types.ts, UCUM and vital sign lists, AI fallback (T22), the scenario documents as parsed records for tests
     identity/names.ts         name words, subset and shared-word tests from Identity, shared by the patient check and T08
@@ -366,9 +390,11 @@ src/
     matrix/client.ts          Matrix client-server API
     matrix/notices.ts         notice texts and notifyRoom for Dr. Hofer's room
     metrics/                  metrics from audit rows, validator runner, metrics table (T17, T18)
+    mail/message.ts           request email template and the content check (T06)
+    mail/send.ts              sendRequestEmail over SMTP: Mailpit, or Gmail to the team inboxes (T06)
     auth/eid-session.ts       outside person's session cookie and login cookie
     auth/id-austria.ts        OpenID Connect login: discovery, code swap, Keycloak logout, claims for the identity checks
-    portal/data.ts            data loaders for the portal, the login, and the SMS page. The SMS log is a stub until T06
+    portal/data.ts            data loaders for the portal, the login, and the SMS page. The SMS log is a stub; T06 sends email only
     portal/paths.ts           the portal page for each login result
   bot/                        Matrix bot process and commands
 scripts/
@@ -380,6 +406,7 @@ scripts/
   validate.ts                 HL7 validator on every filed resource or on given files (T18)
   audit-check.ts              six event types per request, each with who, what, and when (T17)
   scenario.ts                 request 1, M1 to M3, request 2, and the four metrics in one run (T17, T18)
+  clinical-review-export.ts   the filing Bundles for the clinical review in docs/clinical-review/19-fhir/ (#19)
 track/                        track brief, scenario, patient.json, test documents, and our extra set in scenario/extra/
 ```
 
@@ -390,7 +417,7 @@ track/                        track brief, scenario, patient.json, test document
 1. `./scripts/setup.sh` once. It creates `.env`, starts the containers, registers the Matrix users, migrates the database, loads the patient, and creates Dr. Hofer's room with the widget.
 2. `pnpm dev` starts Next.js on `http://localhost:3010` and the bot.
 3. Open Element at `http://localhost:8081` and log in as `lena.hofer` / `hofer-demo-2026`. The room "Dr. Hofer · Outside documents" is there. Send `!status`.
-4. Mailpit is at `http://localhost:8025`, the SMS screen at `http://localhost:3010/sms` (T06).
+4. Mailpit is at `http://localhost:8025`. The SMS screen at `http://localhost:3010/sms` is a stub.
 
 ## Sources
 

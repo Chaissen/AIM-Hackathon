@@ -9,7 +9,7 @@ import superjson from "superjson";
 import type { AppRouter } from "@/server/api/root";
 import { makeQueryClient } from "./query-client";
 
-export const { TRPCProvider, useTRPC } = createTRPCContext<AppRouter>();
+export const { TRPCProvider, useTRPC, useTRPCClient } = createTRPCContext<AppRouter>();
 
 // ClinicAccess remounts this provider when credentials change, discarding the previous identity's cache.
 export function TRPCReactProvider({ children, clinicToken }: { children: React.ReactNode; clinicToken?: string }) {

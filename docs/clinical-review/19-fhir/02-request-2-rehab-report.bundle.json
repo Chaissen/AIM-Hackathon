@@ -1,0 +1,292 @@
+{
+  "resourceType": "Bundle",
+  "type": "transaction",
+  "entry": [
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000001",
+      "resource": {
+        "resourceType": "Practitioner",
+        "name": [
+          {
+            "family": "Hofer",
+            "given": [
+              "Lena"
+            ],
+            "prefix": [
+              "Dr."
+            ]
+          }
+        ],
+        "identifier": [
+          {
+            "system": "urn:ietf:rfc:3986",
+            "value": "urn:oid:1.2.40.0.34.3.2.99.1.1"
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "Practitioner",
+        "ifNoneExist": "identifier=urn:ietf:rfc:3986|urn:oid:1.2.40.0.34.3.2.99.1.1"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
+      "resource": {
+        "resourceType": "Practitioner",
+        "name": [
+          {
+            "family": "Kern",
+            "given": [
+              "Stefan"
+            ]
+          }
+        ],
+        "identifier": [
+          {
+            "system": "urn:aim-t2:answer",
+            "value": "2:a1a77c8c33672f6f126cee24aad081ef61d1c6abc74a4bf313c67fd96fef48af:sender"
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "Practitioner",
+        "ifNoneExist": "identifier=urn:aim-t2:answer|2:a1a77c8c33672f6f126cee24aad081ef61d1c6abc74a4bf313c67fd96fef48af:sender"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000003",
+      "resource": {
+        "resourceType": "Practitioner",
+        "name": [
+          {
+            "family": "Leitner",
+            "given": [
+              "Johanna"
+            ],
+            "prefix": [
+              "Dr."
+            ]
+          }
+        ],
+        "identifier": [
+          {
+            "system": "urn:ietf:rfc:3986",
+            "value": "urn:oid:1.2.40.0.34.3.2.99.1.3"
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "Practitioner",
+        "ifNoneExist": "identifier=urn:ietf:rfc:3986|urn:oid:1.2.40.0.34.3.2.99.1.3"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000004",
+      "resource": {
+        "resourceType": "Organization",
+        "name": "Reha Waldblick",
+        "identifier": [
+          {
+            "system": "urn:ietf:rfc:3986",
+            "value": "urn:oid:1.2.40.0.34.3.1.99.1.3"
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "Organization",
+        "ifNoneExist": "identifier=urn:ietf:rfc:3986|urn:oid:1.2.40.0.34.3.1.99.1.3"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000005",
+      "resource": {
+        "resourceType": "Organization",
+        "name": "ID Austria (simulation)",
+        "identifier": [
+          {
+            "system": "urn:ietf:rfc:3986",
+            "value": "http://localhost:8080/realms/idaustria-sim"
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "Organization",
+        "ifNoneExist": "identifier=urn:ietf:rfc:3986|http://localhost:8080/realms/idaustria-sim"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000006",
+      "resource": {
+        "resourceType": "DocumentReference",
+        "status": "current",
+        "docStatus": "final",
+        "type": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "18842-5"
+            }
+          ],
+          "text": "Rehab discharge report"
+        },
+        "subject": {
+          "reference": "Patient/maria-beispiel"
+        },
+        "date": "2026-10-29T14:02:12+01:00",
+        "author": [
+          {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000003"
+          },
+          {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000004"
+          }
+        ],
+        "description": "rehabilitation after a total hip replacement on the left, on 18 August 2026 at Klinikum Beispielstadt",
+        "content": [
+          {
+            "attachment": {
+              "contentType": "text/markdown; charset=utf-8",
+              "data": "IyBSZWhhIFdhbGRibGljazogZGlzY2hhcmdlIHJlcG9ydAoKUGF0aWVudDogTWFyaWEgQmVpc3BpZWwsIGJvcm4gMTIgTWFyY2ggMTk2MQpTdGF5OiAyIHRvIDIzIFNlcHRlbWJlciAyMDI2ClJlYXNvbjogcmVoYWJpbGl0YXRpb24gYWZ0ZXIgYSB0b3RhbCBoaXAgcmVwbGFjZW1lbnQgb24gdGhlIGxlZnQsIG9uIDE4IEF1Z3VzdCAyMDI2IGF0IEtsaW5pa3VtIEJlaXNwaWVsc3RhZHQKCiMjIENvdXJzZQoKT24gYXJyaXZhbCwgTWFyaWEgd2Fsa2VkIHdpdGggdHdvIGNydXRjaGVzLiBBZnRlciB0aHJlZSB3ZWVrcyBvZiBwaHlzaW90aGVyYXB5IHNoZSB3YWxrcyB1cCB0byA1MDAgbWV0cmVzIHdpdGhvdXQgYWlkcyBhbmQgY2xpbWJzIHN0YWlycyB3aXRoIGEgaGFuZHJhaWwuIFRoZSB3b3VuZCBoZWFsZWQgd2l0aG91dCBwcm9ibGVtcy4gVGhlcmUgd2VyZSBubyBmYWxscy4KCiMjIE1lZGljYXRpb24gYXQgZGlzY2hhcmdlCgotIFJpdmFyb3hhYmFuIDEwIG1nIG9uY2UgYSBkYXkgdW50aWwgMjkgU2VwdGVtYmVyIDIwMjYsIHRvIHByZXZlbnQgdGhyb21ib3NpcyBmb3Igc2l4IHdlZWtzIGFmdGVyIHRoZSBvcGVyYXRpb24KLSBQYXJhY2V0YW1vbCA1MDAgbWcgdXAgdG8gdGhyZWUgdGltZXMgYSBkYXkgaWYgbmVlZGVkCi0gUGFudG9wcmF6b2xlIDIwIG1nIG9uY2UgYSBkYXkKCiMjIFJlY29tbWVuZGF0aW9ucwoKLSBDb250aW51ZSB0aGUgaG9tZSBleGVyY2lzZXMuCi0gT3V0cGF0aWVudCBwaHlzaW90aGVyYXB5IHR3aWNlIGEgd2VlayBmb3Igc2l4IHdlZWtzLgotIEZvbGxvdy11cCBYLXJheSBhdCBLbGluaWt1bSBCZWlzcGllbHN0YWR0IGluIE5vdmVtYmVyIDIwMjYuCgpXcml0dGVuIGJ5OiBEci4gSm9oYW5uYSBMZWl0bmVyLCBtZWRpY2FsIGRpcmVjdG9yLCBSZWhhIFdhbGRibGljawpTZW50IGJ5OiBTdGVmYW4gS2VybiwgZGlzY2hhcmdlIG1hbmFnZW1lbnQK",
+              "title": "Reha Waldblick: discharge report"
+            }
+          }
+        ],
+        "context": {
+          "period": {
+            "start": "2026-09-02",
+            "end": "2026-09-23"
+          }
+        },
+        "identifier": [
+          {
+            "system": "urn:aim-t2:answer",
+            "value": "2:a1a77c8c33672f6f126cee24aad081ef61d1c6abc74a4bf313c67fd96fef48af:output"
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "DocumentReference",
+        "ifNoneExist": "identifier=urn:aim-t2:answer|2:a1a77c8c33672f6f126cee24aad081ef61d1c6abc74a4bf313c67fd96fef48af:output"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000007",
+      "resource": {
+        "resourceType": "Provenance",
+        "text": {
+          "status": "generated",
+          "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\">Sent by Stefan Kern on 29 October 2026 at 14:02. Written by Dr. Johanna Leitner for Reha Waldblick. Identity checked with ID Austria (simulation), full function, level high. The eHVD confirms Dr. Johanna Leitner as responsible for the content at Reha Waldblick, found by name.</div>"
+        },
+        "target": [
+          {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000006"
+          }
+        ],
+        "occurredDateTime": "2026-10-29T14:02:00+01:00",
+        "recorded": "2026-10-29T14:02:12+01:00",
+        "policy": [
+          "urn:aim-t2:identity-policy:rehab-report:v1"
+        ],
+        "agent": [
+          {
+            "type": {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/provenance-participant-type",
+                  "code": "author"
+                }
+              ]
+            },
+            "who": {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000003"
+            },
+            "onBehalfOf": {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000004"
+            }
+          },
+          {
+            "type": {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/provenance-participant-type",
+                  "code": "informant"
+                }
+              ]
+            },
+            "who": {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000002"
+            },
+            "onBehalfOf": {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000004"
+            }
+          }
+        ],
+        "signature": [
+          {
+            "type": [
+              {
+                "system": "urn:iso-astm:E1762-95:2013",
+                "code": "1.2.840.10065.1.12.1.10"
+              }
+            ],
+            "when": "2026-10-29T14:01:40+01:00",
+            "who": {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000005"
+            },
+            "sigFormat": "application/jose",
+            "data": "ZXlKaGJHY2lPaUpTVXpJMU5pSXNJblI1Y0NJNklrcFhWQ0o5LmV5SnBjM01pT2lKb2RIUndPaTh2Ykc5allXeG9iM04wT2pnd09EQXZjbVZoYkcxekwybGtZWFZ6ZEhKcFlTMXphVzBpTENKaGRXUWlPaUp2Y21SNUlpd2lhV0YwSWpveE56a3pNamM0T1RBd0xDSmhkWFJvWDNScGJXVWlPakUzT1RNeU56ZzVNREFzSW1WNGNDSTZNVGM1TXpJM09USXdNQ3dpWjJsMlpXNWZibUZ0WlNJNklsTjBaV1poYmlJc0ltWmhiV2xzZVY5dVlXMWxJam9pUzJWeWJpSXNJbUpwY25Sb1pHRjBaU0k2SWpFNU9EWXRNREl0TURNaUxDSjFjbTQ2Y0had1ozWmhkRHB2YVdSakxtSndheUk2SWtkSU9sSkdObEJFZFVSNU1ERkZRM0V6U0hkWFZtUnpSMXB3VGtnMFFUMGlMQ0oxY200NmNIWndaM1poZERwdmFXUmpMbVZwWkY5cFpHRmZiR1YyWld3aU9pSjFjbTQ2Wldsa1ozWmhkRHBsYVdRdWMzUmhkSFZ6TG1aMWJHd2lMQ0oxY200NmNIWndaM1poZERwdmFXUmpMbVZwWkY5amFYUnBlbVZ1WDNGaFlWOWxhV1JoYzE5c1pYWmxiQ0k2SW1oMGRIQTZMeTlsYVdSaGN5NWxkWEp2Y0dFdVpYVXZURzlCTDJocFoyZ2lMQ0oxY200NmNIWndaM1poZERwdmFXUmpMbVZwWkY5cFpHVnVkR2wwZVY5emRHRjBkWE5mYkdWMlpXd2lPaUpvZEhSd09pOHZaV2xrTG1kMkxtRjBMMlZKUkM5emRHRjBkWE12ZEdWemRHbGtaVzUwYVhSNUlpd2lkWEp1T25CMmNHZDJZWFE2YjJsa1l5NXdkbkJmZG1WeWMybHZiaUk2SWpJdU1pSjkuZFc1emFXZHVaV1FnY21WMmFXVjNJR052Y0hr"
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "Provenance",
+        "ifNoneExist": "target=urn:uuid:00000000-0000-4000-8000-000000000006"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Task",
+        "id": "ordy-request-2",
+        "status": "completed",
+        "intent": "order",
+        "description": "Request for a rehab discharge report",
+        "for": {
+          "reference": "Patient/maria-beispiel"
+        },
+        "authoredOn": "2026-10-29T09:00:00+01:00",
+        "requester": {
+          "reference": "urn:uuid:00000000-0000-4000-8000-000000000001"
+        },
+        "owner": {
+          "reference": "urn:uuid:00000000-0000-4000-8000-000000000002"
+        },
+        "restriction": {
+          "period": {
+            "end": "2026-11-05T09:00:00+01:00"
+          }
+        },
+        "output": [
+          {
+            "type": {
+              "text": "Rehab discharge report"
+            },
+            "valueReference": {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000006"
+            }
+          }
+        ]
+      },
+      "request": {
+        "method": "PUT",
+        "url": "Task/ordy-request-2"
+      }
+    }
+  ]
+}
