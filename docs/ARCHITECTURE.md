@@ -85,14 +85,13 @@ A failed identity check does not change the state, so the real person can still 
 
 `failed_checks` counts every failed identity check while the link works, but only a `sent` request locks on the third one.
 
-No job watches the expiry. Before the request service reads or changes a request, it sets that request to `expired` if it is open and past `expires_at`. Before it lists requests, it does the same for all of them (`expireDueRequests` in `src/server/requests/service.ts`). `applyEvent` in the same file locks the request row while it changes the state, so two events on one request never overlap. Its callback writes the audit entry for the change in the same transaction.
+No job watches the expiry. Before the request service reads or changes a request, it sets that request to `expired` if it is open and past `expires_at`. Before it lists requests, it does the same for all of them (`expireDueRequests` in `src/server/requests/service.ts`). `applyEvent` in the same file locks the request row while it changes the state, so two events on one request never overlap. Its callback writes the audit entry for the change in the same transaction. It takes every event except a login's: `identity_pass`, `identity_hold`, and `identity_fail` go only through `applyLoginTransition` below, so a login always stores the bPK.
 
 The login changes a request through the five ports that `runIdentityChecks` in `src/server/identity/login.ts` takes. `identityCheckPorts(db, notify)` in `src/server/requests/identity-ports.ts` builds them from the request service:
 
 - `incrementFailedChecks` adds one to `failed_checks` in one statement and returns the new count.
-- `applyLoginTransition` applies `sent` to `verified`, `identity_held`, or `locked` only while the request is still `sent` and not expired. It stores the bPK in the same statement. It returns false when the state changed in between, and it refuses a change the lifecycle table does not allow, such as a lock before the third failure.
-- `findBinding` reads `bindings`, and `recordAudit` writes the entry.
-- The caller passes `notify`, because the thread of a request belongs to T05.
+- `applyLoginTransition` applies `sent` to `verified`, `identity_held`, or `locked` only while the request is still `sent` and not expired. It stores the bPK in the same statement. It returns false when the state changed in between, and it refuses a change the lifecycle table does not allow, such as a lock before the third failure. If a `sent` request already has three failures counted because the lock after the third one never ran, the next login locks it instead of passing or holding.
+- `findBinding` reads `bindings`. `recordAudit` parses the entry against the audit types before it writes it: `identity_checked` with `pass`, `hold`, or `fail`, or `misdelivery_caught` with `wrong_person`, each with check names, verdicts, and reason codes only. Anything else throws.- The caller passes `notify`, because the thread of a request belongs to T05.
 
 The link token and the 7 days start when the request goes out. **Send anyway** (`sendAnyway`) gives the request a new token and a new expiry and writes `request_sent` then, not when the request was created.
 
