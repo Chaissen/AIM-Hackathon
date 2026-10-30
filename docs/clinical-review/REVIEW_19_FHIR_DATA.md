@@ -28,12 +28,12 @@ Done by a developer on 30 October 2026, not by a clinician. Only Doc 1's grade c
 | # | Finding | Answers | Effect on the filed data | Pre-review suggests | Issue |
 |---|---|---|---|---|---|
 | 1 | A one-sided reference range such as `< 5` or `> 45` loses its limit, and the value gets no flag | A3 (CRP), A5 (LDL, HDL) | **CRP 14 mg/L (range below 5) is stored without `H`.** The lab's own comment asks to look for a source of inflammation before the procedure. LDL 128 mg/dL (below 116) has no `H`, and HDL 58 mg/dL (above 45) has no `N`. The range is kept as text only. | A3 unsafe, A5 acceptable or unsafe | [#49](https://github.com/Chaissen/AIM-Hackathon/issues/49) |
-| 2 | The narrative says "Written by Dr. Eva Brandl" for a lab result she validated | A4, A5 | The document says "Validated by". The person is right, but the verb is wrong. | acceptable | [#50](https://github.com/Chaissen/AIM-Hackathon/issues/50) |
+| 2 | Dr. Eva Brandl validated the lab results, but the stored data says she wrote them: the narrative says "Written by", and the Provenance stores her in the role "author" | role: A1, A3, A4, A5. Narrative: A4, A5 | The document says "Validated by". The person is right, but the verb and the coded role are not. FHIR's closer role is "verifier". [FHIR model](../FHIR.md#provenance) chose "author" on purpose for the person responsible for the content, so Doc 1 decides (question in each lab answer's grade block). | acceptable | [#50](https://github.com/Chaissen/AIM-Hackathon/issues/50) |
 | 3 | The request record (Task) in each upload package has no entry address (`fullUrl`) | all | No clinical effect. The HL7 validator reports 2 technical errors per upload. | — | [#51](https://github.com/Chaissen/AIM-Hackathon/issues/51) |
 | 4 | Trailing zeros are dropped: `1.0` is stored as `1`, `2.0 to 4.0` as 2 and 4, `0,50` as 0.5 | A1, A3, A4, A5 | The numbers are the same, but they have fewer decimal places. The range text and the attached document keep the values as written. This is a design decision in [FHIR model](../FHIR.md#the-scenario-values). | acceptable | none, by design |
 | 5 | The units `µmol/L` and `mIU/L` are not valid UCUM | A4, A5 | **Fixed by #30.** They are stored as the UCUM codes `umol/L` and `m[IU]/L`, and the unit as written is kept next to the code. | correct | none, closed |
 
-Everything else matched: patient, LOINC codes and their meaning, values, units, two-sided ranges and their flags, sample and report times with the right summer or winter time offset, the lab's comment, the validating physician, the rehab author, sender, clinic, stay dates and reason, and the attached original text, which is byte-identical to the uploaded file in all seven answers.
+Everything else matched: patient, LOINC codes and their meaning, values, units, two-sided ranges and their flags, sample and report times with the right summer or winter time offset, the lab's comment, the validating physician's name and eHVD record (her role is finding 2), the rehab author, sender, clinic, stay dates and reason, and the attached original text, which is byte-identical to the uploaded file in all seven answers.
 
 ## The known parser gaps
 
@@ -48,7 +48,7 @@ Everything else matched: patient, LOINC codes and their meaning, values, units, 
 
 - **Code.** `main` at `0466f90`, which contains the mappers from #30 (PR head `2dc9b74`, the same code). Parser, patient check, mappers, and `buildFilingBundle()`, with no server involved. `pnpm clinical-review:export` writes one upload package (a FHIR transaction Bundle) per answer to [`19-fhir/`](19-fhir/). Run it again after any change to the parser, the mappers, or the filing, and compare.
 - **Not yet wired.** The answer flow that collects the people for the filing (T09, [#13](https://github.com/Chaissen/AIM-Hackathon/issues/13)) is not merged. The export follows [FHIR model](../FHIR.md) and [Identity](../IDENTITY.md#who-may-release-a-document) for who goes where, and the T09 draft for the sentence about the release check.
-- **Fixed inputs.** Every answer uses the same times: Dr. Hofer sends the request on 29 October 2026 at 09:00, the outside person logs in at 14:01:40 and sends at 14:02, and ordy files at 14:02:12 (Vienna time, `+01:00`). The ID token is the test citizen's, with a placeholder signature. A real filing carries the token that ID Austria signed. Each answer stands alone, as if it were the first answer from that sender.
+- **Fixed inputs.** Every answer uses the same times: Dr. Hofer sends the request on 29 October 2026 at 09:00, the outside person logs in at 14:01:40 and sends at 14:02, and ordy files at 14:02:12 (Vienna time, `+01:00`). The ID token is the test citizen's, with a placeholder signature. A real filing carries the token that ID Austria signed. Each answer stands alone, as if it were the first answer from that sender and the first mention of its author. On a real server, the answers share people: Dr. Eva Brandl (A1, A3, A4, A5) and Dr. Johanna Leitner (A2, A6, A7) are created once, by their eHVD identifier, and every later answer points at the existing record, whose name the later answer does not change. So the stored record shows the name from the first answer filed. Dr. Brandl's is "Dr. Eva Brandl" in every answer. Dr. Leitner's is "Dr. Johanna Leitner" when A2 or A6 is filed first, as in the demo order, although A7 sends "Prim. Dr. Johanna Leitner". A7's narrative is built from the document, so it still says "Prim. Dr.".
 - **Validator.** Not run: Java is not installed on the machine that made the package. The #30 run of HL7 validator 7.0.3 on the same mapper output found 0 errors in the clinical resources, and the 2 Task errors per Bundle from #51. To check: `pnpm validate docs/clinical-review/19-fhir`.
 - **LOINC names.** The stored data carries the LOINC code and the document's own label, not LOINC's name, by design ([FHIR model](../FHIR.md#validation)). The LOINC names in the tables below were looked up on tx.fhir.org on 30 October 2026, so you can check that each code means what the document says.
 
@@ -76,7 +76,7 @@ File: [`track/scenario/documents/lab-result-maria-beispiel.md`](../../track/scen
 | Test | LOINC code: LOINC name | Result | Unit as written → stored | Reference range: document → stored | Flag expected → stored | Check |
 |---|---|---|---|---|---|---|
 | INR (prothrombin time) | 6301-6: INR in platelet poor plasma by coagulation assay | 1.0 → 1 | none → none | 0.8 to 1.2 → 0.8 to 1.2 | N → N | match (1.0 stored as 1) |
-| aPTT | 14979-9: aPTT in platelet poor plasma by coagulation assay | 31 → 31 | s → `s` | 25 to 37 s → 25 to 37 s | N → N | match |
+| aPTT | 14979-9: aPTT in platelet poor plasma by coagulation assay | 31 → 31 | s → `s` | 25 to 37 → 25 to 37 s | N → N | match |
 | Platelets | 777-3: Platelets [#/volume] in blood by automated count | 245 → 245 | 10^9/L → `10*9/L` | 150 to 400 → 150 to 400 | N → N | match |
 | Fibrinogen | 3255-7: Fibrinogen [mass/volume] in platelet poor plasma by coagulation assay | 3.1 → 3.1 | g/L → `g/L` | 2.0 to 4.0 → 2 to 4 g/L | N → N | match (2.0 and 4.0 stored as 2 and 4) |
 
@@ -84,9 +84,14 @@ Provenance narrative, as stored:
 
 > Sent by Dr. Eva Brandl on 29 October 2026 at 14:02. Identity checked with ID Austria (simulation), full function, level high. The eHVD confirms Dr. Eva Brandl as responsible for the content at Labor Kanalstraße, found by the eHVD OID in the ID Austria login.
 
-Sender and responsible person are the same, so there is one person: Dr. Eva Brandl as author, for Labor Kanalstraße.
+Sender and responsible person are the same, so there is one person: Dr. Eva Brandl, stored in the Provenance role "author", for Labor Kanalstraße. The document says "Validated by" (finding 2, [#50](https://github.com/Chaissen/AIM-Hackathon/issues/50)).
 
-Pre-review: no differences. INR has no unit in the document and none is stored, which is usual for a ratio. Suggests **correct**.
+Pre-review: the values have no differences. INR has no unit in the document and none is stored, which is usual for a ratio. Suggests **correct** if Doc 1 accepts the role "author" below, otherwise **acceptable**.
+
+**Question for Doc 1 (role of the validating physician):** the document says "Validated by: Dr. Eva Brandl". The record of who released this answer (the Provenance) stores her in the role "author", the FHIR role for whoever wrote the content. FHIR also has the role "verifier", which is closer to "validated by". Is "author" acceptable here?
+
+- [ ] "author" is acceptable for the validating physician
+- [ ] should be "verifier" (or another role, write it under Comments)
 
 **Grade**
 
@@ -162,7 +167,12 @@ Provenance narrative, as stored:
 
 > Sent by Dr. Eva Brandl on 29 October 2026 at 14:02. Identity checked with ID Austria (simulation), full function, level high. The eHVD confirms Dr. Eva Brandl as responsible for the content at Labor Kanalstraße, found by the eHVD OID in the ID Austria login.
 
-Pre-review suggests **unsafe**: an abnormal value that the lab says must be acted on before the procedure is not flagged.
+Pre-review suggests **unsafe**: an abnormal value that the lab says must be acted on before the procedure is not flagged. Dr. Brandl is stored in the role "author" as in A1 (finding 2).
+
+**Question for Doc 1 (role of the validating physician):** the document says "Validated by: Dr. Eva Brandl". The record of who released this answer (the Provenance) stores her in the role "author", the FHIR role for whoever wrote the content. FHIR also has the role "verifier", which is closer to "validated by". Is "author" acceptable here?
+
+- [ ] "author" is acceptable for the validating physician
+- [ ] should be "verifier" (or another role, write it under Comments)
 
 **Grade**
 
@@ -201,9 +211,14 @@ Provenance narrative, as stored:
 
 > Sent by Sophie Lindner-Pichler on 29 October 2026 at 14:02. Written by Dr. Eva Brandl for Labor Kanalstraße. Identity checked with ID Austria (simulation), full function, level high. The eHVD confirms Dr. Eva Brandl as responsible for the content at Labor Kanalstraße, found by name.
 
-**Narrative differs:** the document says "Validated by: Dr. Eva Brandl", and the narrative says "Written by Dr. Eva Brandl" ([#50](https://github.com/Chaissen/AIM-Hackathon/issues/50)). The structured data names her correctly as the interpreting physician and the author, with Sophie Lindner-Pichler as the sender.
+**Narrative differs:** the document says "Validated by: Dr. Eva Brandl", and the narrative says "Written by Dr. Eva Brandl" ([#50](https://github.com/Chaissen/AIM-Hackathon/issues/50)). **Coded role differs too:** the report names her as the interpreting physician and each value names her as the performer, which fits "Validated by". But the Provenance, the record of who released the answer, stores her in the role "author", the FHIR role for whoever wrote the content. FHIR's closer role is "verifier". [FHIR model](../FHIR.md#provenance) chose "author" on purpose, so this is a question for Doc 1, not a bug fixed here ([#50](https://github.com/Chaissen/AIM-Hackathon/issues/50)). Sophie Lindner-Pichler is stored as the sender, which matches.
 
-Pre-review suggests **acceptable**: all values, units, ranges, and flags match, and only the narrative's verb is wrong.
+Pre-review suggests **acceptable**: all values, units, ranges, and flags match. The narrative's verb and the coded role say "wrote" where the document says "validated".
+
+**Question for Doc 1 (role of the validating physician):** the document says "Validated by: Dr. Eva Brandl". The record of who released this answer (the Provenance) stores her in the role "author", the FHIR role for whoever wrote the content. FHIR also has the role "verifier", which is closer to "validated by". Is "author" acceptable here?
+
+- [ ] "author" is acceptable for the validating physician
+- [ ] should be "verifier" (or another role, write it under Comments)
 
 **Grade**
 
@@ -246,9 +261,14 @@ Provenance narrative, as stored:
 
 > Sent by Sophie Lindner-Pichler on 29 October 2026 at 14:02. Written by Dr. Eva Brandl for Labor Kanalstraße. Identity checked with ID Austria (simulation), full function, level high. The eHVD confirms Dr. Eva Brandl as responsible for the content at Labor Kanalstraße, found by name.
 
-**Narrative differs:** "Written by" instead of "Validated by", as in A4 ([#50](https://github.com/Chaissen/AIM-Hackathon/issues/50)).
+**Narrative and coded role differ:** "Written by" instead of "Validated by", and the Provenance role "author", as in A4 ([#50](https://github.com/Chaissen/AIM-Hackathon/issues/50)).
 
 Pre-review suggests **acceptable or unsafe**, Doc 1's call. LDL 128 mg/dL is above its target and not flagged. HDL is normal and only lacks its `N`. The comment does not mention LDL.
+
+**Question for Doc 1 (role of the validating physician):** the document says "Validated by: Dr. Eva Brandl". The record of who released this answer (the Provenance) stores her in the role "author", the FHIR role for whoever wrote the content. FHIR also has the role "verifier", which is closer to "validated by". Is "author" acceptable here?
+
+- [ ] "author" is acceptable for the validating physician
+- [ ] should be "verifier" (or another role, write it under Comments)
 
 **Grade**
 
@@ -305,7 +325,7 @@ File: [`track/scenario/extra/rehab-report-maria-beispiel-2024.md`](../../track/s
 | Kind | Reha Waldblick: discharge report | Discharge summary (LOINC 18842-5) | match |
 | Stay | 28 December to 25 January 2024 | 28 December **2023** to 25 January 2024 | match (the start year is taken as the year before) |
 | Reason and diagnosis | rehabilitation after a fracture of the right ankle (lateral malleolus), operated with a plate at Klinikum Beispielstadt on 14 December 2023 | the same text | match |
-| Written by (author) | Prim. Dr. Johanna Leitner, medical director, Reha Waldblick | Prim. Dr. Johanna Leitner and Reha Waldblick, with eHVD OIDs. Found in the eHVD by name despite the title "Prim." | match |
+| Written by (author) | Prim. Dr. Johanna Leitner, medical director, Reha Waldblick | Prim. Dr. Johanna Leitner and Reha Waldblick, with eHVD OIDs. Found in the eHVD by name despite the title "Prim." | match in this package. On a server where A2 or A6 was filed first, her stored record reads "Dr. Johanna Leitner" (see [How this package was made](#how-this-package-was-made)). |
 | Sent by | Karl Heinz Moser-Wallner, discharge management | Karl Heinz Moser-Wallner, as the sender (informant). He is not in the eHVD. | match |
 | "Pain at discharge: 2 of 10" | a line in the course text | only in the attached original | by design |
 
@@ -313,7 +333,7 @@ Provenance narrative, as stored:
 
 > Sent by Karl Heinz Moser-Wallner on 29 October 2026 at 14:02. Written by Prim. Dr. Johanna Leitner for Reha Waldblick. Identity checked with ID Austria (simulation), full function, level high. The eHVD confirms Prim. Dr. Johanna Leitner as responsible for the content at Reha Waldblick, found by name.
 
-Pre-review: no differences. Suggests **correct**.
+Pre-review: no differences in this package. On a shared server, the stored record of Dr. Leitner keeps the titles of the first answer filed, usually "Dr.", while A7's narrative says "Prim. Dr.". Same person, same eHVD identifier. Suggests **correct**.
 
 **Grade**
 
