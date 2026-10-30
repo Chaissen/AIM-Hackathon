@@ -91,7 +91,7 @@ A tester passes when all of these hold:
 If the tester sees the **Held** page, the answer waits for Dr. Hofer and no `answer_filed` is written yet. Until the release check (#44) is wired into the answer flow's `answerDeps` (#54), every answer is held. What to do then depends on **Accept**:
 
 - If **Accept** in the widget files a held answer, click it after the stopwatch stopped. `answer_filed` is then written, the audit effort still ends at the tester's send, and you note "held, accepted" in the table.
-- If **Accept** refuses with "Filing a held answer is not built yet." (as on `main` on 30 October 2026), `pnpm audit:check --effort` prints "Effort: not measured" and exits with 1. The audit criterion cannot be met, so do not run the test with a real tester yet. See [Readiness](#readiness-on-30-october-2026).
+- If **Accept** refuses with "Filing a held answer is not built yet." (`main`'s refusal before #54, which replaces it with a call to `acceptAnswer`), `pnpm audit:check --effort` prints "Effort: not measured" and exits with 1. The audit criterion cannot be met, so do not run the test with a real tester yet. See [Readiness](#readiness-on-30-october-2026).
 
 ## Fetch the audit times
 
@@ -226,16 +226,16 @@ Where testers hesitated, and what we changed because of it:
 
 ## Readiness on 30 October 2026
 
-Checked from the code on `main` at `a48e40e` and on the open PRs, without a running stack. Check again when the blockers below land, with the rehearsal in Prepare, step 4.
+Checked from the code on `main` at `dc908a6` and on #54 (`feat/T09-portal-flow`) at `2241043`, without a running stack. Check again when the blockers below land, with the rehearsal in Prepare, step 4.
 
 | Step | Today |
 |---|---|
-| Send request 1 from the widget | Works (#32, #56). The request is created and `request_sent` written, but no email goes out: `request.create` only prints the link to the `[web]` log in development. |
-| Email in the Gmail inbox | **Blocker.** #47 (open) adds `sendRequestEmail()` and the Gmail settings, but nothing calls it yet. `request.create` has to call it where it prints the link today. The Gmail app password of the team account is needed in `.env`. |
+| Send request 1 from the widget | Works (#32, #56). The request is created and `request_sent` written, but no email goes out yet, see the next row. |
+| Email in the Gmail inbox | **Blocker.** #47 (merged) adds `sendRequestEmail()` and the Gmail settings, but nothing calls it yet. `request.create` and `sendAnyway` in `src/server/api/routers/request.ts` still call `printLink` (`TODO(T06)`), which only prints the link to the `[web]` log in development. The follow-up that calls `sendRequestEmail()` there is needed. The Gmail app password of the team account is needed in `.env`. |
 | Landing page `/r/{token}`, `link_opened` | Works. |
 | ID Austria login and identity checks | Work (#42, #34). A pass sends the tester to the answer page. |
 | Answer page with patient and document type | Works. The upload field and the name and birth date fields are there. |
-| **Send securely**, `answer_sent` | **Blocker.** #54 (#13, open). On `main` the button only says "Uploading is not connected yet". |
+| **Send securely**, `answer_sent` | **Blocker until #54 (#13) lands.** On `main` the button only says "Uploading is not connected yet". |
 | Refused upload, Held, refused, and unavailable pages, Done page | Missing on `main`. #54 has them. |
-| `answer_filed` | **Blocker**, even after #54. #54 says: "Until #44 is wired into `answerDeps`, every answer is held, and Accept files it." But **Accept** on a held answer does not file on `main`: `request.accept` refuses it with "Filing a held answer is not built yet." (`src/server/api/routers/request.ts`, and the note in `src/app/widget/request-card.tsx`). So the tester's send is held, no `answer_filed` is written, and `pnpm audit:check --effort` prints "not measured" and exits with 1. One of these must land: #44 wired into #54's `answerDeps`, so that request 1 is filed directly, **or** the widget's **Accept** (#14) calling #54's `acceptAnswer`, so that a held answer is filed. |
+| `answer_filed` | **Blocker until #54 lands.** #54 holds every answer until #44 is wired into its `answerDeps`, so the tester sees the **Held** page. In #54, **Accept** on a held answer calls `acceptAnswer(answerDeps, …)` (`src/server/api/routers/request.ts`, merged with #56 in `5ebcfa1`) and files it, replacing `main`'s refusal. So after #54 the test runs as "held, accepted": the operator clicks **Accept**, `answer_filed` is written, and `pnpm audit:check --effort` measures. #44 wired into `answerDeps` is needed only so that request 1 is filed without the hold. |
 | `pnpm audit:check --effort` | Works, with tests. Measures nothing until an `answer_filed` entry is written. |
