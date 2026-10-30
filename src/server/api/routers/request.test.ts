@@ -108,7 +108,7 @@ test("a request created through createCaller is stored and logged as request_sen
   assert.equal(audit[0].actorKind, "network_member");
   assert.equal(audit[0].actor, hofer);
   assert.equal(audit[0].outcome, "sent");
-  assert.deepEqual(audit[0].detail, { docType: "lab-result", channel: "email", address: "eva.brandl@labor-kanal.example" });
+  assert.deepEqual(audit[0].detail, { docType: "lab-result", channel: "email", address: "eva.brandl@labor-kanal.example", sentAnyway: false });
 });
 
 test("an SMS request stores the phone number", { skip: noDb }, async () => {
@@ -284,7 +284,8 @@ test("an address the eHVD cannot confirm waits too, but nothing is logged as cau
   assert.equal((await clinic.request.get({ id: request.id })).addressWarning, "The eHVD could not confirm the address, so the request has not been sent.");
   assert.deepEqual(await auditOf(request.id), [], "nothing went out and nothing was caught");
   assert.equal((await clinic.request.sendAnyway({ id: request.id })).state, "sent");
-  assert.deepEqual((await auditOf(request.id)).map((a) => a.event), ["request_sent"]);
+  // With no misdelivery_caught before it, sentAnyway shows that the address went out unconfirmed.
+  assert.deepEqual((await auditOf(request.id)).map((a) => [a.event, (a.detail as { sentAnyway?: boolean }).sentAnyway]), [["request_sent", true]]);
 });
 
 test("a failed write in the same transaction rolls the state change back", { skip: noDb }, async () => {

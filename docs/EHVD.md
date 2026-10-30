@@ -4,7 +4,7 @@ The eHealth directory (eHVD, eHealth Verzeichnisdienst) lists every person and o
 
 The real web service needs a registration with the health ministry and an IP allowlist entry at BRZ, so we cannot call it during the hackathon. We build a mock that behaves like the real service in every documented way. This page records what is public about the interface, which gaps we fill and how, and what the mock contains.
 
-Status: the mock is built (T23) and runs as the container `ehvd`. The client in ordy, the address check, and the release check are built (T15, `src/server/ehvd/`). `request.create` calls the address check before sending, and the answer flow (T09) calls the release check. See [Timeline](TIMELINE.md).
+Status: the mock is built (T23) and runs as the container `ehvd`. The client in ordy, the address check, and the release check are built (T15, `src/server/ehvd/`). `request.create` calls the address check before sending. The release check waits for the answer flow (T09) to call it. See [Timeline](TIMELINE.md).
 
 ## Sources and what they give us
 
@@ -312,8 +312,8 @@ The code lives in `src/server/ehvd/` and reads `EHVD_URL`, default `http://local
 |---|---|
 | Organisation | `GdaSearch` with the organisation name as `surname`, `ehvdstatus` `Aktiv`, and `maxResults` 200. Exactly one active organisation whose name has the same words in the same order, titles included, gives the OID and the `mail` domain. Persons with that surname do not count. The eHVD matches exactly, so if the name Dr. Hofer typed finds nothing, the release check also tries the heading's spelling, such as "Kanalstraße" for "Kanalstrasse". |
 | Address check before sending | The domain of the email address Dr. Hofer typed must equal the domain of the organisation's `mail`. `labor-kanaI.example` does not. |
-| Responsible person, when it is the sender and the login carried the GDA claim | `GetGDA` with the OID from the claim. The entry must have that OID, be a person, carry the name from the document, be active, have the role the document type needs, and list the organisation in `memberof`. The name search below must find no other active member of the organisation with the document's name. |
-| Responsible person, otherwise | `GdaSearch` with `surname` `*Brandl*` for the longest part of the document's family name, `ehvdstatus` `Inaktiv`, and `maxResults` 200. The substring finds double names such as Brandl-Huber and Huber-Brandl, and leaving out the given name finds "Eva Maria" for "Eva". `Inaktiv` returns both statuses, so the notice can say that a physician is not active. Only if that gives fault 6005 does a second search add `firstname` `*Eva*`, the first given name. If that is still 6005, the check holds and does not narrow further. Exactly one active hit that carries the name from the document and is a member of the organisation confirms the role. Here the name is the only link. |
+| Responsible person, when it is the sender and the login carried the GDA claim | `GetGDA` with the OID from the claim. The entry must have that OID, be a person, carry the name from the document, be active, have the role the document type needs, and list the organisation in `memberof`. The name search below, with the entry's own spelling, must return the entry itself and no other active member of the organisation with the document's name. If the entry is not active, lacks the role, or is not a member, the check goes on as for a sender without the claim. |
+| Responsible person, otherwise | `GdaSearch` with `surname` `*Brandl*` for the longest part of the document's family name, `ehvdstatus` `Inaktiv`, and `maxResults` 200. The substring finds double names such as Brandl-Huber and Huber-Brandl, and leaving out the given name finds "Eva Maria" for "Eva". `Inaktiv` returns both statuses, so the notice can say that a physician is not active. Only if that gives fault 6005 does a second search add `firstname` `*Eva*`, the first given name that is not a title. If that is still 6005, the check holds and does not narrow further. Exactly one active hit that carries the name from the document and is a member of the organisation confirms the role. Here the name is the only link. |
 | Lab result | The physician under `Validated by`: `role` 158 or 159 with `specialisation` `1.2.40.0.34.3.1.10.20:19`, member of the lab |
 | Rehab report | The physician under `Written by`: `elgaRole` 700, member of the rehab clinic. The rehab clinic: active, `role` 300 or 301. The sender is usually not listed. |
 
@@ -372,7 +372,7 @@ The names follow the [name match](IDENTITY.md#name-match): every word of the doc
 | `too_many_matches` | More than 200 entries even with the first given name (6005 twice) | The eHVD lists too many people named Brandl to confirm Dr. Eva Brandl. |
 | `not_searchable` | The name or organisation breaks the field rules, such as `O'Brandl` | The eHVD cannot be searched for Dr. Eva O'Brandl. |
 | `ehvd_unreachable` | No connection, no answer in time, a redirect, or an HTTP status such as the firewall's 403 | The eHVD could not be reached to confirm Dr. Eva Brandl. Or, when the organisation search fails: … to confirm Labor Kanalstraße. |
-| `ehvd_error` | A fault other than 6002 and 6005, for example 6003, or an answer the WSDL does not describe | The eHVD answered with an error, so Dr. Eva Brandl could not be confirmed. |
+| `ehvd_error` | A fault other than 6002 and 6005, for example 6003, an answer the WSDL does not describe, or a namesake search that does not return the claim's own entry | The eHVD answered with an error, so Dr. Eva Brandl could not be confirmed. |
 
 ### Tests
 

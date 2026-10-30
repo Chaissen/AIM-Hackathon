@@ -1,5 +1,5 @@
 import type { LabResult, PersonLine, RehabReport } from "@/server/documents/types";
-import { isSubset, nameWords } from "@/server/identity/names";
+import { isSubset, nameWords, TITLE } from "@/server/identity/names";
 
 import { ehvd, type EhvdClient } from "./client";
 import {
@@ -91,7 +91,10 @@ const ORGANISATION_HOLDS = {
 } as const satisfies Record<Extract<OrganisationLookup, { ok: false }>["reason"], ReleaseHoldReason>;
 
 /** Text from the document or the request goes into the notice, so it is cut to a length a notice can carry. */
-const clip = (text: string) => (text.length > 100 ? `${text.slice(0, 99)}…` : text);
+const clip = (text: string) => {
+  const chars = [...text]; // by code point, so an emoji is never cut in half
+  return chars.length > 100 ? `${chars.slice(0, 99).join("")}…` : text;
+};
 const displayName = (person: PersonLine) => clip([...person.titles, person.given, person.family].filter(Boolean).join(" ").replace(/[.,;:]+$/, ""));
 
 type NameWords = { given: Set<string>; family: Set<string> };
@@ -173,17 +176,19 @@ type PeopleSearch = { ok: true; people: GdaDescriptor[] } | { ok: false; reason:
  * Everyone in the eHVD, active or not, who carries the document's name. The search asks for the family name's longest
  * part as a substring, so "Brandl-Huber" and "Huber-Brandl" both count for "Brandl", and for any given name, so
  * "Eva Maria" counts for "Eva". `Inaktiv` returns both statuses, so the notice can say that a physician is not active.
- * Only when that is more than 200 entries does it add the first given name, again as a substring, and when that is
- * still too many it holds instead of narrowing further. Every hit must carry the document's name. Spellings the eHVD
- * does not fold, such as "Mueller" for "Müller", are not found, so they are not counted either.
+ * Only when that is more than 200 entries does it add the first given name that is not a title, again as a substring,
+ * and when that is still too many it holds instead of narrowing further. Every hit must carry the document's name.
+ * `spelling` is the name as the search writes it: the document's, or the claim entry's, which is the eHVD's own.
+ * Spellings the eHVD does not fold, such as "Mueller" for "Müller", are not found, so they are not counted either.
  */
-async function searchPeople(client: EhvdClient, person: PersonLine, name: NameWords): Promise<PeopleSearch> {
-  const family = nameParts(person.family).reduce((a, b) => (b.length > a.length ? b : a), "");
+async function searchPeople(client: EhvdClient, spelling: { given: string; family: string }, name: NameWords): Promise<PeopleSearch> {
+  const family = nameParts(spelling.family).reduce((a, b) => (b.length > a.length ? b : a), "");
+  const given = nameParts(spelling.given).find((part) => !TITLE.test(part)) ?? "";
   const search = (query: Partial<GdaSearchQuery>) =>
     client.gdaSearch({ surname: `*${family}*`, maxResults: PERSON_RESULTS, ehvdstatus: "Inaktiv", ...query });
   const tooMany = (r: Awaited<ReturnType<typeof search>>) => !r.ok && r.failure.kind === "fault" && r.failure.code === 6005;
   let result = await search({});
-  if (tooMany(result)) result = await search({ firstname: `*${nameParts(person.given)[0]}*` });
+  if (tooMany(result)) result = await search({ firstname: `*${given}*` });
   if (tooMany(result)) return { ok: false, reason: "too_many_matches" };
   if (!result.ok) return { ok: false, reason: serviceReason(result.failure) };
   return { ok: true, people: result.value.filter((gda) => isPerson(gda) && sameName(name, entryName(gda))) };
@@ -210,7 +215,9 @@ export async function checkRelease(input: ReleaseInput, client: EhvdClient = ehv
   // words in the same order but may differ in spelling, such as "Kanalstrasse" and "Kanalstraße".
   let lookup: OrganisationLookup = await findOrganisation(client, org);
   if (!lookup.ok && lookup.reason === "not_listed" && document.organisation.trim() !== org.trim()) {
-    lookup = await findOrganisation(client, document.organisation);
+    // Keep "not listed" unless the heading's spelling finds it: a failure of the second try says nothing about the first.
+    const retry = await findOrganisation(client, document.organisation);
+    if (retry.ok) lookup = retry;
   }
   if (!lookup.ok) return hold(ORGANISATION_HOLDS[lookup.reason], { about: null });
   organisation = lookup.organisation;
@@ -227,13 +234,17 @@ export async function checkRelease(input: ReleaseInput, client: EhvdClient = ehv
     const entry = result.value;
     if (!entry || !isPerson(entry)) return hold("claim_not_listed");
     if (entry.id.id !== sender.gdaOid || !sameName(name, entryName(entry))) return hold("claim_differs");
-    const reason = judge(document.type, entry, organisationOid);
-    if (reason) return hold(reason, { practitioner: entry });
-    // The document's name must still point to the sender alone: another active member with it could have signed.
-    const namesakes = await searchPeople(client, person, name);
-    if (!namesakes.ok) return hold(namesakes.reason, { practitioner: entry });
-    if (members(namesakes.people).some((gda) => isActive(gda) && gda.id.id !== entry.id.id)) return hold("several_matches");
-    return { verdict: "pass", via: "claim", practitioner: entry, organisation, senderIsResponsible: true };
+    // A sender who may not release it may still have sent what someone else with that name validated: then the name
+    // search below decides, as for any other sender.
+    if (!judge(document.type, entry, organisationOid)) {
+      // The document's name must still point to the sender alone: another active member with it could have signed.
+      // The search uses the entry's own spelling, so a working search must return the entry itself.
+      const namesakes = await searchPeople(client, entryName(entry), name);
+      if (!namesakes.ok) return hold(namesakes.reason, { practitioner: entry });
+      if (!namesakes.people.some((gda) => gda.id.id === entry.id.id)) return hold("ehvd_error", { practitioner: entry });
+      if (members(namesakes.people).some((gda) => isActive(gda) && gda.id.id !== entry.id.id)) return hold("several_matches");
+      return { verdict: "pass", via: "claim", practitioner: entry, organisation, senderIsResponsible: true };
+    }
   }
 
   // Otherwise the name is the only link: exactly one active member of the organisation with that name.
