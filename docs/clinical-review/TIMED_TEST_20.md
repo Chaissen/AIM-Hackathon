@@ -226,12 +226,12 @@ Where testers hesitated, and what we changed because of it:
 
 ## Readiness on 30 October 2026
 
-Checked from the code on `main` at `25f0c28`, without a running stack. #44 (`2c11410`) and #54 (`900d141`) are merged. Check again when the blocker below lands, with the rehearsal in Prepare, step 4.
+Checked from the code on `main` at `25f0c28`, without a running stack. #44 (`2c11410`) and #54 (`900d141`) are merged. #4 connected the email afterwards. Check again with the rehearsal in Prepare, step 4.
 
 | Step | Today |
 |---|---|
 | Send request 1 from the widget | Works (#32, #56). `request.create` runs `checkAddress()` against the eHVD at `EHVD_URL` (`http://localhost:8095/`, the `ehvd` container) first. If the container is down, request 1 waits in `awaiting_confirmation` with "The eHVD could not confirm the address", so check http://localhost:8095/healthz before sending. |
-| Email in the Gmail inbox | **Blocker.** #47 (merged) adds `sendRequestEmail()` and the Gmail settings, but nothing calls it yet. `request.create` and `sendAnyway` in `src/server/api/routers/request.ts` still call `printLink` (`TODO(T06)`), which only prints the link to the `[web]` log in development. The follow-up that calls `sendRequestEmail()` there is needed. The Gmail app password of the team account is needed in `.env`. |
+| Email in the Gmail inbox | Works with Mailpit (#4): `request.create` sends request 1's email through `sendRequestEmail()` from #47, checked through the router against the running stack. Not tried with Gmail yet: the Gmail app password of the team account is needed in `.env`. |
 | Landing page `/r/{token}`, `link_opened` | Works. |
 | ID Austria login and identity checks | Work (#42, #34). A pass sends the tester to the answer page. |
 | Answer page with patient and document type | Works. The upload field and the name and birth date fields are there. |
