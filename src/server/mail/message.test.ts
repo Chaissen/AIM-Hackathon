@@ -71,6 +71,8 @@ test("an initial in the patient's name does not refuse the request email", () =>
   const email = requestEmail({ requester: "Dr. Lena Hofer", clinic: "Klinikum Beispielstadt", link: "http://localhost:3010/r/abc", expiresAt: new Date("2026-11-05T10:00:00Z") });
   assert.deepEqual(forbiddenContent(email, { ...maria, given: ["Maria", "R.", "A."] }), []);
   assert.deepEqual(check("Maria R.", { ...maria, given: ["Maria", "R."] }), ["patient-name"]);
+  for (const initial of ["Ö.", "O\u0308.", "Ä."]) assert.deepEqual(check("Dr. Ö. Yılmaz, Dr. Ä. Kaya", { ...maria, given: [initial] }), [], initial);
+  assert.deepEqual(check("Dr. Öz", { ...maria, family: "Öz" }), ["patient-name"]);
 });
 
 test("a combining mark from any block drops out without splitting the word", () => {
