@@ -44,7 +44,11 @@ function collect(markdown: string): Raw {
       const text = tokens[i + 1]?.content.trim() ?? "";
       if (t.tag === "h1" && raw.title === null) raw.title = text;
       else if (t.tag === "h2") raw.sections.push((section = { heading: text, lines: [] }));
+      // A `###` heading or a second `#` heading stays text, so a comment under it reaches the conclusion.
+      else if (text) addText(text);
       i += 2;
+    } else if (t.type === "fence" || t.type === "code_block") {
+      for (const line of t.content.split("\n").map((l) => l.trim()).filter(Boolean)) addText(line);
     } else if (t.type === "table_open") {
       const { table, end } = readTable(tokens, i);
       raw.tables.push(table);
@@ -89,6 +93,12 @@ function readTable(tokens: Token[], start: number): { table: Table; end: number 
     } else if (t.type === "inline" && row) row.push(t.content.trim());
   }
   return { table: { header, rows }, end: i };
+}
+
+/** The conclusion of a lab report: every free line, then each `##` section as `Heading: text`. Null when there is none. */
+export function freeText(free: string[], sections: { heading: string; lines: string[] }[]): string | null {
+  const parts = [...free, ...sections.map((s) => (s.lines.length ? `${s.heading}: ${s.lines.join(" ")}` : s.heading))];
+  return parts.join(" ") || null;
 }
 
 /** `Dr. Eva Brandl, lab physician` into titles, given, family, and details. */
@@ -227,7 +237,7 @@ export function parseDocument(markdown: string): ParseResult {
       sampleTaken,
       reported,
       rows,
-      conclusion: raw.free.join(" ") || null,
+      conclusion: freeText(raw.free, raw.sections),
       validatedBy: person("Validated by"),
     };
   } else if (kind === "discharge report") {

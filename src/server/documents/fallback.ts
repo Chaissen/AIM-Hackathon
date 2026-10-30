@@ -2,8 +2,8 @@ import MarkdownIt from "markdown-it";
 import { z } from "zod";
 
 import { parseDateWide, parseStayWide, parseViennaDateTimeWide } from "./dates";
-import { isLoinc, parseDocument, parsePersonLine, toNumber } from "./parse";
-import { BIRTH_KEYS, PATIENT_KEYS, keyLines, patientIdentity, toKeyLine, type KeyLine } from "./patient-lines";
+import { freeText, isLoinc, parseDocument, parsePersonLine, toNumber } from "./parse";
+import { HEADER_ONLY_KEYS, IDENTITY_KEYS, keyLines, patientIdentity, toKeyLine, type KeyLine } from "./patient-lines";
 import type { LabResult, LabRow, ParseResult, ParsedDocument, PersonLine, RehabReport, SafetyRefusal } from "./types";
 
 // AI fallback (docs/ARCHITECTURE.md, "AI fallback"; docs/COMPLIANCE_AND_SAFETY.md, "AI rules").
@@ -78,7 +78,9 @@ const FIELD_KEYS: Record<KeyField, Set<string>> = {
   writtenBy: new Set(["written by", "author", "authored by", "report by"]),
   sentBy: new Set(["sent by", "sender"]),
 };
-const CONSUMED = new Set([...PATIENT_KEYS, ...BIRTH_KEYS, "requested by", ...Object.values(FIELD_KEYS).flatMap((s) => [...s])]);
+const CONSUMED = new Set([...IDENTITY_KEYS, "requested by", ...Object.values(FIELD_KEYS).flatMap((s) => [...s])]);
+/** A key code reads as a field. `Name:` or `Born:` below the header block is text, as `patient-lines.ts` reads it. */
+const consumed = (line: KeyLine) => CONSUMED.has(line.norm) && (line.header || !HEADER_ONLY_KEYS.has(line.norm));
 const COLUMNS: Record<LabRowKey, Set<string>> = {
   test: new Set(["test", "analyte", "parameter", "investigation", "examination", "analysis", "test name"]),
   valueText: new Set(["result", "results", "value", "result value", "measured value", "finding"]),
@@ -105,12 +107,17 @@ function collect(markdown: string) {
   let row: string[] | null = null;
   let inHead = false;
   let listDepth = 0;
+  let header = true;
+  const addText = (line: string) => (section ? section.lines : out.free).push(line);
   const tokens = md.parse(markdown, {});
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
     if (t.type === "bullet_list_open" || t.type === "ordered_list_open") listDepth++;
     else if (t.type === "bullet_list_close" || t.type === "ordered_list_close") listDepth--;
-    else if (t.type === "table_open") out.tables.push((table = { header: [], rows: [] }));
+    else if (t.type === "table_open") {
+      out.tables.push((table = { header: [], rows: [] }));
+      header = false;
+    }
     else if (t.type === "table_close") table = null;
     else if (t.type === "thead_open") inHead = true;
     else if (t.type === "thead_close") inHead = false;
@@ -122,15 +129,20 @@ function collect(markdown: string) {
     } else if (t.type === "inline" && row) row.push(collapse(t.content));
     else if (t.type === "heading_open") {
       const heading = collapse(tokens[i + 1]?.content ?? "");
+      if (out.title !== null) header = false;
       if (t.tag === "h1" && out.title === null) out.title = heading;
       else if (t.tag === "h2") out.sections.push((section = { heading, lines: [] }));
+      // A `###` heading or a second `#` heading stays text, as in the parser.
+      else addText(heading);
       i += 2;
+    } else if (t.type === "fence" || t.type === "code_block") {
+      for (const line of t.content.split("\n").map(collapse).filter(Boolean)) addText(line);
     } else if (t.type === "inline" && tokens[i - 1]?.type === "paragraph_open") {
       for (const line of t.content.split("\n").map(collapse).filter(Boolean)) {
-        const kl = listDepth ? null : toKeyLine(line);
+        const kl = listDepth ? null : toKeyLine(line, header);
         // As in the parser: inside a `##` section only the keys code knows count as fields.
-        if (kl && (!section || CONSUMED.has(kl.norm))) out.lines.push(kl);
-        if (!kl || !CONSUMED.has(kl.norm)) (section ? section.lines : out.free).push(listDepth ? `- ${line}` : line);
+        if (kl && (!section || consumed(kl))) out.lines.push(kl);
+        if (!kl || !consumed(kl)) addText(listDepth ? `- ${line}` : line);
       }
     }
   }
@@ -177,7 +189,8 @@ function readWide(markdown: string): Wide {
   if (raw.tables.length > 1) refusals.push({ safety: "several-tables", error: "The file has more than one table. Put all results in one table." });
   const seen = new Map<string, string>();
   const repeated = new Set<string>();
-  for (const { key, norm, value } of raw.lines) {
+  // Only keys code reads, as in the parser: two `Note:` lines are text, not a second patient.
+  for (const { key, norm, value } of raw.lines.filter(consumed)) {
     if (seen.has(norm) && seen.get(norm) !== value) repeated.add(key);
     else seen.set(norm, value);
   }
@@ -186,7 +199,8 @@ function readWide(markdown: string): Wide {
   refusals.push(...identity.refusals);
 
   // The patient, from the line that names them. Code reads the whole name part and the one birth date.
-  if (!identity.name) errors.push("The file has no line that names the patient.");
+  errors.push(...identity.errors);
+  if (!identity.name && !identity.errors.length) errors.push("The file has no line that names the patient.");
   const birthDate = identity.birth?.date ?? null;
   if (!birthDate) errors.push("The file has no readable birth date for the patient.");
 
@@ -257,8 +271,8 @@ function readWide(markdown: string): Wide {
       sampleTaken: dateTime("Sample taken", reading.sampleTaken),
       reported: dateTime("Reported", reading.reported),
       rows: reading.rows.flatMap((r, n) => labRow(r, n, errors) ?? []),
-      // All free text, as the parser does, so no line such as "results invalid" can be left out.
-      conclusion: raw.free.join(" ") || null,
+      // All free text, as in the parser: lines outside sections, sub-headings, code blocks, and each `##` section.
+      conclusion: freeText(raw.free, raw.sections),
       validatedBy: person(reading.validatedBy),
     };
   } else if (type === "rehab-report") {

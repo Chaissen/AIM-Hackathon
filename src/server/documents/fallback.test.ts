@@ -92,6 +92,13 @@ async function unreadable(markdown: string) {
   return result.errors;
 }
 const insertAfter = (markdown: string, anchor: string, line: string) => markdown.replace(anchor, `${anchor}\n${line}`);
+/** Comments a lab report may carry outside its plain lines, and how each reaches the conclusion. */
+const hiddenComments = [
+  ["\n## Comment\n\nSample haemolysed, all results invalid.\n", "Comment: Sample haemolysed, all results invalid."],
+  ["\n### Comment\n\nSample haemolysed, all results invalid.\n", "Comment Sample haemolysed, all results invalid."],
+  ["\n# Addendum\n\nSample haemolysed, all results invalid.\n", "Addendum Sample haemolysed, all results invalid."],
+  ["\n```\nSample haemolysed, all results invalid.\n```\n", "Sample haemolysed, all results invalid."],
+] as const;
 
 test("the parser cannot read either fixture, and neither is a safety refusal", () => {
   for (const markdown of [lab, rehab]) {
@@ -142,16 +149,22 @@ test("the fallback reads the rehab report in the other format and holds it", asy
 
 // Finding 1: code, not the model, reads the patient.
 
-test("the patient name is the whole name part of the patient line, read by code", async () => {
-  const son = lab.replace("Patient name: Maria Beispiel", "Patient name: Max Beispiel, son of Maria Beispiel");
-  assert.deepEqual(await disagrees(son, goodLab()), ['patientName: "Maria Beispiel"']);
-  // A model that reads the line right gives Max, and the patient check stops him.
-  const doc = await record(son, changed(goodLab, (r) => (r.patientName = "Max Beispiel")));
-  assert.equal(doc.patient.name, "Max Beispiel");
-  assert.equal(checkAnswerPatient(doc.patient, { name: "Maria Beispiel", birthDate: "1961-03-12" }, maria).pass, false);
-
+test("the patient name is the whole value of the patient line, read by code", async () => {
   for (const name of ["Anna Maria Beispiel", "Maria Beispiel Gruber"]) {
     assert.deepEqual(await disagrees(lab.replace("Patient name: Maria Beispiel", `Patient name: ${name}`), goodLab()), ['patientName: "Maria Beispiel"']);
+  }
+  // Family name first is a real format, and the whole value is the name.
+  const surnameFirst = lab.replace("Patient name: Maria Beispiel\nDate of birth: 12.03.1961", "Patient: BEISPIEL Maria, DOB 12.03.1961");
+  const doc = await record(surnameFirst, changed(goodLab, (r) => (r.patientName = "BEISPIEL Maria")));
+  assert.deepEqual(doc.patient, { name: "BEISPIEL Maria", birthDate: "1961-03-12" });
+  assert.equal(checkAnswerPatient(doc.patient, { name: "Maria Beispiel", birthDate: "1961-03-12" }, maria).pass, true);
+});
+
+test("a patient line with more than a name and a birth clause gives no record, so no name is cut short", async () => {
+  // Cut at the first comma, these would read "Beispiel" or "Maria Beispiel" and pass the patient check for Maria.
+  for (const value of ["Beispiel, Max", "Maria Beispiel, Max Beispiel", "Max Beispiel, son of Maria Beispiel"]) {
+    const errors = await unreadable(lab.replace("Patient name: Maria Beispiel", `Patient name: ${value}`));
+    assert.ok(errors.includes(`The patient line "${value}" has more than a name and a birth date such as ", born 12 March 1961".`), errors.join("; "));
   }
 });
 
@@ -260,13 +273,67 @@ test("the parser refuses a bold second patient line too", () => {
 
 // Finding 7: code builds the free text.
 
-test("the conclusion is all the free text, built by code, so no line can be left out", async () => {
+test("the conclusion is the free text, built by code: lines, notes, sections, sub-headings, and code blocks", async () => {
   const note = lab
     .replace("All values are within the reference range.", "Not all values are within the reference range.")
     .replace("Validated by:", "Note: sample haemolysed, results invalid.\n\nValidated by:");
   const doc = (await record(note, goodLab())) as LabResult;
   assert.equal(doc.conclusion, "Not all values are within the reference range. Note: sample haemolysed, results invalid.");
   assert.equal("conclusion" in modelReadingSchema.shape, false);
+
+  for (const [extra, text] of hiddenComments) {
+    const commented = (await record(`${lab}${extra}`, goodLab())) as LabResult;
+    assert.equal(commented.conclusion, `All values are within the reference range. ${text}`, extra);
+  }
+});
+
+test("the parser puts sections, sub-headings, and code blocks of a lab report into the conclusion too", () => {
+  for (const [extra, text] of hiddenComments) {
+    const result = parseDocument(`${scenario("lab-result-maria-beispiel.md")}${extra}`);
+    assert.ok(result.ok && result.document.type === "lab-result", extra);
+    assert.equal(result.document.conclusion, `All values are within the reference range. ${text}`, extra);
+  }
+});
+
+// Round 3, finding 2: `Name`, `Full name`, and `Born` identify the patient only in the header block.
+
+test("Name and Born below the header block are text, in the parser and in the fallback", async () => {
+  const rehabScenario = scenario("rehab-report-maria-beispiel.md");
+  for (const markdown of [
+    `${rehabScenario}\n## Contact\n\nName: Stefan Kern\n`,
+    `${scenario("lab-result-maria-beispiel.md")}\nName: Labor Kanalstraße GmbH\n`,
+    `${rehabScenario}\n## History\n\nBorn: in Linz, grew up on a farm.\n`,
+  ]) {
+    const result = parseDocument(markdown);
+    assert.ok(result.ok, result.ok ? "" : result.errors.join("; "));
+  }
+  for (const extra of ["\n## Contact\n\nName: Stefan Kern\n", "\n## History\n\nBorn: in Linz, grew up on a farm.\n", "\nFull name: Reha Waldblick GmbH\n"]) {
+    const doc = (await record(`${rehab}${extra}`, goodRehab())) as RehabReport;
+    assert.deepEqual(doc.patient, { name: "Maria Beispiel", birthDate: "1961-03-12" }, extra);
+  }
+  // In the header block they still name the patient.
+  assert.ok((await refused(insertAfter(lab, "Date of birth: 12.03.1961", "Name: Max Beispiel"))).includes("several-patients"));
+  assert.ok((await refused(insertAfter(lab, "Date of birth: 12.03.1961", "Born: 03.12.1961"))).includes("several-birth-dates"));
+});
+
+// Round 3, finding 3: only keys code reads can be a repeated key.
+
+test("two Note lines are text, not a safety refusal", async () => {
+  const notes = lab.replace("Validated by:", "Note: haemolysed sample.\nNote: repeat aPTT.\n\nValidated by:");
+  const doc = (await record(notes, goodLab())) as LabResult;
+  assert.equal(doc.conclusion, "All values are within the reference range. Note: haemolysed sample. Note: repeat aPTT.");
+});
+
+// Round 3, finding 5: more written forms of a second patient.
+
+test("a second patient with a dash, a fullwidth colon, a link, or first name and surname lines is refused", async () => {
+  for (const line of ["Patient - Max Beispiel", "Patient： Max Beispiel", "[Patient: Max Beispiel](#)", "First name: Max\nSurname: Beispiel"]) {
+    assert.ok((await refused(insertAfter(lab, "Reported: 22.10.2026 11:40\n", line))).includes("several-patients"), line);
+  }
+  // First name and surname lines that agree with the patient line are fine, and alone they name the patient.
+  assert.ok(await record(insertAfter(lab, "Date of birth: 12.03.1961", "First name: Maria\nSurname: Beispiel"), goodLab()));
+  const split = lab.replace("Patient name: Maria Beispiel", "First name: Maria\nSurname: Beispiel");
+  assert.deepEqual((await record(split, goodLab())).patient, { name: "Maria Beispiel", birthDate: "1961-03-12" });
 });
 
 // Earlier rounds, still held or refused.
