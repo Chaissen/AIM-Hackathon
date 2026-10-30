@@ -8,7 +8,7 @@ import { fhirFetch } from "@/server/fhir/client";
 import { linkIsLive } from "@/server/requests/lifecycle";
 import { findRequestByToken, type RequestRow } from "@/server/requests/service";
 
-// Data the portal pages need. The SMS log does not exist yet, so listSms returns nothing until T06 lands.
+// Data the portal pages need. The SMS log does not exist, so listSms returns nothing. T06 sends email only.
 
 /** What the outside person may see before the identity check: the requester and the clinic only. */
 export type PublicRequest = { requester: string; clinic: string; expiresAt: Date };
@@ -73,7 +73,7 @@ export async function findAnswerContext(
   };
 }
 
-// TODO(T06): read the SMS the request service would have sent.
+// TODO: read the SMS the request service would have sent. No task owns this, because T06 sends email only.
 export async function listSms(): Promise<SmsMessage[]> {
   return [];
 }
