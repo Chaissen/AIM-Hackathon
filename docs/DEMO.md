@@ -5,16 +5,17 @@ A draft click path for the 2-minute video and the live demo, written for the pit
 The steps follow the documented target behaviour in [Architecture](ARCHITECTURE.md) and [Identity and misdelivery](IDENTITY.md). The screen texts are the ones in the code where they exist. Each step has a state:
 
 - **Ready**: works on `main` today.
+- **Ready with the log link**: works, but the link comes from the `pnpm dev` log, because ordy does not send the email or the SMS yet.
 - **Partly**: some of it is built (the row says what), but the step cannot be shown as written yet.
-- **Not built**: waits for the tasks named. [Timeline](TIMELINE.md) has the owners.
+- **Not built**: no code on `main` does it yet. [Timeline](TIMELINE.md) has the tasks and owners.
 
-States as of 30 October 2026, 02:45, with the request core (T04), the widget actions (T05), the ID Austria login (T07), the FHIR mappers (T12, T14), the filing (T13), the metric runner (T17, T18), and the AI fallback parser (T22) on `main`. Check them again on the frozen build before recording. Cut every step that is still not built, or replace it with one spoken sentence. If you show a screen from `prototype/ordy-app`, label it on screen as a design mock-up, not the running app.
+States as of 30 October 2026, 03:20, on `main` at commit `06abdc9`, checked in one run by hand through request 1, M1 to M3, and the rehab request. Check them again on the frozen build before recording. Cut every step that is still not built, or replace it with one spoken sentence. If you show a screen from `prototype/ordy-app`, label it on screen as a design mock-up, not the running app.
 
-The widget sends the request (T05), but no email or SMS goes out yet (T06, in review as [#47](https://github.com/Chaissen/AIM-Hackathon/pull/47)). Until then `pnpm dev` prints each new request's link in its log as `Request <id>: http://localhost:3010/r/<token>`. The landing page, the login, the identity checks, and the answer page work with that link; those steps say "with the log link". The pages for a refused, held, or failed login and the upload are not on `main` yet (T09, in review as [#54](https://github.com/Chaissen/AIM-Hackathon/pull/54)), so on `main` such a login ends on a 404 page. ordy does not check the address against the eHVD yet (T15, in review as [#44](https://github.com/Chaissen/AIM-Hackathon/pull/44)), so no request waits for **Send anyway**.
+ordy does not send the email or the SMS yet. The email text is built (T06), but nothing calls it, and no task builds the SMS. Until then `pnpm dev` prints each new request's link in its log as `Request <id>: http://localhost:3010/r/<token>`. Every portal step works with that link.
 
-Nothing posts the "Request … sent" notice yet, and no open pull request adds it. So a request has no thread in the room, and every later notice about it is a new message in the room.
+Nothing posts the "Request … sent" notice yet, and no task builds it. So a request has no thread in the room, and every later notice about it is the newest message in the room.
 
-The notices below quote the names as [Architecture](ARCHITECTURE.md#matrix-bot) writes them, for example "Dr. Eva Brandl". The request form has no title field, so check on the frozen build how the notices write the names.
+The notices write the outside person as typed in the form when someone else logs in ("not Eva Brandl"), and with the title from the eHVD once the answer is filed ("from Dr. Eva Brandl"). The texts below are the ones the run by hand produced.
 
 ## Order of the story
 
@@ -37,10 +38,10 @@ The notices number the requests in the order they are created after `pnpm reset`
 
 ## Before recording
 
-1. Record on the frozen build. Run `pnpm reset`, then `pnpm dev`. Do not run `pnpm test` after the reset: its request tests move the request ids on. Keep the `pnpm dev` terminal off camera: until the email and SMS exist, the links come from its log.
+1. Record on the frozen build. Run `pnpm reset`, then `pnpm dev`. Do not run `pnpm test` after the reset: its request tests move the request ids on. Keep the `pnpm dev` terminal off camera: until the email and SMS exist, the links come from its log. If a login returns to the landing page with `?login=failed`, `.env` still has the old demo `ORDY_SECRET`: run `pnpm exec tsx scripts/init-env.ts` and restart `pnpm dev`.
 2. `pnpm reset` keeps the Matrix room and the notices from rehearsals. For a clean room, set a new `MATRIX_ROOM_ALIAS` in `.env`, run `pnpm matrix:bootstrap`, restart `pnpm dev`, and leave the old room in Element.
 3. Open these tabs: Element at http://localhost:8081 logged in as `lena.hofer` / `hofer-demo-2026` with the room "Dr. Hofer · Outside documents" and the ordy widget open, Mailpit at http://localhost:8025, the SMS screen at http://localhost:3010/sms, and HAPI FHIR's web UI at http://localhost:8090. The base URL http://localhost:8090/fhir alone shows only an error, so use the search links in scenes 6 and 7.
-4. Only the first notice of a request shows in the room timeline. Later notices go into that request's thread, so open the thread to show them.
+4. Every notice is a new message in the room until the "request sent" notice exists. Tests and rehearsals post into the same room, so use a clean room (step 2).
 5. Private windows of one browser share their cookies. Close every private window before you switch to the next outside person, or use a separate browser profile for each person.
 6. Keep the files ready: `track/scenario/documents/lab-result-maria-beispiel.md`, `lab-result-max-beispiel.md`, and `rehab-report-maria-beispiel.md`.
 7. Fill forms off camera or speed up typing in the edit. Two minutes leave no time for typing.
@@ -58,8 +59,8 @@ Say: Outside labs still answer by fax. ordy lets Dr. Hofer ask from her Matrix r
 
 | Click | What you see | State |
 |---|---|---|
-| In the widget, pick **Lab result**, patient Maria Beispiel, Eva Brandl, Labor Kanalstraße, `eva.brandl@labor-kanal.example`, then **Send request** | The form, then the notice "Request 1 sent to Dr. Eva Brandl (Labor Kanalstraße) by email." in the room | Partly: the widget sends the request and shows request 1 below the form with the state "Sent" and its "Request sent" audit entry (T05). The room notice is not built, and no email goes out (T06). |
-| Open the email in Mailpit | "Secure request from Klinikum Beispielstadt", the link, the expiry date. No patient name, no birth date, no document type. | Not built (T06) |
+| In the widget, pick **Lab result**, patient Maria Beispiel, Eva Brandl, Labor Kanalstraße, `eva.brandl@labor-kanal.example`, then **Send request** | The form, then the notice "Request 1 sent to Dr. Eva Brandl (Labor Kanalstraße) by email." in the room | Partly: the widget sends the request and shows request 1 below the form with the state "Sent". The room notice is not built. |
+| Open the email in Mailpit | "Secure request from Klinikum Beispielstadt", the link, the expiry date. No patient name, no birth date, no document type. | Not built: the email text exists, but nothing sends it. Cut this step and say that the email is simulated. |
 
 Say: The email names only Dr. Hofer and the clinic. Nobody who intercepts it learns about the patient.
 
@@ -67,9 +68,9 @@ Say: The email names only Dr. Hofer and the clinic. Nobody who intercepts it lea
 
 | Click | What you see | State |
 |---|---|---|
-| In a private window, open the link from the email | "Dr. Lena Hofer at Klinikum Beispielstadt sent you a request" and **Log in with ID Austria**. Nothing about the patient. | Partly: works with the log link (T04). The email is not built (T06). |
-| Log in as `thomas.wagner` / `demo-thomas`, Dr. Brandl's colleague | "This request is for someone else. Nothing was shared with you." | Partly: the login and the check work with the log link (T07, T08), but the refusal page is not on `main` (T09), so this login ends on a 404 page. |
-| Switch to Element and open the thread of request 1 | "Request 1 was opened by someone who is not Dr. Eva Brandl (ID Austria name: Thomas Wagner). Nothing was shown or filed. Check the address." | Partly: the login posts it (T07), as a new message in the room, not in a thread. The widget's **Requests** view shows the same catch on request 1: "Identity checked" with `fail` and "Misdelivery caught" with `wrong_person`. |
+| In a private window, open the link from the email | "Dr. Lena Hofer at Klinikum Beispielstadt sent you a request" and **Log in with ID Austria**. Nothing about the patient. | Ready with the log link |
+| Log in as `thomas.wagner` / `demo-thomas`, Dr. Brandl's colleague | "This request is for someone else. Nothing was shared with you." | Ready with the log link |
+| Switch to Element and look at the newest message in the room | "Request 1 was opened by someone who is not Eva Brandl (ID Austria name: Thomas Wagner). Nothing was shown or filed. Check the address." | Ready, as a new message, not in a thread. The widget's **Requests** view shows the same catch on request 1: "Identity checked" with `fail` and "Misdelivery caught" with `wrong_person`. |
 
 Say: A forwarded link is useless. Only the person Dr. Hofer named can open it.
 
@@ -77,8 +78,8 @@ Say: A forwarded link is useless. Only the person Dr. Hofer named can open it.
 
 | Click | What you see | State |
 |---|---|---|
-| Close the private window, open the same link in a new one, and click **Log in with ID Austria** | The Keycloak login titled "ID Austria (Simulation)" | Partly: works with the log link (T07) |
-| Log in as `eva.brandl` / `demo-eva` | The answer page: "Lab result for Maria Beispiel, born 12 March 1961", an upload field, and fields for the patient's name and birth date | Partly: works with the log link (T04, T07) |
+| Close the private window, open the same link in a new one, and click **Log in with ID Austria** | The Keycloak login titled "ID Austria (Simulation)" | Ready with the log link |
+| Log in as `eva.brandl` / `demo-eva` | The answer page: "Lab result for Maria Beispiel, born 12 March 1961", an upload field, and fields for the patient's name and birth date | Ready with the log link |
 
 Say: No account with us and nothing new to install: she logs in with her ID Austria, simulated here without the phone-app step.
 
@@ -86,8 +87,8 @@ Say: No account with us and nothing new to install: she logs in with her ID Aust
 
 | Click | What you see | State |
 |---|---|---|
-| Upload `lab-result-max-beispiel.md`, enter Maria Beispiel and 12 March 1961 in the form, send | "This document is about a different patient. Check the file and upload again." | Partly: the parser and the patient check are built (T10, T11), the upload is not (T09) |
-| Switch to Element and open the thread of request 1 | "The answer to request 1 is about a different patient. Name and birth date do not match Maria Beispiel. Nothing was filed." | Partly: the notice text is built, the upload is not (T09) |
+| Upload `lab-result-max-beispiel.md`, enter Maria Beispiel and 12 March 1961 in the form, send | "This document is about a different patient. Check the file and upload again." | Ready |
+| Switch to Element and look at the newest message | "The answer to request 1 is about a different patient. Name and birth date do not match Maria Beispiel. Nothing was filed." | Ready |
 
 Say: She entered Maria's details, but the file is about Max Beispiel. The notice never names him, and the upload is discarded.
 
@@ -95,9 +96,9 @@ Say: She entered Maria's details, but the file is about Max Beispiel. The notice
 
 | Click | What you see | State |
 |---|---|---|
-| Upload `lab-result-maria-beispiel.md`, enter Maria Beispiel and 12 March 1961, send | A confirmation that the answer was sent | Partly: the answer form exists, sending it is not built (T09) |
-| Switch to Element and open the thread of request 1 | "Lab result for Maria Beispiel from Dr. Eva Brandl is filed. Identity checked with ID Austria. 4 values, all within the reference range." | Partly: the notice text, the lab mapper, and the filing Bundle are built (T12, T13), the upload and the release check are not (T09, T15) |
-| Open http://localhost:8090/fhir/DiagnosticReport?subject=Patient/maria-beispiel&_include=DiagnosticReport:result&_revinclude=Provenance:target&_pretty=true | One DiagnosticReport with four Observations and their LOINC codes (INR, aPTT, platelets, fibrinogen), and a Provenance that holds the ID Austria token | Partly: the lab mapper and the filing Bundle with Provenance and Task are built (T12, T13), but nothing calls them until the upload exists (T09) |
+| Upload `lab-result-maria-beispiel.md`, enter Maria Beispiel and 12 March 1961, send | "Thank you, your document is filed. Klinikum Beispielstadt has it now. You can close this page." | Ready |
+| Switch to Element and look at the newest message | "Lab result for Maria Beispiel from Dr. Eva Brandl is filed. Identity checked with ID Austria. 4 values, all within the reference range." | Ready |
+| Open http://localhost:8090/fhir/DiagnosticReport?subject=Patient/maria-beispiel&_include=DiagnosticReport:result&_revinclude=Provenance:target&_pretty=true | One DiagnosticReport with four Observations and their LOINC codes (INR, aPTT, platelets, fibrinogen), and a Provenance that holds the ID Austria token | Ready |
 
 Say: Dr. Hofer gets structured values she can trend and reuse, not a scan, and the Provenance proves who sent them.
 
@@ -105,11 +106,11 @@ Say: Dr. Hofer gets structured values she can trend and reuse, not a scan, and t
 
 | Click | What you see | State |
 |---|---|---|
-| In the widget, pick **Rehab discharge report**, Stefan Kern, Reha Waldblick, `+43 660 000 0101`, send | The form switches to SMS. The notice "Request 2 sent to Stefan Kern (Reha Waldblick) by SMS." | Partly: the form switches to SMS and sends the request (T05). The room notice is not built, and no SMS goes out (T06). |
-| Open the SMS screen and the link in it | The SMS on a phone frame, then the landing page | Partly: the SMS screen exists, the SMS log is not built (T06) |
-| Log in as `stefan.kern` / `demo-stefan`, upload `rehab-report-maria-beispiel.md`, enter Maria Beispiel and 12 March 1961, send | The answer page, then a confirmation | Partly: the login and the answer page work with the log link (T07), the upload is not built (T09) |
-| Switch to Element and open the thread of request 2 | "Rehab discharge report for Maria Beispiel from Stefan Kern is filed. Identity checked with ID Austria." | Partly: the notice text, the rehab mapper, and the filing Bundle are built (T13, T14), the upload and the release check are not (T09, T15) |
-| Open http://localhost:8090/fhir/DocumentReference?subject=Patient/maria-beispiel&_revinclude=Provenance:target&_pretty=true | A DocumentReference with the report attached, and its Provenance | Partly: the rehab mapper and the filing Bundle are built (T13, T14), but nothing calls them until the upload exists (T09) |
+| In the widget, pick **Rehab discharge report**, Stefan Kern, Reha Waldblick, `+43 660 000 0101`, send | The form switches to SMS. The notice "Request 2 sent to Stefan Kern (Reha Waldblick) by SMS." | Partly: the form switches to SMS and sends the request. The room notice is not built. |
+| Open the SMS screen and the link in it | The SMS on a phone frame, then the landing page | Not built: the SMS screen stays empty. Open the log link instead and say that the SMS is not sent yet. |
+| Log in as `stefan.kern` / `demo-stefan`, upload `rehab-report-maria-beispiel.md`, enter Maria Beispiel and 12 March 1961, send | The answer page, then "Thank you, your document is filed" | Ready with the log link |
+| Switch to Element and look at the newest message | "Rehab discharge report for Maria Beispiel from Stefan Kern is filed. Identity checked with ID Austria." | Ready |
+| Open http://localhost:8090/fhir/DocumentReference?subject=Patient/maria-beispiel&_revinclude=Provenance:target&_pretty=true | A DocumentReference with the report attached, and its Provenance | Ready |
 
 Say: Stefan Kern only sends the report. The Provenance names Dr. Leitner, who wrote it, as author and Stefan Kern as informant.
 
@@ -117,10 +118,10 @@ Say: Stefan Kern only sends the report. The Provenance names Dr. Leitner, who wr
 
 | Click | What you see | State |
 |---|---|---|
-| In the widget, send the lab request again to `eva.brandl@labor-kanaI.example`, with a capital I | The warning "The address domain `labor-kanaI.example` does not match Labor Kanalstraße (`labor-kanal.example`)." next to **Send anyway** and **Cancel** | Partly: the widget shows this warning and the buttons (T05), but only after the address check, which is not built (T15). On `main` request 3 goes out at once. |
-| Click **Send anyway**. Off camera, open the new email in Mailpit and its link in a fresh private window. | Only the requesting doctor and clinic | Partly: **Send anyway** works once the warning shows (T05, T15). The email is not built (T06), and the landing page works with the log link. |
-| Log in as `anna.huber` / `demo-anna`, who owns the mistyped address | "This request is for someone else. Nothing was shared with you." | Partly: the login and the check work with the log link (T07, T08), but the refusal page is not on `main` (T09), so this login ends on a 404 page. |
-| Switch to Element and open the thread of request 3 | "Request 3 was opened by someone who is not Dr. Eva Brandl (ID Austria name: Anna Huber). Nothing was shown or filed. Check the address." | Partly: the login posts it (T07), as a new message in the room, not in a thread |
+| In the widget, send the lab request again to `eva.brandl@labor-kanaI.example`, with a capital I | The warning "The address domain `labor-kanaI.example` does not match Labor Kanalstraße (`labor-kanal.example`)." next to **Send anyway** and **Cancel** | Ready: `request.create` returns this warning and holds the request. Check how the widget shows it before recording. |
+| Click **Send anyway**. Off camera, open the new email in Mailpit and its link in a fresh private window. | Only the requesting doctor and clinic | Ready with the log link: **Send anyway** sends the request, and `pnpm dev` prints its new link |
+| Log in as `anna.huber` / `demo-anna`, who owns the mistyped address | "This request is for someone else. Nothing was shared with you." | Ready with the log link |
+| Switch to Element and look at the newest message | "Request 3 was opened by someone who is not Eva Brandl (ID Austria name: Anna Huber). Nothing was shown or filed. Check the address." | Ready |
 
 Say: ordy warns before sending, and even if Dr. Hofer sends anyway, the stranger sees nothing.
 
@@ -128,12 +129,12 @@ Say: ordy warns before sending, and even if Dr. Hofer sends anyway, the stranger
 
 | Click | What you see | State |
 |---|---|---|
-| Open the **Audit log** tab in the widget and scroll: it lists every audit entry, newest first, with its request | At the top, request 3's entries for M1, with "Identity checked" and outcome `fail` and the "Misdelivery caught" entries. Further down, request 1's six event types, from "Answer filed" at the top to "Request sent" at the bottom: "Answer filed", "Answer sent", "Misdelivery caught", "Identity checked", "Link opened", and "Request sent" | Partly: the tab shows what the widget, the request core, and the login write (T04, T05, T07). "Answer sent" and "Answer filed" wait for the upload (T09). |
-| Show the metric results from the README | FHIR validation, effort, misdeliveries, and audit coverage | Partly: `pnpm scenario` (T17, T18) runs and writes the table to `out/metrics/metrics.md`, but reports the flow steps as blocked. The stopwatch test (T19) is not done. |
+| Open the **Audit log** tab in the widget and scroll: it lists every audit entry, newest first, with its request | At the top, request 3's entries for M1, with "Identity checked" and outcome `fail` and the "Misdelivery caught" entries. Further down, request 1's six event types, from "Answer filed" at the top to "Request sent" at the bottom: "Answer filed", "Answer sent", "Misdelivery caught", "Identity checked", "Link opened", and "Request sent" | Ready |
+| Show the metric results from the README | FHIR validation, effort, misdeliveries, and audit coverage | Ready for three metrics, from the run by hand. Effort waits for the stopwatch test. Do not show `pnpm scenario`: it still reports its steps as blocked. |
 
 Say, filled in from the frozen build and the README status, in about 17 s: "Works today: …. Built but not connected: …. Not built: …."
 
-As of 02:45 that would be: "Works today: the stack, the widget, which sends requests and shows their state and audit trail, and the ID Austria login, whose checks stop a wrong person. Built but not connected: parser, patient check, FHIR mapping and filing, AI fallback. Not built yet: email and SMS, upload, eHVD checks."
+As of 03:20 that would be: "Works today: both requests and all three misdeliveries, with FHIR filing, Provenance, and the audit log. Built but not connected: the request email and the AI fallback. Not built yet: the SMS."
 
 ## Scene 10: disclaimer (8 s)
 
@@ -147,16 +148,10 @@ Cut in this order and say in the video what was cut:
 
 1. The Matrix notice in scene 3. The M1 notice in scene 8 shows the same kind of notice.
 2. The Matrix notice in scene 6. The filed notice in scene 7 shows that Dr. Hofer is told, and the HAPI view shows the filing.
-3. Shorten scene 7 to the SMS screen and the filed notice. Keep request 2 in the video, because the track judges the flow on both requests.
+3. Shorten scene 7 to the login with the log link and the filed notice. Keep request 2 in the video, because the track judges the flow on both requests.
 
 Never cut the HAPI view in scene 6. It is the only place the video shows the FHIR resources and the Provenance.
 
-## If the flow is not ready at the freeze
+## If the email and SMS are still not sent at the freeze
 
-Record only what works, and say plainly what is not built. A possible order on the 02:45 state, with seconds that add up to 2:00:
-
-1. Dr. Hofer's room, the widget, and request 1 sent from the form, with its card showing the state "Sent" and the "Request sent" audit entry (15 s).
-2. The live portal with the log link (35 s): the landing page, `thomas.wagner`'s login up to the Keycloak page (cut before the 404 page), the notice in the room, and the "Identity checked" `fail` and "Misdelivery caught" entries on request 1 in the **Requests** view. Then `eva.brandl`'s login and the answer page that names the patient.
-3. The tests for M3, the FHIR mappers, the filing Bundle with Provenance and Task, and the AI fallback (15 s). Run only these files, because the full `pnpm test` output scrolls by too fast: `pnpm exec tsx --test src/server/documents/patient-check.test.ts src/server/fhir/mappers.test.ts src/server/fhir/filing.test.ts src/server/documents/fallback.test.ts`. They need no running services.
-4. The output of `pnpm scenario`: which steps pass and which are blocked, and why (10 s).
-5. The design in one sentence per step, over the README architecture diagram (15 s), then the spoken part of scene 9 (22 s), and scene 10 (8 s).
+Record the scenes above with the log link, and say it once in scene 2: "The email is simulated; here we open its link directly." Cut the Mailpit step in scene 2 and the SMS screen in scene 7, and use the freed seconds for the HAPI view in scene 6. Name the missing email and SMS again in the spoken part of scene 9.
