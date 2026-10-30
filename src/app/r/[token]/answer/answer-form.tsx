@@ -3,7 +3,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { isTRPCClientError } from "@trpc/client";
 import { FileUp, Loader2, Lock } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { AnswerFiled, AnswerHeld, LinkClosed } from "@/components/portal/answer-messages";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -29,6 +29,7 @@ export function AnswerForm({ token, requester, clinic }: { token: string; reques
   const trpc = useTRPC();
   const answer = useMutation(trpc.portal.answer.mutationOptions());
   const [file, setFile] = useState<File | null>(null);
+  const input = useRef<HTMLInputElement>(null);
   const [name, setName] = useState("");
   const [birthDate, setBirthDate] = useState("");
   const [drag, setDrag] = useState(false);
@@ -40,13 +41,15 @@ export function AnswerForm({ token, requester, clinic }: { token: string; reques
   if (done === "closed") return <LinkClosed />;
 
   async function send() {
-    if (!file) return setProblem({ title: "Add the document first." });
-    if (file.size > MAX_FILE_BYTES) return setProblem({ title: `The file is larger than ${MAX_FILE_BYTES / 1024} KB. Upload the document as Markdown or text.` });
+    // A file chosen before the page finished loading is in the input but not in the state.
+    const chosen = file ?? input.current?.files?.[0] ?? null;
+    if (!chosen) return setProblem({ title: "Add the document first." });
+    if (chosen.size > MAX_FILE_BYTES) return setProblem({ title: `The file is larger than ${MAX_FILE_BYTES / 1024} KB. Upload the document as Markdown or text.` });
     if (!name.trim() || !birthDate) return setProblem({ title: "Enter the patient's name and birth date." });
     setProblem(null);
     const data = new FormData();
     data.set("token", token);
-    data.set("file", file);
+    data.set("file", chosen);
     data.set("patientName", name);
     data.set("birthDate", birthDate);
     try {
@@ -107,7 +110,7 @@ export function AnswerForm({ token, requester, clinic }: { token: string; reques
           <FileUp className="size-6 text-muted-foreground" />
           <span className="font-medium">{file ? file.name : "Drop the file here or click to choose"}</span>
           <span className="text-muted-foreground">Markdown or text, as your system exports it</span>
-          <input id="file" type="file" accept=".md,.txt,text/markdown,text/plain" className="sr-only" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+          <input ref={input} id="file" type="file" accept=".md,.txt,text/markdown,text/plain" className="sr-only" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
         </label>
       </section>
 
