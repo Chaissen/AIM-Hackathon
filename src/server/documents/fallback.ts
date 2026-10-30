@@ -2,7 +2,7 @@ import MarkdownIt from "markdown-it";
 import { z } from "zod";
 
 import { parseDateWide, parseStayWide, parseViennaDateTimeWide } from "./dates";
-import { freeText, isLoinc, parseDocument, parsePersonLine, toNumber } from "./parse";
+import { freeText, isLoinc, parseDocument, parsePersonLine, rowUnit, toNumber } from "./parse";
 import { HEADER_ONLY_KEYS, IDENTITY_KEYS, headerBlock, isPatientHeading, keyLines, patientIdentity, toKeyLine, type KeyLine } from "./patient-lines";
 import type { LabResult, LabRow, ParseResult, ParsedDocument, PersonLine, RehabReport, SafetyRefusal } from "./types";
 
@@ -156,18 +156,21 @@ function labRow(row: ModelReading["rows"][number], n: number, errors: string[]):
   const value = toNumber(row.valueText);
   if (value === null) errors.push(`${where}: the result "${row.valueText}" is not a number.`);
   if (!isLoinc(row.loinc)) errors.push(`${where}: "${row.loinc}" is not a LOINC code such as 6301-6, or its check digit is wrong.`);
+  // UCUM and the vital sign checks as in the parser, so a record from the fallback files as valid FHIR too.
+  const unit = rowUnit(row.loinc, row.unitText);
+  if ("error" in unit) errors.push(`${where}: ${unit.error}`);
   // A range that is written but cannot be read gives no record, so a value outside it can never pass as normal.
   const range = row.rangeText ? RANGE.exec(collapse(row.rangeText)) : null;
   const low = range ? toNumber(range[1]) : null;
   const high = range ? toNumber(range[2]) : null;
   if (row.rangeText && (low === null || high === null)) errors.push(`${where}: the reference range "${row.rangeText}" cannot be read.`);
-  if (value === null || !isLoinc(row.loinc) || (row.rangeText && (low === null || high === null))) return null;
+  if (value === null || !isLoinc(row.loinc) || "error" in unit || (row.rangeText && (low === null || high === null))) return null;
   const hasRange = low !== null && high !== null;
   return {
     test: row.test,
     value,
     valueText: row.valueText,
-    ucum: row.unitText ? row.unitText.replace(/\^/g, "*") : null,
+    ucum: unit.ucum,
     unitText: row.unitText,
     low: hasRange ? low : null,
     high: hasRange ? high : null,
