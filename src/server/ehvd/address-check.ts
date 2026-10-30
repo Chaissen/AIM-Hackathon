@@ -1,30 +1,11 @@
+import { addressWarning, type AddressCheck, domainOf, sameDomain } from "@/lib/address-check";
+import { isSubset, nameWords } from "@/server/identity/names";
+
 import { ehvd, type EhvdClient } from "./client";
-import { findOrganisation } from "./directory";
+import { findOrganisation, isActive, isPerson, type OrganisationLookup } from "./directory";
 
-// The address check before sending (docs/EHVD.md, "How ordy uses the eHVD", and M1 in docs/IDENTITY.md).
-
-export type AddressCheck =
-  /** The domain matches the organisation's `mail`, or the request goes by SMS, which the eHVD cannot check. */
-  | { result: "pass" }
-  /** The domain differs. The request waits for Send anyway, and `misdelivery_caught` gets `address_mismatch`. */
-  | { result: "mismatch"; domain: string; expectedDomain: string }
-  /**
-   * The eHVD could not confirm the address. The request waits for Send anyway too, because an unchecked address is
-   * never a pass, but nothing was caught, so no `misdelivery_caught`.
-   */
-  | {
-      result: "unchecked";
-      reason: "invalid_address" | "organisation_not_listed" | "several_organisations" | "no_mail" | "not_searchable" | "ehvd_unreachable" | "ehvd_error";
-    };
-
-/**
- * The domain of one plain address, as typed, or null for anything else: several `@`, a list, spaces, or a domain that is
- * not ASCII letters, digits, dots, and hyphens. Lowercasing a non-ASCII domain could turn it into the organisation's,
- * such as the Kelvin sign into `k`.
- */
-const domainOf = (address: string) => /^[^\s@,;<>]+@([A-Za-z0-9.-]+)$/.exec(address)?.[1] ?? null;
-// Domain names compare case-insensitively, and a trailing dot names the same domain.
-const sameDomain = (a: string, b: string) => a.toLowerCase().replace(/\.$/, "") === b.toLowerCase().replace(/\.$/, "");
+// The address check before sending (docs/EHVD.md, "How ordy uses the eHVD", and M1 in docs/IDENTITY.md), and the
+// advisory recipient check the request form runs while Dr. Hofer types.
 
 export async function checkAddress(
   request: { channel: "email" | "sms"; address: string; org: string },
@@ -35,7 +16,11 @@ export async function checkAddress(
   // The request procedure accepts only valid email addresses, so this is only a guard.
   if (!domain) return { result: "unchecked", reason: "invalid_address" };
 
-  const lookup = await findOrganisation(client, request.org);
+  return compareDomain(domain, await findOrganisation(client, request.org));
+}
+
+/** The address's domain against the organisation's `mail` domain, once the organisation lookup ran. */
+function compareDomain(domain: string, lookup: OrganisationLookup): AddressCheck {
   if (!lookup.ok) {
     const reason = (
       { not_listed: "organisation_not_listed", several: "several_organisations", not_searchable: "not_searchable", ehvd_unreachable: "ehvd_unreachable", ehvd_error: "ehvd_error" } as const
@@ -47,23 +32,71 @@ export async function checkAddress(
   return sameDomain(domain, expectedDomain) ? { result: "pass" } : { result: "mismatch", domain, expectedDomain };
 }
 
-/** The warning next to Send anyway in the widget (docs/ARCHITECTURE.md, "Widget"). Plain text: the names come from input. */
-export function addressWarning(check: Exclude<AddressCheck, { result: "pass" }>, org: string): string {
-  if (check.result === "mismatch") return `The address domain ${check.domain} does not match ${org} (${check.expectedDomain}).`;
-  switch (check.reason) {
-    case "invalid_address":
-      return "The address is not a single plain email address, so it could not be checked.";
-    case "organisation_not_listed":
-      return `The eHVD does not list ${org} as an active organisation, so the address could not be checked.`;
-    case "several_organisations":
-      return `The eHVD lists more than one entry named ${org}, so the address could not be checked.`;
-    case "no_mail":
-      return `The eHVD has no email address for ${org}, so the address could not be checked.`;
-    case "not_searchable":
-      return `The organisation name ${org} cannot be searched in the eHVD, so the address could not be checked.`;
-    case "ehvd_unreachable":
-      return "The eHVD could not be reached, so the address could not be checked.";
-    case "ehvd_error":
-      return "The eHVD answered with an error, so the address could not be checked.";
+/** What the eHVD says about a recipient before the request exists. Advisory: `request.create` runs its own address check. */
+export type RecipientCheck = {
+  organisation: { status: "listed"; name: string } | { status: "not_listed" } | { status: "unchecked" };
+  person: { status: "member"; name: string } | { status: "not_member" } | { status: "not_listed" } | { status: "unchecked" };
+  address: { status: "match" } | { status: "mismatch"; domain: string; expectedDomain: string } | { status: "unchecked"; reason: string } | { status: "sms" };
+};
+
+export type Recipient = { given: string; family: string; org: string; channel: "email" | "sms"; address: string };
+
+/** Persons per name search: the service-wide maximum, as in the release check. */
+const PERSON_RESULTS = 200;
+
+const wordSegmenter = new Intl.Segmenter("de", { granularity: "word" });
+/** The longest word of a name as typed. The eHVD does not fold spellings, so the search keeps "Müller" as it is. */
+const longestWord = (name: string) =>
+  Array.from(wordSegmenter.segment(name))
+    .filter((s) => s.isWordLike)
+    .reduce((longest, s) => (s.segment.length > longest.length ? s.segment : longest), "");
+
+/**
+ * Whether an active person with every word of the typed name is a member of the organisation. The search asks for the
+ * family name's longest word as a substring with both statuses, like the release check, so it also finds double names.
+ */
+async function findMember(client: EhvdClient, recipient: Recipient, organisationOid: string): Promise<RecipientCheck["person"]> {
+  const given = nameWords(recipient.given);
+  const family = nameWords(recipient.family);
+  // An empty set passes every subset test (docs/IDENTITY.md, "Name match").
+  if (!given.size || !family.size) return { status: "unchecked" };
+  const result = await client.gdaSearch({ surname: `*${longestWord(recipient.family)}*`, ehvdstatus: "Inaktiv", maxResults: PERSON_RESULTS });
+  if (!result.ok) return { status: "unchecked" };
+  const named = result.value.filter((gda) => isPerson(gda) && isSubset(family, nameWords(gda.surname)) && isSubset(given, nameWords(gda.firstname ?? "")));
+  if (!named.length) return { status: "not_listed" };
+  // An inactive entry may not release a document, so it does not count as a member.
+  const member = named.find((gda) => isActive(gda) && gda.relations.memberof.includes(organisationOid));
+  if (!member) return { status: "not_member" };
+  return { status: "member", name: [member.title, member.firstname, member.surname].filter(Boolean).join(" ") };
+}
+
+/** The same comparison as `checkAddress`, on the lookup the recipient check already made. An SMS has no address check. */
+function addressStatus(recipient: Recipient, lookup: OrganisationLookup): RecipientCheck["address"] {
+  if (recipient.channel === "sms") return { status: "sms" };
+  const domain = domainOf(recipient.address);
+  const check: AddressCheck = domain ? compareDomain(domain, lookup) : { result: "unchecked", reason: "invalid_address" };
+  switch (check.result) {
+    case "pass":
+      return { status: "match" };
+    case "mismatch":
+      return { status: "mismatch", domain: check.domain, expectedDomain: check.expectedDomain };
+    case "unchecked":
+      return { status: "unchecked", reason: addressWarning(check, recipient.org) };
+    default:
+      return check satisfies never;
   }
+}
+
+/** The organisation, the person, and the address domain. Reads the eHVD only. */
+export async function checkRecipient(recipient: Recipient, client: EhvdClient = ehvd): Promise<RecipientCheck> {
+  const lookup = await findOrganisation(client, recipient.org);
+  if (!lookup.ok) {
+    const organisation = lookup.reason === "not_listed" ? { status: "not_listed" as const } : { status: "unchecked" as const };
+    return { organisation, person: { status: "unchecked" }, address: addressStatus(recipient, lookup) };
+  }
+  return {
+    organisation: { status: "listed", name: lookup.organisation.surname },
+    person: await findMember(client, recipient, lookup.organisation.id.id),
+    address: addressStatus(recipient, lookup),
+  };
 }

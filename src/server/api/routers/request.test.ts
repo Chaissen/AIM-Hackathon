@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { after, test } from "node:test";
 
 import { TRPCError } from "@trpc/server";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import { UnsecuredJWT } from "jose";
 
 import { env, mxid } from "@/env";
@@ -12,6 +12,8 @@ import { createCaller } from "@/server/api/root";
 import { linkDeps } from "@/server/api/routers/request";
 import { createContext } from "@/server/api/trpc";
 import { db } from "@/server/db";
+import { checkRecipient } from "@/server/ehvd/address-check";
+import { createEhvdClient } from "@/server/ehvd/client";
 import { startEhvdMock } from "@/server/ehvd/start-mock";
 import { anonymousBrowser } from "@/server/audit/record";
 import { answerDeps, type AnswerDeps } from "@/server/answers/deps";
@@ -360,6 +362,132 @@ test("list returns the audit entries of each request", { skip: noDb }, async () 
   ]);
 });
 
+test("a listed request carries its pending decision and no link hash, ID token, or held text", { skip: noDb }, async () => {
+  const request = await seedHeldAnswer();
+  const listed = (await clinic.request.list()).find((r) => r.id === request.id);
+  assert.ok(listed);
+  assert.deepEqual(Object.keys(listed).sort(), [
+    "address",
+    "audit",
+    "channel",
+    "createdAt",
+    "docType",
+    "expiresAt",
+    "failedChecks",
+    "family",
+    "given",
+    "id",
+    "org",
+    "patientId",
+    "pending",
+    "requester",
+    "requesterName",
+    "state",
+    "taskStatus",
+  ]);
+  assert.deepEqual(Object.keys(listed.pending ?? {}).sort(), ["filingOpen", "kind", "reason", "sender", "sentAt"]);
+  const got = await clinic.request.get({ id: request.id });
+  assert.deepEqual(Object.keys(got).sort(), [...Object.keys(listed), "message"].sort());
+});
+
+test("a held answer's pending decision says when the last Accept left its filing open", { skip: noDb }, async () => {
+  const request = await seedHeldAnswer();
+  const pendingOf = async () => (await clinic.request.list()).find((r) => r.id === request.id)?.pending;
+  const { sentAt } = (await db.select().from(heldAnswers).where(eq(heldAnswers.requestId, request.id)))[0];
+  const held = { kind: "answer", sender: "Eva Brandl", reason: "Not confirmed.", sentAt };
+  assert.deepEqual(await pendingOf(), { ...held, filingOpen: false });
+  await withAnswerDeps({ readPatient: maria, fileAnswer: () => Promise.reject(new Error("fetch failed")), notify: async () => {} }, async () => {
+    await assert.rejects(clinic.request.accept({ id: request.id }), (e) => e instanceof TRPCError && e.code === "INTERNAL_SERVER_ERROR");
+  });
+  assert.deepEqual(await pendingOf(), { ...held, filingOpen: true });
+  assert.deepEqual((await clinic.request.get({ id: request.id })).pending, { ...held, filingOpen: true });
+});
+
+test("get shows the email or SMS as the recipient gets it, with the link cut after /r/", { skip: noDb }, async () => {
+  const expiresAt = new Date("2099-11-04T23:30:00Z");
+  const { request: email } = await seed();
+  const { request: sms } = await seed({ docType: "rehab-report", given: "Stefan", family: "Kern", org: "Reha Waldblick", channel: "sms", address: "+43 660 000 0101" });
+  await db.update(requests).set({ expiresAt }).where(inArray(requests.id, [email.id, sms.id]));
+  assert.deepEqual((await clinic.request.get({ id: email.id })).message, {
+    subject: `Secure request from ${env.CLINIC_NAME}`,
+    text:
+      "Hello,\n\n" +
+      `Dr. Lena Hofer at ${env.CLINIC_NAME} has sent you a secure request.\n` +
+      `Open it here: ${env.PUBLIC_URL}/r/…\n\n` +
+      "You need ID Austria to open it. The link expires on 5 November 2099.\n" +
+      "If you did not expect this message, you can ignore it.\n",
+  });
+  assert.deepEqual((await clinic.request.get({ id: sms.id })).message, {
+    subject: null,
+    text: `${env.CLINIC_NAME}: Dr. Lena Hofer sent you a secure request. Open it with ID Austria: ${env.PUBLIC_URL}/r/… (valid until 5 Nov)`,
+  });
+});
+
+test("the preview of either message for Maria passes the content check", { skip: noFhir }, async () => {
+  const email = await clinic.request.preview({ channel: "email", patient: "maria-beispiel" });
+  assert.equal(email.subject, `Secure request from ${env.CLINIC_NAME}`);
+  assert.ok(email.text.includes(`Open it here: ${env.PUBLIC_URL}/r/…\n`));
+  assert.deepEqual(email.refused, []);
+  const sms = await clinic.request.preview({ channel: "sms", patient: "maria-beispiel" });
+  assert.equal(sms.subject, null);
+  assert.ok(sms.text.startsWith(`${env.CLINIC_NAME}: `));
+  assert.deepEqual(sms.refused, []);
+  await assert.rejects(clinic.request.preview({ channel: "email", patient: "nobody-here" }), (e) => e instanceof TRPCError && e.code === "NOT_FOUND");
+});
+
+const recipient1 = { given: "Eva", family: "Brandl", org: "Labor Kanalstraße", channel: "email", address: "eva.brandl@labor-kanal.example" } as const;
+
+test("the recipient check confirms request 1's lab, physician, and address, and writes nothing", { skip: noDb }, async () => {
+  const start = new Date();
+  const checker = mxid(`recipient-check-${run}`);
+  const caller = createCaller(createContext({ kind: "clinic", mxid: checker }));
+  const bound = await db.select().from(bindings).where(and(eq(bindings.given, "Eva"), eq(bindings.family, "Brandl"), eq(bindings.org, "Labor Kanalstraße")));
+  assert.deepEqual(await caller.request.checkRecipient(recipient1), {
+    organisation: { status: "listed", name: "Labor Kanalstraße" },
+    person: { status: "member", name: "Dr. Eva Brandl" },
+    address: { status: "match" },
+    knownSender: bound.length === 1,
+  });
+  assert.deepEqual(await caller.request.checkRecipient({ ...recipient1, address: "eva.brandl@labor-kanaI.example" }), {
+    organisation: { status: "listed", name: "Labor Kanalstraße" },
+    person: { status: "member", name: "Dr. Eva Brandl" },
+    address: { status: "mismatch", domain: "labor-kanaI.example", expectedDomain: "labor-kanal.example" },
+    knownSender: bound.length === 1,
+  });
+  const written = await db
+    .select()
+    .from(auditLog)
+    .where(and(gte(auditLog.at, start), or(eq(auditLog.actor, checker), isNull(auditLog.requestId))));
+  assert.deepEqual(written, [], "no audit entry, not even without a request");
+});
+
+test("the recipient check tells a sender outside the eHVD and a namesake elsewhere from a member", { skip: noDb }, async () => {
+  const kern = await clinic.request.checkRecipient({ given: "Stefan", family: "Kern", org: "Reha Waldblick", channel: "sms", address: "+43 660 000 0101" });
+  assert.deepEqual([kern.organisation, kern.person, kern.address], [{ status: "listed", name: "Reha Waldblick" }, { status: "not_listed" }, { status: "sms" }]);
+  const martin = await clinic.request.checkRecipient({ ...recipient1, given: "Martin", address: "martin.brandl@labor-kanal.example" });
+  assert.deepEqual(martin.person, { status: "not_member" });
+});
+
+test("the recipient check knows a bound sender at an organisation the eHVD does not list", { skip: noDb }, async () => {
+  const org = `Labor Kanalstraße test ${run}`;
+  // Filing a held answer above may have bound her there already.
+  await db.insert(bindings).values({ given: "Eva", family: "Brandl", org, personNumber: "GH:recipient-check" }).onConflictDoNothing();
+  assert.deepEqual(await clinic.request.checkRecipient({ ...recipient1, org }), {
+    organisation: { status: "not_listed" },
+    person: { status: "unchecked" },
+    address: { status: "unchecked", reason: `The eHVD does not list ${org} as an active organisation, so the address could not be checked.` },
+    knownSender: true,
+  });
+});
+
+test("an unreachable eHVD leaves every part of the recipient check unchecked", async () => {
+  assert.deepEqual(await checkRecipient(recipient1, createEhvdClient({ url: "http://127.0.0.1:9/" })), {
+    organisation: { status: "unchecked" },
+    person: { status: "unchecked" },
+    address: { status: "unchecked", reason: "The eHVD could not be reached, so the address could not be checked." },
+  });
+});
+
 test("the link shows only the requester and the clinic and writes link_opened", { skip: noDb }, async () => {
   env.ORDY_SECRET = randomBytes(32).toString("hex");
   const { request, token } = await seed();
@@ -442,8 +570,9 @@ test("M1 through the router: another domain waits for Send anyway, which sends i
   assert.equal(request.state, "awaiting_confirmation");
   const warning = "The address domain labor-kanaI.example does not match Labor Kanalstraße (labor-kanal.example).";
   assert.equal(request.addressWarning, warning);
-  assert.equal((await clinic.request.get({ id: request.id })).addressWarning, warning, "a reload shows the same warning");
-  assert.equal((await clinic.request.list()).find((r) => r.id === request.id)?.addressWarning, warning, "so does the widget's list");
+  const pending = { kind: "address", warning, mismatch: { domain: "labor-kanaI.example", expectedDomain: "labor-kanal.example" } };
+  assert.deepEqual((await clinic.request.get({ id: request.id })).pending, pending, "a reload shows the same warning");
+  assert.deepEqual((await clinic.request.list()).find((r) => r.id === request.id)?.pending, pending, "so does the widget's list");
   assert.deepEqual(
     (await auditOf(request.id)).map((a) => [a.event, a.outcome]),
     [["misdelivery_caught", "address_mismatch"]],
@@ -451,8 +580,8 @@ test("M1 through the router: another domain waits for Send anyway, which sends i
 
   const sent = await clinic.request.sendAnyway({ id: request.id });
   assert.equal(sent.state, "sent");
-  assert.equal((await clinic.request.get({ id: request.id })).addressWarning, null);
-  assert.equal((await clinic.request.list()).find((r) => r.id === request.id)?.addressWarning, null);
+  assert.equal((await clinic.request.get({ id: request.id })).pending, null);
+  assert.equal((await clinic.request.list()).find((r) => r.id === request.id)?.pending, null);
   assert.deepEqual((await auditOf(request.id)).map((a) => a.event), ["misdelivery_caught", "request_sent"]);
   await assert.rejects(clinic.request.sendAnyway({ id: request.id }), (e) => e instanceof TRPCError && e.code === "CONFLICT");
 });
@@ -462,9 +591,9 @@ test("an address the eHVD cannot confirm waits too, but nothing is logged as cau
   created.push(request.id);
   assert.equal(request.state, "awaiting_confirmation");
   assert.equal(request.addressWarning, "The eHVD does not list Labor Nirgendwo as an active organisation, so the address could not be checked.");
-  const unconfirmed = "The eHVD could not confirm the address, so the request has not been sent.";
-  assert.equal((await clinic.request.get({ id: request.id })).addressWarning, unconfirmed);
-  assert.equal((await clinic.request.list()).find((r) => r.id === request.id)?.addressWarning, unconfirmed);
+  const unconfirmed = { kind: "address", warning: "The eHVD could not confirm the address, so the request has not been sent.", mismatch: null };
+  assert.deepEqual((await clinic.request.get({ id: request.id })).pending, unconfirmed);
+  assert.deepEqual((await clinic.request.list()).find((r) => r.id === request.id)?.pending, unconfirmed);
   assert.deepEqual(await auditOf(request.id), [], "nothing went out and nothing was caught");
   assert.equal((await clinic.request.sendAnyway({ id: request.id })).state, "sent");
   // With no misdelivery_caught before it, sentAnyway shows that the address went out unconfirmed.

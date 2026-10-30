@@ -253,33 +253,38 @@ async function validate(refs: string[]): Promise<ValidationRun> {
   }
 }
 
-async function measure(ctx: Ctx, results: StepResult[]): Promise<Metric[]> {
+async function measure(ctx: Ctx, results: StepResult[]) {
   const rows = results[0].status === "pass" ? await rowsSince(ctx) : [];
   const coverage = [ctx.r1, ctx.r2].flatMap((id) => (id === undefined ? [] : [requestCoverage(id, rows)]));
   for (const c of coverage) console.log(coverageLines(c).join("\n"));
-  return [
-    validationMetric(await validate(filedReferences(rows))),
+  const references = filedReferences(rows);
+  const run = await validate(references);
+  const validation = run.kind === "done" ? { at: new Date(), files: run.files, references, results: run.results } : null;
+  const metrics = [
+    validationMetric(run),
     effortMetric(ctx.r1 === undefined ? null : effortSeconds(rows, ctx.r1)),
     misdeliveryMetric(results),
     coverageMetric(coverage.find((c) => c.requestId === ctx.r1)),
   ];
+  return { metrics, validation };
 }
 
 const ctx: Ctx = { since: new Date() };
 console.log(`pnpm scenario: started ${ctx.since.toISOString()}\n`);
 let results: StepResult[] = [];
 let metrics: Metric[] = [];
+let validation: Awaited<ReturnType<typeof measure>>["validation"] = null;
 try {
   results = await runSteps(ctx);
   console.log("");
-  metrics = await measure(ctx, results);
+  ({ metrics, validation } = await measure(ctx, results));
 } finally {
   await db.$client.end();
 }
 
 const markdown = metricsMarkdown(metrics, ctx.since);
 await mkdir(METRICS_DIR, { recursive: true });
-await writeFile(path.join(METRICS_DIR, "scenario.json"), JSON.stringify({ at: ctx.since, requests: { r1: ctx.r1, m1: ctx.m1, r2: ctx.r2 }, steps: results, metrics }, null, 2));
+await writeFile(path.join(METRICS_DIR, "scenario.json"), JSON.stringify({ at: ctx.since, requests: { r1: ctx.r1, m1: ctx.m1, r2: ctx.r2 }, steps: results, metrics, validation }, null, 2));
 await writeFile(path.join(METRICS_DIR, "metrics.md"), markdown);
 console.log(`\n${markdown}\nWritten to ${path.join(METRICS_DIR, "metrics.md")} and scenario.json.`);
 process.exit(results.every((r) => r.status === "pass") && metrics.every((m) => m.status === "met") ? 0 : 1);
