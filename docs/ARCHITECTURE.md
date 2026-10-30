@@ -289,6 +289,8 @@ src/
     ehvd/client.ts            eHVD SOAP client (T15), with soap.ts for the messages and xml.ts for the parser
     ehvd/address-check.ts     address check before sending (T15)
     ehvd/release-check.ts     release check when an answer arrives (T15)
+    fhir/filing.ts            one answer as a transaction Bundle with Provenance and Task; fhir/file-answer.ts posts it (T13)
+    requests/lifecycle.ts     request states and the Task status they map to (T04 adds the transitions)
     matrix/client.ts          Matrix client-server API
     matrix/notices.ts         notice texts and notifyRoom for Dr. Hofer's room
     auth/eid-session.ts       outside person's session cookie

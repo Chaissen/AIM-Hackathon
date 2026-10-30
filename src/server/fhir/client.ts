@@ -1,4 +1,4 @@
-import type { CapabilityStatement, FhirResource } from "fhir/r4";
+import type { Bundle, CapabilityStatement, FhirResource } from "fhir/r4";
 
 import { env } from "@/env";
 
@@ -23,3 +23,6 @@ export const capabilities = (signal?: AbortSignal) => fhirFetch<CapabilityStatem
 
 export const put = <T extends FhirResource>(resource: T & { id: string }) =>
   fhirFetch<T>(`${resource.resourceType}/${resource.id}`, { method: "PUT", body: JSON.stringify(resource) });
+
+/** POSTs a transaction Bundle to the server base. The server applies all entries or none. */
+export const transaction = (bundle: Bundle) => fhirFetch<Bundle>("", { method: "POST", body: JSON.stringify(bundle) });
