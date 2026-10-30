@@ -4,7 +4,7 @@ Our own set, before the jury brings theirs. Every file uses the format of [`../d
 
 For every document, Dr. Hofer sends a request about Maria Beispiel, born 12 March 1961, addressed to the person in the Sender column, who then uploads the file as the answer. Do not reuse a request addressed to someone else: Sophie Lindner-Pichler answering scenario request 1, which is addressed to Dr. Brandl, is test M2 and gets blocked, not filed.
 
-`src/server/documents/extra.test.ts` runs every file through `parseDocument` and the patient check. It asserts the columns Kind and Patient and the parser values named under Trap. For Expected, it checks only the patient check for now: `Filed` and `Held` mean the patient check passes, and `Blocked` means it fails. The release check (T15) and the identity checks are not tested here yet, so the parts of Expected about them, such as who the release check must find, wait for T15.
+`src/server/documents/extra.test.ts` runs every file through `parseDocument` and the patient check. It asserts the columns Kind and Patient and the parser values named under Trap. For Expected, it checks the patient check: `Filed` and `Held` mean the patient check passes, and `Blocked` means it fails. `src/server/ehvd/release-check.test.ts` checks the release check for the five filed documents, with the sender from the Sender column: it must find the physician Expected names. The identity checks are not tested here yet.
 
 ## Documents
 

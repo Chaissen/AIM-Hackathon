@@ -113,7 +113,7 @@ The request form has the document type, the patient, the given name, the family 
 | Organisation | Labor Kanalstraße | Reha Waldblick |
 | Contact | `eva.brandl@labor-kanal.example` | `+43 660 000 0101` |
 
-If the address check fails, the widget shows the warning next to **Send anyway** and **Cancel**: "The address domain `labor-kanaI.example` does not match Labor Kanalstraße (`labor-kanal.example`)."
+If the address check fails, the widget shows the warning next to **Send anyway** and **Cancel**: "The address domain `labor-kanaI.example` does not match Labor Kanalstraße (`labor-kanal.example`)." If the eHVD cannot confirm the address, for example because it cannot be reached, the widget asks the same way: "The eHVD could not be reached, so the address could not be checked." [eHVD](EHVD.md#the-address-check) has every case.
 
 ## Matrix bot
 
@@ -236,7 +236,7 @@ Configuration is read in `src/env.ts`. Service addresses and demo accounts have 
 | `OIDC_METADATA_URL` | `http://localhost:8080/realms/idaustria-sim/.well-known/openid-configuration` |
 | `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | `request-service`, `request-service-demo-2026` |
 | `KEYCLOAK_ADMIN_USER`, `KEYCLOAK_ADMIN_PASSWORD` | `admin`, demo value (`pnpm citizen` only) |
-| `EHVD_URL` | `http://localhost:8095/` (planned, T15) |
+| `EHVD_URL` | `http://localhost:8095/` |
 | `SMTP_HOST`, `SMTP_PORT`, `MAILPIT_API_URL` | `localhost`, `1025`, `http://localhost:8025` |
 | `ANTHROPIC_API_KEY` | unset, only for the optional AI fallback |
 
@@ -280,7 +280,9 @@ src/
     identity/checks.ts        identity checks at login: level, name, person number, eHVD claim (T08)
     identity/login.ts         what a check result does: state, audit entries, page, notice, and runIdentityChecks for the callback (T08)
     ehvd/oid.ts               OID check shared by the login and pnpm citizen
-    ehvd/                     eHVD SOAP client, planned (T15)
+    ehvd/client.ts            eHVD SOAP client (T15), with soap.ts for the messages and xml.ts for the parser
+    ehvd/address-check.ts     address check before sending (T15)
+    ehvd/release-check.ts     release check when an answer arrives (T15)
     matrix/client.ts          Matrix client-server API
     matrix/notices.ts         notice texts and notifyRoom for Dr. Hofer's room
     auth/eid-session.ts       outside person's session cookie

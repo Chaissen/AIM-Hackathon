@@ -12,7 +12,7 @@ export type AddressCheck =
    * The eHVD could not confirm the address. The request waits for Send anyway too, because an unchecked address is
    * never a pass, but nothing was caught, so no `misdelivery_caught`.
    */
-  | { result: "unchecked"; reason: "organisation_not_listed" | "several_organisations" | "no_mail" | "not_searchable" | "ehvd_unavailable" };
+  | { result: "unchecked"; reason: "organisation_not_listed" | "several_organisations" | "no_mail" | "not_searchable" | "ehvd_unreachable" };
 
 /** The part after the last `@`, as typed. */
 const domainOf = (address: string) => {
@@ -33,7 +33,7 @@ export async function checkAddress(
 
   const lookup = await findOrganisation(client, request.org);
   if (!lookup.ok) {
-    const reason = ({ not_listed: "organisation_not_listed", several: "several_organisations", not_searchable: "not_searchable", ehvd_unavailable: "ehvd_unavailable" } as const)[lookup.reason];
+    const reason = ({ not_listed: "organisation_not_listed", several: "several_organisations", not_searchable: "not_searchable", ehvd_unreachable: "ehvd_unreachable" } as const)[lookup.reason];
     return { result: "unchecked", reason };
   }
   const expectedDomain = lookup.organisation.mail ? domainOf(lookup.organisation.mail) : null;
@@ -53,7 +53,7 @@ export function addressWarning(check: Exclude<AddressCheck, { result: "pass" }>,
       return `The eHVD has no email address for ${org}, so the address could not be checked.`;
     case "not_searchable":
       return `The organisation name ${org} cannot be searched in the eHVD, so the address could not be checked.`;
-    case "ehvd_unavailable":
+    case "ehvd_unreachable":
       return "The eHVD could not be reached, so the address could not be checked.";
   }
 }

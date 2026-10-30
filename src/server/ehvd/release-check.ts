@@ -11,6 +11,8 @@ import type { GdaDescriptor } from "./soap";
 export type ReleaseHoldReason =
   /** The document names nobody under `Validated by` or `Written by`. */
   | "no_responsible_person"
+  /** The responsible person's given name or family name has no words, such as `Dr. Brandl`. */
+  | "incomplete_name"
   /** The heading names another organisation than the request went to. */
   | "organisation_differs"
   | "organisation_not_listed"
@@ -27,7 +29,7 @@ export type ReleaseHoldReason =
   | "claim_differs"
   /** A name or organisation with characters the eHVD search does not allow. */
   | "not_searchable"
-  | "ehvd_unavailable";
+  | "ehvd_unreachable";
 
 export type ReleaseCheck =
   | { verdict: "pass"; via: "claim" | "search"; practitioner: GdaDescriptor; organisation: GdaDescriptor }
@@ -47,13 +49,20 @@ const PERSON_RESULTS = 200;
 
 const displayName = (person: PersonLine) => [...person.titles, person.given, person.family].filter(Boolean).join(" ");
 
-/** Every word of the document's name is in the other name, family and given name each. */
-const sameName = (person: PersonLine, other: { given: string; family: string }) =>
-  isSubset(nameWords(person.family), nameWords(other.family)) && isSubset(nameWords(person.given), nameWords(other.given));
+type NameWords = { given: Set<string>; family: Set<string> };
+
+/**
+ * Every word of the document's name is in the other name, family and given name each. The caller makes sure the
+ * document's name has words in both, because an empty set passes every subset test (docs/IDENTITY.md, "Name match").
+ */
+const sameName = (document: NameWords, other: { given: string; family: string }) =>
+  isSubset(document.family, nameWords(other.family)) && isSubset(document.given, nameWords(other.given));
+
+const entryName = (gda: GdaDescriptor) => ({ given: gda.firstname ?? "", family: gda.surname });
 
 const sameOrganisationName = (a: string, b: string) => {
   const [x, y] = [nameWords(a), nameWords(b)];
-  return x.size === y.size && isSubset(x, y);
+  return x.size > 0 && x.size === y.size && isSubset(x, y);
 };
 
 /** What the document type needs of the responsible person (docs/IDENTITY.md, "The release check"). */
@@ -68,6 +77,8 @@ function sentence(reason: ReleaseHoldReason, input: ReleaseInput, person: Person
   switch (reason) {
     case "no_responsible_person":
       return `The document names nobody under ${document.type === "lab-result" ? "Validated by" : "Written by"}.`;
+    case "incomplete_name":
+      return `The document does not give the full name of ${name}.`;
     case "organisation_differs":
       return `The document comes from ${document.organisation}, but the request went to ${org}.`;
     case "organisation_not_listed":
@@ -92,7 +103,7 @@ function sentence(reason: ReleaseHoldReason, input: ReleaseInput, person: Person
       return `The eHVD entry of the sender's ID Austria login is not ${name}.`;
     case "not_searchable":
       return `The eHVD cannot be searched for ${name || org}.`;
-    case "ehvd_unavailable":
+    case "ehvd_unreachable":
       return `The eHVD could not be reached to confirm ${name || org}.`;
   }
 }
@@ -111,30 +122,33 @@ export async function checkRelease(input: ReleaseInput, client: EhvdClient = ehv
   const hold = (reason: ReleaseHoldReason): ReleaseCheck => ({ verdict: "hold", reason, sentence: sentence(reason, input, person) });
 
   if (!person) return hold("no_responsible_person");
+  const name: NameWords = { given: nameWords(person.given), family: nameWords(person.family) };
+  if (name.given.size === 0 || name.family.size === 0) return hold("incomplete_name");
   if (!sameOrganisationName(document.organisation, org)) return hold("organisation_differs");
 
   const lookup = await findOrganisation(client, org);
   if (!lookup.ok) {
-    const reason = ({ not_listed: "organisation_not_listed", several: "several_organisations", not_searchable: "not_searchable", ehvd_unavailable: "ehvd_unavailable" } as const)[lookup.reason];
+    const reason = ({ not_listed: "organisation_not_listed", several: "several_organisations", not_searchable: "not_searchable", ehvd_unreachable: "ehvd_unreachable" } as const)[lookup.reason];
     return hold(reason);
   }
   const { organisation } = lookup;
   if (document.type === "rehab-report" && !hasCode(organisation.roles.role, GTELV_ROLE, ["300", "301"])) return hold("organisation_not_hospital");
 
   // The responsible person is the sender, and the login carried the GDA claim: the OID links the person through the state.
-  if (sender.gdaOid && sameName(person, { given: sender.givenName, family: sender.familyName })) {
+  if (sender.gdaOid && sameName(name, { given: sender.givenName, family: sender.familyName })) {
     const result = await client.getGda({ id: sender.gdaOid });
-    if (!result.ok) return hold(result.failure.kind === "bad_request" ? "not_searchable" : "ehvd_unavailable");
+    if (!result.ok) return hold(result.failure.kind === "bad_request" ? "not_searchable" : "ehvd_unreachable");
     const entry = result.value;
     if (!entry || !isPerson(entry)) return hold("not_listed");
-    if (!sameName(person, { given: entry.firstname ?? "", family: entry.surname })) return hold("claim_differs");
+    if (!sameName(name, entryName(entry))) return hold("claim_differs");
     const reason = judge(document.type, entry, organisation.id.id);
     return reason ? hold(reason) : { verdict: "pass", via: "claim", practitioner: entry, organisation };
   }
 
-  // Otherwise the name is the only link: exactly one active member of the organisation with that name.
+  // Otherwise the name is the only link: exactly one active member of the organisation with that name. The hits are
+  // compared with the document's name here too, so the decision never rests on how the eHVD matches names.
   const result = await client.gdaSearch({
-    ...(person.given ? { firstname: person.given } : {}),
+    firstname: person.given,
     surname: person.family,
     maxResults: PERSON_RESULTS,
     ehvdstatus: "Aktiv",
@@ -143,9 +157,9 @@ export async function checkRelease(input: ReleaseInput, client: EhvdClient = ehv
     const { failure } = result;
     if (failure.kind === "bad_request") return hold("not_searchable");
     if (failure.kind === "fault" && failure.code === 6005) return hold("several_matches");
-    return hold("ehvd_unavailable");
+    return hold("ehvd_unreachable");
   }
-  const people = result.value.filter((gda) => isPerson(gda) && isActive(gda));
+  const people = result.value.filter((gda) => isPerson(gda) && isActive(gda) && sameName(name, entryName(gda)));
   if (people.length === 0) return hold("not_listed");
   const members = people.filter((gda) => gda.relations.memberof.includes(organisation.id.id));
   if (members.length === 0) return hold("not_member");

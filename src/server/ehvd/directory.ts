@@ -20,7 +20,7 @@ export const hasCode = (values: string[], system: string, codes: string[]) => co
 
 export type OrganisationLookup =
   | { ok: true; organisation: GdaDescriptor }
-  | { ok: false; reason: "not_listed" | "several" | "not_searchable" | "ehvd_unavailable"; failure?: EhvdFailure };
+  | { ok: false; reason: "not_listed" | "several" | "not_searchable" | "ehvd_unreachable"; failure?: EhvdFailure };
 
 /**
  * The one active organisation with this name (docs/EHVD.md, "How ordy uses the eHVD"). The search compares the whole
@@ -32,7 +32,7 @@ export async function findOrganisation(client: EhvdClient, name: string): Promis
     const { failure } = result;
     if (failure.kind === "bad_request") return { ok: false, reason: "not_searchable", failure };
     if (failure.kind === "fault" && failure.code === 6005) return { ok: false, reason: "several", failure };
-    return { ok: false, reason: "ehvd_unavailable", failure };
+    return { ok: false, reason: "ehvd_unreachable", failure };
   }
   const found = result.value.filter((gda) => isOrganisation(gda) && isActive(gda));
   if (found.length === 0) return { ok: false, reason: "not_listed" };
