@@ -9,7 +9,7 @@ import { signEidSession, type EidSession } from "@/server/auth/eid-session";
 
 const outside: EidSession = {
   requestId: 1, personNumber: "synthetic-bpk", givenName: "Eva", familyName: "Brandl",
-  level: "urn:eidgvat:eid.status.full", gdaOid: null, idToken: "synthetic-token",
+  level: "urn:eidgvat:eid.status.full", gdaOid: null,
 };
 const forbiddenDb = { select: () => assert.fail("Unauthorized request reached the database") } as unknown as Context["db"];
 const unauthorized = { code: "UNAUTHORIZED" };

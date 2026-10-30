@@ -1,4 +1,4 @@
-// Creates Dr. Hofer's room (idempotent via alias), joins her and the bot, and pins the ordy widget.
+// Creates Dr. Hofer's room (idempotent via alias), joins her and the bot, sets her display name, and pins the ordy widget.
 import { env } from "@/env";
 import { MatrixClient, roomAlias } from "@/server/matrix/client";
 
@@ -19,6 +19,8 @@ if (!roomId) {
   }));
 }
 await hofer.joinRoom(roomId);
+// The request service names the requester by this display name in the portal and in the email and SMS.
+await hofer.setDisplayName("Dr. Lena Hofer");
 
 await bot.setState(roomId, "im.vector.modular.widgets", WIDGET_ID, {
   id: WIDGET_ID,

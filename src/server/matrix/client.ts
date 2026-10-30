@@ -92,6 +92,10 @@ export class MatrixClient {
   createRoom(options: Record<string, unknown>) {
     return this.request<{ room_id: string }>("POST", "/_matrix/client/v3/createRoom", options);
   }
+
+  setDisplayName(displayname: string) {
+    return this.request("PUT", `/_matrix/client/v3/profile/${encodeURIComponent(this.userId)}/displayname`, { displayname });
+  }
 }
 
 async function raw<T>(baseUrl: string, method: string, path: string, body?: unknown, token?: string, timeoutMs = 15_000): Promise<T> {
@@ -118,6 +122,32 @@ export async function verifyOpenIdToken(token: string): Promise<string | null> {
       `/_matrix/federation/v1/openid/userinfo?access_token=${encodeURIComponent(token)}`,
     );
     return res.sub.endsWith(`:${env.MATRIX_SERVER_NAME}`) ? res.sub : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A user's display name on the homeserver, such as "Dr. Lena Hofer". Null if there is none or Matrix is not reachable.
+ * Users set it themselves, so it comes back as one line of at most 100 characters: it ends up in emails and SMS.
+ */
+export async function displayName(userId: string): Promise<string | null> {
+  try {
+    const res = await raw<{ displayname?: string }>(
+      env.MATRIX_HOMESERVER_URL,
+      "GET",
+      `/_matrix/client/v3/profile/${encodeURIComponent(userId)}/displayname`,
+      undefined,
+      undefined,
+      5_000,
+    );
+    return (
+      res.displayname
+        ?.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 100) || null
+    );
   } catch {
     return null;
   }

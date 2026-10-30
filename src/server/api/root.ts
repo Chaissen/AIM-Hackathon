@@ -1,10 +1,12 @@
 import { healthRouter } from "@/server/api/routers/health";
 import { clinicRouter } from "@/server/api/routers/clinic";
+import { requestRouter } from "@/server/api/routers/request";
 import { createCallerFactory, createTRPCRouter } from "@/server/api/trpc";
 
 export const appRouter = createTRPCRouter({
   clinic: clinicRouter,
   health: healthRouter,
+  request: requestRouter,
 });
 
 export type AppRouter = typeof appRouter;
