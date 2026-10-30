@@ -217,7 +217,18 @@ The request service keeps three Postgres tables, defined with Drizzle in `src/se
 | `answer_filed` | The request service | FHIR resource ids and the Provenance id |
 | `misdelivery_caught` | Whoever triggered it | `address_mismatch`, `wrong_person`, or `patient_mismatch` |
 
-Every entry has a UTC timestamp in `at`. The widget and `GET /audit` show the entries.
+Every entry has a UTC timestamp in `at`. The `outcome` column holds the short result: `pass`, `hold`, or `fail` for `identity_checked`, and the kind for `misdelivery_caught`. The What sits in `detail`, with these fields, which `pnpm audit:check` requires:
+
+| Event | `detail` fields |
+|---|---|
+| `request_sent` | `docType`, `channel`, `address` |
+| `link_opened` | `state` |
+| `identity_checked` | `checks`, one entry per check with its result and reason |
+| `answer_sent` | `sha256`, `size` |
+| `answer_filed` | `resources` (every filed resource as `Type/id`, which `pnpm validate` reads), `provenance` |
+| `misdelivery_caught` | `address_mismatch`: `domain`, `expectedDomain`. `wrong_person`: `checks`. `patient_mismatch`: `sha256`, `size`, `nameMatches`, `birthDateMatches`. |
+
+The widget and `GET /audit` show the entries.
 
 ## Configuration
 
@@ -291,6 +302,7 @@ src/
     requests/lifecycle.ts     request states and the Task status they map to (T04 adds the transitions)
     matrix/client.ts          Matrix client-server API
     matrix/notices.ts         notice texts and notifyRoom for Dr. Hofer's room
+    metrics/                  metrics from audit rows, validator runner, metrics table (T17, T18)
     auth/eid-session.ts       outside person's session cookie
     portal/data.ts            data loaders for the portal and SMS pages, stubs until T04, T06, T07
   bot/                        Matrix bot process and commands
@@ -300,8 +312,9 @@ scripts/
   bootstrap-matrix.ts         room, invites, widget
   seed-fhir.ts                Maria Beispiel into HAPI
   citizen.ts                  add a test citizen to the simulated ID Austria
-  validate.ts                 planned, T18: HL7 validator on every filed resource
-  audit-check.ts              planned, T17: six event types per request
+  validate.ts                 HL7 validator on every filed resource or on given files (T18)
+  audit-check.ts              six event types per request, each with who, what, and when (T17)
+  scenario.ts                 request 1, M1 to M3, request 2, and the four metrics in one run (T17, T18)
 track/                        track brief, scenario, patient.json, test documents, and our extra set in scenario/extra/
 ```
 
