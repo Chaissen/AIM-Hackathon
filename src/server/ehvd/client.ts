@@ -40,8 +40,10 @@ export const EHVD_TIMEOUT_MS = 5000;
 /** 200 descriptors, the service-wide maximum, take well under 1 MiB. */
 export const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 
-// Allowed characters from docs/EHVD.md, "Allowed characters in requests". ordy searches only exact values, so `*` is
-// never allowed: a `*` from a document would turn an exact search into a wildcard search.
+// Allowed characters from docs/EHVD.md, "Allowed characters in requests". A `*` is allowed only at the start or end of
+// `firstname` and `surname`, with two letters A to Z besides it, as the handbook's wildcard rule says. The release check
+// wraps a name from the document as `*name*`, so a `*` in the name itself lands inside and is refused.
+const WILDCARD_FIELDS = new Set(["firstname", "surname"]);
 const NAME_TEXT = /^[\p{Script=Latin}0-9 .\-~_+=/]+$/u;
 const STREET_NUMBER = /^[\p{L}0-9 .\-~_+=/]+$/u;
 const RULES: Record<string, { pattern: RegExp; max?: number }> = {
@@ -73,9 +75,11 @@ function invalidField(query: Record<string, unknown>): { field: string; detail: 
     const rule = RULES[field];
     if (!rule) return { field, detail: "is not a field of this operation" };
     const text = String(value);
-    if (text === "" || text !== text.trim()) return { field, detail: "must not be empty or start or end with a blank" };
     if (rule.max !== undefined && [...text].length > rule.max) return { field, detail: `must have at most ${rule.max} characters` };
-    if (!rule.pattern.test(text)) return { field, detail: "has a character the eHVD does not allow" };
+    const core = WILDCARD_FIELDS.has(field) ? text.replace(/^\*/, "").replace(/\*$/, "") : text;
+    if (core === "" || core !== core.trim()) return { field, detail: "must not be empty or start or end with a blank" };
+    if (core !== text && (core.match(/[A-Za-z]/g) ?? []).length < 2) return { field, detail: "needs two letters A to Z besides the wildcard" };
+    if (!rule.pattern.test(core)) return { field, detail: "has a character the eHVD does not allow" };
   }
   return null;
 }
@@ -134,7 +138,8 @@ export function createEhvdClient({ url, timeoutMs = EHVD_TIMEOUT_MS }: { url: st
     try {
       const answer = readResponse(operation, new TextDecoder("utf-8", { fatal: true }).decode(bytes));
       if (answer.kind === "fault") {
-        if (operation === "GetGDA" && answer.code === 6002) return { ok: true, value: null };
+        // 6002 is GetGDA's "nothing found". A search that sent it would mean the same.
+        if (answer.code === 6002) return { ok: true, value: operation === "GetGDA" ? null : [] };
         return failed({ kind: "fault", code: answer.code, message: answer.message });
       }
       if (status !== 200) return failed({ kind: "bad_response", detail: `HTTP ${status} without a SOAP fault` });

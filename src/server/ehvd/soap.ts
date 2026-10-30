@@ -91,14 +91,14 @@ export const FAULT_CODES = [6001, 6002, 6003, 6004, 6005, 6006] as const;
 export type FaultCode = (typeof FAULT_CODES)[number];
 
 /** The messages from the handbook (docs/EHVD.md, "Faults"), for a fault whose number is not where the mock puts it. */
-const FAULT_MESSAGES: Record<string, FaultCode> = {
-  "Content is not valid!": 6001,
-  "No compliance found!": 6002,
-  "A general error occurred!": 6003,
-  "Attribute not found!": 6004,
-  "Maximum numbers of compliances exceeded!": 6005,
-  "User/Role is not allowed to use this webservice interface!": 6006,
-};
+const FAULT_MESSAGES = new Map<string, FaultCode>([
+  ["Content is not valid!", 6001],
+  ["No compliance found!", 6002],
+  ["A general error occurred!", 6003],
+  ["Attribute not found!", 6004],
+  ["Maximum numbers of compliances exceeded!", 6005],
+  ["User/Role is not allowed to use this webservice interface!", 6006],
+]);
 
 export type SoapAnswer = { kind: "gdas"; gdas: GdaDescriptor[] } | { kind: "fault"; code: FaultCode | null; message: string };
 
@@ -177,7 +177,7 @@ function readFault(fault: XmlElement): SoapAnswer {
   const message = reason ? (childrenNamed(reason, SOAP_ENVELOPE, "Text")[0]?.text.trim() ?? "") : "";
   const detail = childrenNamed(fault, SOAP_ENVELOPE, "Detail")[0];
   const number = detail ? Number(child(detail, "code")[0]?.text.trim()) : NaN;
-  const code = (FAULT_CODES as readonly number[]).includes(number) ? (number as FaultCode) : (FAULT_MESSAGES[message] ?? null);
+  const code = (FAULT_CODES as readonly number[]).includes(number) ? (number as FaultCode) : (FAULT_MESSAGES.get(message) ?? null);
   return { kind: "fault", code, message };
 }
 

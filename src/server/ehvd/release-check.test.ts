@@ -6,7 +6,7 @@ import { parseDocument } from "@/server/documents/parse";
 import type { LabResult, RehabReport } from "@/server/documents/types";
 
 import { createEhvdClient, type EhvdClient } from "./client";
-import { checkRelease, type ReleaseInput } from "./release-check";
+import { checkRelease, type ReleaseCheck, type ReleaseInput } from "./release-check";
 import type { GdaDescriptor, GdaSearchQuery } from "./soap";
 import { startEhvdMock } from "./start-mock";
 
@@ -30,19 +30,25 @@ const lab = (edit: (markdown: string) => string = (m) => m) => parsed<LabResult>
 const rehab = (edit: (markdown: string) => string = (m) => m) => parsed<RehabReport>(edit(scenario("rehab-report-maria-beispiel.md")));
 
 const EVA_OID = "1.2.40.0.34.3.2.99.1.2";
+const LAB_OID = "1.2.40.0.34.3.1.99.1.2";
 const eva = { givenName: "Eva", familyName: "Brandl", gdaOid: EVA_OID };
 const stefan = { givenName: "Stefan", familyName: "Kern", gdaOid: null };
 
 const run = (input: Partial<ReleaseInput> & Pick<ReleaseInput, "document">) => checkRelease({ org: "Labor Kanalstraße", sender: eva, ...input }, client);
+/** A hold's reason and sentence, to compare. */
+const held = (check: ReleaseCheck) => (check.verdict === "hold" ? { reason: check.reason, sentence: check.sentence } : check);
 
-/** The mock's answers to person searches (maxResults 200), changed by `edit`. Organisation searches stay as they are. */
+// Person searches are wildcards (`*Brandl*`), organisation searches are exact.
+const isPersonSearch = (query: GdaSearchQuery) => query.surname.startsWith("*");
+/** The mock, with its answers to person searches changed by `edit`. Organisation searches stay as they are. */
 const editPeople = (edit: (gdas: GdaDescriptor[]) => GdaDescriptor[]): EhvdClient => ({
   getGda: (query) => client.getGda(query),
   gdaSearch: async (query) => {
     const result = await client.gdaSearch(query);
-    return result.ok && query.maxResults === 200 ? { ok: true, value: edit(result.value) } : result;
+    return result.ok && isPersonSearch(query) ? { ok: true, value: edit(result.value) } : result;
   },
 });
+const TOO_MANY = { ok: false, failure: { kind: "fault", code: 6005, message: "Maximum numbers of compliances exceeded!" } } as const;
 
 test("Dr. Brandl's lab result passes through the OID in her login", async () => {
   const check = await run({ document: lab() });
@@ -51,12 +57,13 @@ test("Dr. Brandl's lab result passes through the OID in her login", async () => 
   assert.equal(check.via, "claim");
   assert.equal(check.practitioner.id.id, EVA_OID);
   assert.equal(check.organisation.id.id, "1.2.40.0.34.3.1.99.1.2");
+  assert.equal(check.senderIsResponsible, true);
 });
 
 test("without the claim, or from another sender, the name search confirms her", async () => {
-  for (const sender of [{ ...eva, gdaOid: null }, { givenName: "Thomas", familyName: "Wagner", gdaOid: null }]) {
+  for (const [sender, senderIsResponsible] of [[{ ...eva, gdaOid: null }, true], [{ givenName: "Thomas", familyName: "Wagner", gdaOid: null }, false]] as const) {
     const check = await run({ document: lab(), sender });
-    assert.equal(check.verdict === "pass" && check.via, "search", sender.givenName);
+    assert.deepEqual(check.verdict === "pass" && [check.via, check.senderIsResponsible], ["search", senderIsResponsible], sender.givenName);
   }
 });
 
@@ -72,17 +79,25 @@ test("a lab result validated by someone the eHVD does not confirm is held, with 
     [validatedBy("Dr. Johanna Leitner"), stefan, "not_member", "The eHVD does not list Dr. Johanna Leitner as a member of Labor Kanalstraße."],
     [validatedBy("Dr. Anna Huber"), stefan, "not_listed", "The eHVD does not list Dr. Anna Huber."],
     [validatedBy("Dr. Eva O'Brandl"), stefan, "not_searchable", "The eHVD cannot be searched for Dr. Eva O'Brandl."],
+    // A * in the document lands inside the wildcard and is refused.
+    [validatedBy("Dr. Eva Br*"), stefan, "not_searchable", "The eHVD cannot be searched for Dr. Eva Br*."],
     [lab((m) => m.replace("Validated by: Dr. Eva Brandl, lab physician\n", "")), eva, "no_responsible_person", "The document names nobody under Validated by."],
   ];
   for (const [document, sender, reason, sentence] of cases) {
-    assert.deepEqual(await run({ document, sender }), { verdict: "hold", reason, sentence });
+    assert.deepEqual(held(await run({ document, sender })), { reason, sentence });
   }
+});
+
+test("a hold keeps what the check found, for the filing if Dr. Hofer accepts", async () => {
+  const document = lab((m) => m.replace("Dr. Eva Brandl, lab physician", "Dr. Martin Brandl, lab physician"));
+  const check = await run({ document, sender: stefan });
+  assert.deepEqual(check.verdict === "hold" && [check.reason, check.organisation?.id.id, check.practitioner?.id.id], ["not_member", "1.2.40.0.34.3.1.99.1.2", "1.2.40.0.34.3.2.99.1.4"]);
 });
 
 test("a name without a given name never passes, not even from the sender with the claim", async () => {
   const document = lab((m) => m.replace("Validated by: Dr. Eva Brandl, lab physician", "Validated by: Dr. Brandl, lab physician"));
   for (const sender of [eva, stefan]) {
-    assert.deepEqual(await run({ document, sender }), { verdict: "hold", reason: "incomplete_name", sentence: "The document does not give the full name of Dr. Brandl." });
+    assert.deepEqual(held(await run({ document, sender })), { reason: "incomplete_name", sentence: "The document does not give the full name of Dr. Brandl." });
   }
 });
 
@@ -91,43 +106,56 @@ test("the search hits must carry the document's name, however the eHVD matches n
   const lax: EhvdClient = { getGda: (query) => client.getGda(query), gdaSearch: (query) => client.gdaSearch({ ...query, firstname: undefined }) };
   const document = lab((m) => m.replace("Validated by: Dr. Eva Brandl, lab physician", "Validated by: Dr. Erika Brandl, lab physician"));
   const check = await checkRelease({ document, org: "Labor Kanalstraße", sender: stefan }, lax);
-  assert.deepEqual(check, { verdict: "hold", reason: "not_listed", sentence: "The eHVD does not list Dr. Erika Brandl." });
+  assert.deepEqual(held(check), { reason: "not_listed", sentence: "The eHVD does not list Dr. Erika Brandl." });
 });
 
-test("the search asks for the family name and compares the given name itself", async () => {
+test("the search asks for every family name that contains the document's, and compares the names itself", async () => {
   // So "Eva Maria" in the eHVD is still found for "Eva" in the document.
   const maria = editPeople((gdas) => gdas.map((gda) => (gda.id.id === EVA_OID ? { ...gda, firstname: "Eva Maria" } : gda)));
   const check = await checkRelease({ document: lab(), org: "Labor Kanalstraße", sender: stefan }, maria);
   assert.equal(check.verdict === "pass" && check.practitioner.id.id, EVA_OID);
 
-  // A family name too common for one answer adds the given name.
+  // The mock's Eva Brandl-Huber comes back for *Brandl* and carries the name. As an active member she makes two.
+  const BRANDL_HUBER = "1.2.40.0.34.3.2.99.1.5";
+  const namesake = editPeople((gdas) =>
+    gdas.map((gda) => (gda.id.id === BRANDL_HUBER ? { ...gda, status: { ehvdstatus: "Aktiv", elgastatus: "Aktiv" }, relations: { ...gda.relations, memberof: [LAB_OID] } } : gda)),
+  );
+  assert.deepEqual(held(await checkRelease({ document: lab(), org: "Labor Kanalstraße", sender: stefan }, namesake)), {
+    reason: "several_matches",
+    sentence: "The eHVD lists more than one Dr. Eva Brandl at Labor Kanalstraße.",
+  });
+});
+
+test("a family name too common for one answer adds the first given name, and holds when that is still too many", async () => {
   const queries: GdaSearchQuery[] = [];
-  const common: EhvdClient = {
+  const common = (stillTooMany: boolean): EhvdClient => ({
     getGda: (query) => client.getGda(query),
     gdaSearch: async (query) => {
+      if (!isPersonSearch(query)) return client.gdaSearch(query);
       queries.push(query);
-      if (query.maxResults === 200 && !query.firstname) return { ok: false, failure: { kind: "fault", code: 6005, message: "Maximum numbers of compliances exceeded!" } };
-      return client.gdaSearch(query);
+      return !query.firstname || stillTooMany ? TOO_MANY : client.gdaSearch(query);
     },
-  };
-  const fallback = await checkRelease({ document: lab(), org: "Labor Kanalstraße", sender: stefan }, common);
-  assert.equal(fallback.verdict === "pass" && fallback.via, "search");
-  assert.deepEqual(queries.slice(1), [
-    { surname: "Brandl", maxResults: 200 },
-    { firstname: "Eva", surname: "Brandl", maxResults: 200 },
+  });
+  const narrowed = await checkRelease({ document: lab(), org: "Labor Kanalstraße", sender: stefan }, common(false));
+  assert.equal(narrowed.verdict === "pass" && narrowed.practitioner.id.id, EVA_OID);
+  assert.deepEqual(queries, [
+    { surname: "*Brandl*", maxResults: 200 },
+    { surname: "*Brandl*", maxResults: 200, firstname: "*Eva*" },
   ]);
+  assert.deepEqual(held(await checkRelease({ document: lab(), org: "Labor Kanalstraße", sender: stefan }, common(true))), {
+    reason: "too_many_matches",
+    sentence: "The eHVD lists too many people named Brandl to confirm Dr. Eva Brandl.",
+  });
 });
 
 test("an inactive physician, or two with the same name, are held as such", async () => {
   const inactive = editPeople((gdas) => gdas.map((gda) => (gda.id.id === EVA_OID ? { ...gda, status: { ehvdstatus: "Inaktiv", elgastatus: "Inaktiv" } } : gda)));
-  assert.deepEqual(await checkRelease({ document: lab(), org: "Labor Kanalstraße", sender: stefan }, inactive), {
-    verdict: "hold",
+  assert.deepEqual(held(await checkRelease({ document: lab(), org: "Labor Kanalstraße", sender: stefan }, inactive)), {
     reason: "not_active",
     sentence: "The eHVD lists Dr. Eva Brandl as not active.",
   });
   const twins = editPeople((gdas) => gdas.flatMap((gda) => (gda.id.id === EVA_OID ? [gda, { ...gda, id: { ...gda.id, id: "1.2.40.0.34.3.2.99.7.1" } }] : [gda])));
-  assert.deepEqual(await checkRelease({ document: lab(), org: "Labor Kanalstraße", sender: stefan }, twins), {
-    verdict: "hold",
+  assert.deepEqual(held(await checkRelease({ document: lab(), org: "Labor Kanalstraße", sender: stefan }, twins)), {
     reason: "several_matches",
     sentence: "The eHVD lists more than one Dr. Eva Brandl at Labor Kanalstraße.",
   });
@@ -135,8 +163,7 @@ test("an inactive physician, or two with the same name, are held as such", async
 
 test("the organisation must be listed once, under the name the request went to", async () => {
   const nowhere = lab((m) => m.replace("# Labor Kanalstraße:", "# Labor Nirgendwo:"));
-  assert.deepEqual(await run({ document: nowhere, org: "Labor Nirgendwo" }), {
-    verdict: "hold",
+  assert.deepEqual(held(await run({ document: nowhere, org: "Labor Nirgendwo" })), {
     reason: "organisation_not_listed",
     sentence: "The eHVD does not list Labor Nirgendwo as an active organisation.",
   });
@@ -144,7 +171,7 @@ test("the organisation must be listed once, under the name the request went to",
     getGda: (query) => client.getGda(query),
     gdaSearch: async (query) => {
       const result = await client.gdaSearch(query);
-      return result.ok && query.maxResults === 10 ? { ok: true, value: result.value.flatMap(edit) } : result;
+      return result.ok && !isPersonSearch(query) ? { ok: true, value: result.value.flatMap(edit) } : result;
     },
   });
   const twice = organisations((gda) => [gda, { ...gda, id: { ...gda.id, id: "1.2.40.0.34.3.1.99.7.1" } }]);
@@ -156,17 +183,18 @@ test("the organisation must be listed once, under the name the request went to",
   assert.equal(elsewhere.verdict === "hold" && elsewhere.reason, "organisation_not_listed");
   // A hold about the organisation names the organisation.
   const unsearchable = lab((m) => m.replace("# Labor Kanalstraße:", "# Labor Kanalstraße (Wien):"));
-  assert.deepEqual(await run({ document: unsearchable, org: "Labor Kanalstraße (Wien)" }), {
-    verdict: "hold",
+  assert.deepEqual(held(await run({ document: unsearchable, org: "Labor Kanalstraße (Wien)" })), {
     reason: "not_searchable",
     sentence: "The eHVD cannot be searched for Labor Kanalstraße (Wien).",
   });
+  // Typed without ß: the eHVD matches exactly, so the heading's spelling finds the lab.
+  const typed = await run({ document: lab(), org: "Labor Kanalstrasse" });
+  assert.equal(typed.verdict === "pass" && typed.organisation.id.id, LAB_OID);
 });
 
 test("a physician of another specialty is held as the wrong role", async () => {
   const document = lab((m) => m.replace("# Labor Kanalstraße:", "# Klinikum Beispielstadt:").replace("Dr. Eva Brandl, lab physician", "Dr. Lena Hofer, internist"));
-  assert.deepEqual(await run({ document, org: "Klinikum Beispielstadt", sender: stefan }), {
-    verdict: "hold",
+  assert.deepEqual(held(await run({ document, org: "Klinikum Beispielstadt", sender: stefan })), {
     reason: "wrong_role",
     sentence: "The eHVD does not list Dr. Lena Hofer as a specialist in medical and chemical laboratory diagnostics.",
   });
@@ -194,9 +222,9 @@ test("the OID in the login must belong to the person the document names", async 
 
 test("an eHVD that is down or answers 6003 is a hold, never a pass", async () => {
   const down = await checkRelease({ document: lab(), org: "Labor Kanalstraße", sender: eva }, createEhvdClient({ url: "http://127.0.0.1:9/" }));
-  assert.deepEqual(down, { verdict: "hold", reason: "ehvd_unreachable", sentence: "The eHVD could not be reached to confirm Labor Kanalstraße." });
+  assert.deepEqual(held(down), { reason: "ehvd_unreachable", sentence: "The eHVD could not be reached to confirm Labor Kanalstraße." });
   const fault = await run({ document: lab(), sender: { ...eva, gdaOid: "1.2.40.0.34.3.1.99.9.6003" } });
-  assert.deepEqual(fault, { verdict: "hold", reason: "ehvd_unreachable", sentence: "The eHVD could not be reached to confirm Dr. Eva Brandl." });
+  assert.deepEqual(held(fault), { reason: "ehvd_error", sentence: "The eHVD answered with an error, so Dr. Eva Brandl could not be confirmed." });
 });
 
 test("the extra test documents: the release check finds the physician who validated or wrote them", async () => {

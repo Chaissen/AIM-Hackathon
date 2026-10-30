@@ -26,22 +26,32 @@ export const sameOrganisationName = (a: string, b: string) => {
   return x.size > 0 && x.size === y.size && isSubset(x, y);
 };
 
-export type OrganisationLookup =
-  | { ok: true; organisation: GdaDescriptor }
-  | { ok: false; reason: "not_listed" | "several" | "not_searchable" | "ehvd_unreachable"; failure?: EhvdFailure };
+/**
+ * Why a call did not confirm anything: ordy refused to send the value, the eHVD could not be reached, or it answered with
+ * a fault or something the WSDL does not describe.
+ */
+export type ServiceReason = "not_searchable" | "ehvd_unreachable" | "ehvd_error";
+
+export const serviceReason = (failure: EhvdFailure): ServiceReason =>
+  failure.kind === "bad_request" ? "not_searchable" : failure.kind === "unreachable" ? "ehvd_unreachable" : "ehvd_error";
+
+export type OrganisationLookup = { ok: true; organisation: GdaDescriptor } | { ok: false; reason: "not_listed" | "several" | ServiceReason };
+
+/** Organisations per search: the service-wide maximum, so 6005 needs more than 200 entries with exactly this name. */
+const ORGANISATION_RESULTS = 200;
 
 /**
- * The one active organisation with this name (docs/EHVD.md, "How ordy uses the eHVD"). The search compares the whole
- * name, so "Labor Kanal" does not find Labor Kanalstraße. Persons with the same surname do not count, and every hit is
- * compared with the name here too, so the result never rests on how the eHVD matches names.
+ * The one active organisation with this name (docs/EHVD.md, "How ordy uses the eHVD"). The eHVD compares the whole
+ * name, so "Labor Kanal" does not find Labor Kanalstraße. Persons with the same surname do not count, and every hit must
+ * also have the name's words, whatever else the eHVD returns. A `*` in the name is refused: it would be a wildcard.
  */
 export async function findOrganisation(client: EhvdClient, name: string): Promise<OrganisationLookup> {
-  const result = await client.gdaSearch({ surname: name.trim(), maxResults: 10, ehvdstatus: "Aktiv" });
+  if (name.includes("*")) return { ok: false, reason: "not_searchable" };
+  const result = await client.gdaSearch({ surname: name.trim(), maxResults: ORGANISATION_RESULTS, ehvdstatus: "Aktiv" });
   if (!result.ok) {
     const { failure } = result;
-    if (failure.kind === "bad_request") return { ok: false, reason: "not_searchable", failure };
-    if (failure.kind === "fault" && failure.code === 6005) return { ok: false, reason: "several", failure };
-    return { ok: false, reason: "ehvd_unreachable", failure };
+    if (failure.kind === "fault" && failure.code === 6005) return { ok: false, reason: "several" };
+    return { ok: false, reason: serviceReason(failure) };
   }
   const found = result.value.filter((gda) => isOrganisation(gda) && isActive(gda) && sameOrganisationName(gda.surname, name));
   if (found.length === 0) return { ok: false, reason: "not_listed" };
