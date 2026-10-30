@@ -18,19 +18,19 @@ Status on `main`, 30 October 2026: the scenario does not run end to end yet. Dr.
 | Simulated ID Austria (Keycloak) | Works: the real ID Austria claim names, five test citizens, `pnpm citizen` for more. ordy's ID Austria login is not built yet. |
 | eHVD mock, the Austrian eHealth directory of healthcare professionals and organisations | Works: SOAP 1.2 with the real eHVD WSDL and synthetic entries. ordy does not call it yet. |
 | Document parser and patient check | Built and tested on the scenario documents and our [extra test documents](track/scenario/extra/index.md), which also list the parser's known gaps. Not connected to an upload yet. |
-| Identity checks at login (level, name, person number, eHVD claim) and the Matrix notices | Built and tested. Not called yet, because the login, sending, and filing are missing. |
+| Identity checks at login (level, name, person number, the eHVD entry ID Austria sends) and the Matrix notices | Built and tested. Not called yet, because sending, the login, and the upload are missing. |
 | Sending the request by email or SMS, the ID Austria login in ordy, the answer upload | Not built yet |
 | FHIR filing: one transaction Bundle with Provenance, Task, Practitioner, and Organization, and the `answer_filed` audit entry | Built and tested. Not called yet, because the upload and the mappers are missing. |
 | FHIR mappers: Observations and DiagnosticReport for the lab result, DocumentReference for the rehab report | Not built yet |
 | eHVD address check and release check in ordy | Not built yet |
 | Metric runner (`pnpm scenario`, `pnpm validate`, `pnpm audit:check`) | Built and tested. It reports the steps that need the missing parts as blocked and their metrics as not measured. |
-| AI fallback parser | Optional, not built |
+| AI fallback parser (optional) | Built and tested with a stand-in for the model. Off without `ANTHROPIC_API_KEY`. Not called yet, because the upload is missing. |
 
 [Timeline](docs/TIMELINE.md) has the tasks and owners.
 
 ## Run it
 
-Requirements: Docker with Compose v2, Node.js 22.9 or newer, pnpm 10 (`corepack enable`, or `npm install -g pnpm@10` on Node.js 25 and newer, which no longer ship Corepack), and Java 17 or newer and internet access, only for the HL7 validator, which checks LOINC codes against tx.fhir.org. These ports must be free: 3010, 5433, 8008, 8081, 8090, 8025, 1025, 8080, and 8095. [Development](docs/DEVELOPMENT.md) has the full guide and troubleshooting.
+Requirements: Docker with Compose v2, Node.js 22.9 or newer, and pnpm 10 (`corepack enable`, or `npm install -g pnpm@10` on Node.js 25 and newer, which no longer ship Corepack). The HL7 validator also needs Java 17 or newer and internet access, because it checks LOINC codes against tx.fhir.org. These ports must be free: 3010, 5433, 8008, 8081, 8090, 8025, 1025, 8080, and 8095. [Development](docs/DEVELOPMENT.md) has the full guide and troubleshooting.
 
 ```bash
 git clone https://github.com/Chaissen/AIM-Hackathon.git
@@ -80,9 +80,10 @@ Element (Dr. Hofer) ──Matrix──▶ Synapse ◀──sync── ordy bot (
 Outside person ──email/SMS link──▶ Next.js pages (React) ──tRPC──────────────────┤
    └─ login ──▶ Keycloak (simulated ID Austria) ──ID token──▶ /auth/callback ────┤
                                                                                  ▼
-                                          appRouter (tRPC v11, zod) ── Postgres (Drizzle)
-                                                                    ├─ eHVD mock (SOAP 1.2)
-                                                                    └─ HAPI FHIR, Mailpit, Synapse
+                                                         appRouter (tRPC v11, zod)
+                                                           ├─ Postgres (Drizzle)
+                                                           ├─ eHVD mock (SOAP 1.2)
+                                                           └─ HAPI FHIR, Mailpit, Synapse
 ```
 
 This section describes the design. [Status](#status) says which parts work today.
@@ -100,10 +101,11 @@ Dr. Hofer fills in the request form in the ordy widget inside her Matrix room. T
 | Postgres | Reused | Requests, person number bindings, audit log |
 | Mailpit | Reused | Catches every outgoing email |
 | HL7 validator | Reused | Validates every filed resource |
+| Anthropic API, model `claude-opus-5-5` | Reused, optional | Second reader for the AI fallback parser, synthetic documents only |
 
-The main flow uses no AI model. Parsing, the identity checks, and the patient check are deterministic. An optional AI fallback parser, not built yet, may only read documents, never decide, and its answers always wait for Dr. Hofer ([AI rules](docs/COMPLIANCE_AND_SAFETY.md#ai-rules)).
+The main flow uses no AI model. Parsing, the identity checks, and the patient check are deterministic. Only when the parser cannot read a document does the optional AI fallback ask a model (Anthropic, `claude-opus-5-5`, off without `ANTHROPIC_API_KEY`) to read it a second time. Code still reads every value, the model's reading must agree with it, and the model can only stop a record, never choose a value. Every answer it read waits for Dr. Hofer ([AI rules](docs/COMPLIANCE_AND_SAFETY.md#ai-rules)). The fallback is built and tested but not connected to an upload yet.
 
-Simulated in the demo: ID Austria (Keycloak, without the phone-app confirmation), the eHVD (our mock), email (Mailpit), and SMS (the SMS screen). Every part we did not build can be replaced, for example Keycloak by real ID Austria. [Whitepaper](docs/WHITEPAPER.md#what-is-real-and-what-is-simulated) says what each part becomes in production, and [Architecture](docs/ARCHITECTURE.md) has the details.
+Simulated in the demo: ID Austria (Keycloak, without the phone-app confirmation), the eHVD (our mock), email (Mailpit), and SMS (the SMS screen). Each can be replaced by the real service, and every other part we did not build, such as HAPI FHIR or Synapse, by another product of its kind. [Whitepaper](docs/WHITEPAPER.md#what-is-real-and-what-is-simulated) says what each part becomes in production, and [Architecture](docs/ARCHITECTURE.md) has the details.
 
 | Part | Where | Notes |
 |---|---|---|
@@ -126,7 +128,7 @@ Short answers to the five questions of the track. They describe our design. Of w
 
 ### 1. How does an outside person prove who they are if they are in no directory?
 
-They log in with ID Austria, the Austrian state electronic ID. It gives ordy their verified name, birth date, and a person number (bPK) that stays the same for our service. ordy compares the name with the name Dr. Hofer typed. Two things back this up. The link went only to the email address or phone number Dr. Hofer gave, so the person has access to that inbox or phone. And for a healthcare professional such as Dr. Brandl, ordy checks the eHVD, the Austrian eHealth directory, which lists her role and organisation. After her first filed answer, ordy stores the person number, so only that exact person can answer as Eva Brandl at Labor Kanalstraße again. The sender needs no account with us and no entry in the PGK directory.
+They log in with ID Austria, the Austrian state electronic ID. It gives ordy their verified name, birth date, and a person number (bPK) that stays the same for our service. ordy compares the name with the name Dr. Hofer typed. Two things back this up. The link went only to the email address or phone number Dr. Hofer gave, so the person has access to that inbox or phone. And for a healthcare professional such as Dr. Brandl, ordy checks the eHVD, the Austrian eHealth directory, which lists her role and organisation. After her first filed answer, ordy stores the person number, so only that exact person can answer as Eva Brandl at Labor Kanalstraße again. Stefan Kern, a discharge manager, is in no directory at all. For him, ID Austria, the name match, the person number, and the phone number are the whole check, and the eHVD check falls on the physician who wrote the report (question 2). Nobody needs an account with us or an entry in the PGK directory.
 
 ### 2. Which identity check do you require for each type of document and why?
 
@@ -145,9 +147,9 @@ If the eHVD cannot confirm the physician, the answer waits until Dr. Hofer accep
 |---|---|
 | Lab result | One Observation per test with its LOINC code, UCUM unit, and reference range, grouped by one DiagnosticReport that carries the original document |
 | Rehab report | One DocumentReference with the report text attached and the stay period |
-| Every answer | One Provenance that targets everything filed and records who sent it, when, and how the identity was checked, including the signed ID Austria token |
+| Every answer | One Provenance that targets the clinical resources filed and records who sent it, when, and how the identity was checked, including the signed ID Austria token |
 | Every request | One Task from sent to completed, pointing at the filed results |
-| People and organisations | Practitioner and Organization for Dr. Hofer, the sender, the document author, and their organisations |
+| People and organisations | Practitioner for Dr. Hofer, the sender, and the document author. Organization for the outside organisation and for ID Austria, which signs the identity proof. |
 
 Every clinical resource points at the Patient through `subject`, and the Task points at her through `for`. The DiagnosticReport lists its Observations in `result`, the Task points at the filed results in `output`, and the Provenance lists everything filed in `target` and names the sender and the author in `agent`. One answer is filed as one transaction Bundle, so it is filed completely or not at all. [FHIR model](docs/FHIR.md) has the reference diagram and the field mapping.
 
@@ -156,7 +158,7 @@ Every clinical resource points at the Patient through `subject`, and the Task po
 ordy checks at three points. Each catch writes a `misdelivery_caught` audit entry. Dr. Hofer sees the first in the widget and gets a Matrix notice for the other two.
 
 1. Before sending: an email domain that differs from the organisation's domain in the eHVD, such as `labor-kanaI.example`, needs Dr. Hofer's confirmation.
-2. At login: the ID Austria name must match the requested person. A stranger at a mistyped address (M1) and a colleague with a forwarded email (M2) fail here and see nothing about the patient.
+2. At login: the ID Austria name must match the requested person. A stranger at a mistyped address (M1) and a colleague with a forwarded email (M2) fail here: they see neither the patient nor the document type, and they cannot answer.
 3. On answer: the patient's name and birth date in the document and in the form must match the patient record. A result for another patient (M3) is not filed.
 
 ### 5. Where does your service run: at the clinic, at the outside organisation or at a third party?
@@ -165,14 +167,14 @@ At the clinic, next to the Matrix server and the FHIR server it already runs. Pa
 
 ## Metrics
 
-We measure the four track metrics on the scenario, on the frozen build. `pnpm scenario` runs request 1, M1 to M3, and request 2 against the running stack and writes this table to `out/metrics/metrics.md`. The stopwatch test with someone new is done by hand. The results are pending until the flow runs end to end. [Whitepaper](docs/WHITEPAPER.md#how-we-measure-the-metrics) has the method in full.
+We measure the four track metrics on the scenario, on the frozen build. `pnpm scenario` drives request 1, M1 to M3, and request 2 against the running stack and writes the results to `out/metrics/metrics.md`. Today it reports every flow step as blocked, because sending, the login, and the upload are not built, so no metric is measured yet. The stopwatch test with someone new is done by hand. [Whitepaper](docs/WHITEPAPER.md#how-we-measure-the-metrics) has the method in full.
 
 | Metric | Target | How we measure | Result |
 |---|---|---|---|
-| FHIR validation | 0 errors | Run the HL7 validator (`-version 4.0`) on every resource filed during a scenario run and count issues with severity `error` or `fatal`. `pnpm validate` runs the same check on its own. | Pending |
-| Effort for the outside person | 0 installs, 0 accounts, under 2 minutes | Someone new answers request 1 with a stopwatch running from opening the email in Mailpit to pressing send. The audit timestamps from `link_opened` to `answer_sent` confirm the time. ID Austria counts as an existing state ID, not as an account with us. | Pending |
-| Misdeliveries caught | 3 of 3 | Run M1, M2, and M3 from [`misdelivery.md`](track/scenario/misdelivery.md) with request 1. M2 and M3 run on request 1 itself. M1 sends request 1 to the mistyped address, which makes it a request of its own. Each must show the outcome the test names and a `misdelivery_caught` audit entry. | Pending |
-| Audit coverage | 6 of 6 on request 1 | Check that request 1 has all six event types, each with who, what, and when: `request_sent`, `link_opened`, `identity_checked`, `answer_sent`, `answer_filed`, `misdelivery_caught`. `pnpm audit:check` lists them per request. | Pending |
+| FHIR validation | 0 errors | Run the HL7 validator (`-version 4.0`) on every resource filed during a scenario run and count issues with severity `error` or `fatal`. `pnpm validate` runs the same check on its own. | Not measured yet |
+| Effort for the outside person | 0 installs, 0 accounts, under 2 minutes | Someone new answers request 1 with a stopwatch running from opening the email in Mailpit to pressing send. The audit timestamps from `link_opened` to `answer_sent` confirm the time. ID Austria counts as an existing state ID, not as an account with us. | Not measured yet |
+| Misdeliveries caught | 3 of 3 | Run M1, M2, and M3 from [`misdelivery.md`](track/scenario/misdelivery.md) with request 1. M2 and M3 run on request 1 itself. M1 sends request 1 to the mistyped address, which makes it a request of its own. Each must show the outcome the test names and a `misdelivery_caught` audit entry. | Not measured yet |
+| Audit coverage | 6 of 6 on request 1 | Check that request 1 has all six event types, each with who, what, and when: `request_sent`, `link_opened`, `identity_checked`, `answer_sent`, `answer_filed`, `misdelivery_caught`. `pnpm audit:check` lists them per request. | Not measured yet |
 
 Not a metric result yet: the login checks for M1 and M2 and the patient check for M3 pass as unit tests in `pnpm test` (`src/server/identity/login.test.ts`, `src/server/documents/patient-check.test.ts`), but not end to end.
 
