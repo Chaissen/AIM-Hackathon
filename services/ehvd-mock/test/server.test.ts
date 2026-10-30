@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { request } from "node:http";
+import { request, type RequestOptions } from "node:http";
 import { connect } from "node:net";
 import { after, test } from "node:test";
 
@@ -71,6 +71,12 @@ test("GdaSearch finds each handbook test entry by its surname", async () => {
   assert.deepEqual(await search({ surname: "XXXeHealth Test-GDA XXXTest-GDA Support-Ordination BMG" }), [TEST_ARZT]);
 });
 
+test("GdaSearch never returns or counts the entry without timestamps, which only GetGDA reaches", async () => {
+  assert.deepEqual(await search({ surname: "*Test*", maxResults: "20" }), [TEST_AMBULATORIUM, TEST_ARZT]);
+  assert.deepEqual(await search({ surname: "*Test*", maxResults: "2" }), [TEST_AMBULATORIUM, TEST_ARZT]);
+  assert.deepEqual(await search({ surname: "ordy test entry without timestamps" }), []);
+});
+
 test("every fault from 6001 to 6005 has its documented code, message, and HTTP status", async () => {
   const cases: [string, string, number, string][] = [
     ["id with a trailing blank", getGdaXml({ id: `${EVA_BRANDL} ` }), 400, faultEnvelope("Sender", "Content is not valid!", 6001)],
@@ -78,19 +84,19 @@ test("every fault from 6001 to 6005 has its documented code, message, and HTTP s
     ["unknown Arzt-Nr", getGdaXml({ oidIssuingAuthority: "1.2.40.0.34.4.18", id: "12345" }), 500, faultEnvelope("Receiver", "No compliance found!", 6002)],
     ["well-formed unknown kind of id", getGdaXml({ oidIssuingAuthority: "1.0.2", id: "99002" }), 500, faultEnvelope("Receiver", "No compliance found!", 6002)],
     [
-      "bPK lookup, not supported",
+      "a real bPK, whose / and = the id rule rejects",
+      getGdaXml({ oidIssuingAuthority: "1.2.40.0.10.2.1.1.149", id: "QqRyJqno/aFVJYjMxkWpDJWj878=" }),
+      400,
+      faultEnvelope("Sender", "Content is not valid!", 6001),
+    ],
+    [
+      "the bPK kind of id with an id the id rule allows",
       getGdaXml({ oidIssuingAuthority: "1.2.40.0.10.2.1.1.149", id: "Njtp64gB10hpR5sYe6HxgmOQJk0" }),
       500,
       faultEnvelope("Receiver", "No compliance found!", 6002),
     ],
     ["reserved OID", getGdaXml({ id: "1.2.40.0.34.3.1.99.9.6003" }), 500, faultEnvelope("Receiver", "A general error occurred!", 6003)],
     ["entry without timestamps", getGdaXml({ id: "1.2.40.0.34.3.1.99.9.6004" }), 500, faultEnvelope("Receiver", "Attribute not found!", 6004)],
-    [
-      "search that hits the entry without timestamps",
-      searchXml({ surname: "ordy test entry without timestamps", maxResults: "10" }),
-      500,
-      faultEnvelope("Receiver", "Attribute not found!", 6004),
-    ],
     [
       "more hits than maxResults",
       searchXml({ surname: "Brandl", maxResults: "1" }),
@@ -115,6 +121,8 @@ test("a malformed field is fault 6001", async () => {
     { oidIssuingAuthority: "1..2", id: "99002" },
     { oidIssuingAuthority: "1.02", id: "99002" },
     { oidIssuingAuthority: "1", id: "99002" },
+    { oidIssuingAuthority: "3.1", id: "99002" },
+    { oidIssuingAuthority: "1.45", id: "99002" },
   ];
   const searchCases: Record<string, string>[] = [
     { surname: "", maxResults: "10" },
@@ -217,15 +225,15 @@ test("a search without hits is an empty GdaIndexResponseList", async () => {
   );
 });
 
-test("each request logs one JSON line without the search values or an unknown path", async () => {
+test("each request logs one JSON line without the search values or an unknown path", async (t) => {
   const quiet = await start();
+  t.after(quiet.close);
   await post(quiet.url, searchXml({ firstname: "Eva", surname: "Brandl", maxResults: "10" }));
   await post(quiet.url, searchXml({ surname: "Brandl", maxResults: "1" }));
   await post(quiet.url, getGdaXml({ id: "1.2.40.0.34.3.2.99.9.1" }));
   await fetch(`${quiet.url}/healthz`);
   await fetch(`${quiet.url}/ehvd.wsdl`);
   await fetch(`${quiet.url}/Patient-Maria-Beispiel-born-1961-03-12`);
-  await quiet.close();
   assert.deepEqual(
     quiet.logs.map((line) => JSON.parse(line)),
     [
@@ -258,10 +266,10 @@ test("the allowlist turns away other networks with an empty 403 and limits opera
   });
 });
 
-test("an IPv4 client of a dual-stack socket is checked and logged as IPv4", async () => {
+test("an IPv4 client of a dual-stack socket is checked and logged as IPv4", async (t) => {
   const dual = await start({ EHVD_ALLOWLIST: "127.0.0.0/8" }, "::");
+  t.after(dual.close);
   await post(dual.url, getGdaXml({ id: EVA_BRANDL }));
-  await dual.close();
   assert.deepEqual(JSON.parse(dual.logs[0]), { client: "127.0.0.1", method: "POST", path: "/", operation: "GetGDA", hits: 1, status: 200 });
 });
 
@@ -284,17 +292,21 @@ test("GET /ehvd.wsdl serves the real WSDL with the mock's address", async () => 
   assert.equal(served, realWsdl.replace('location="https://ehvdws.gesundheit.gv.at"', `location="http://127.0.0.1:${mock.port}/"`));
 });
 
-test("the WSDL address escapes the Host header and falls back without one", async () => {
-  const escaped = await new Promise<string>((resolve, reject) => {
-    request(`${mock.url}/ehvd.wsdl`, { headers: { host: 'a"b&c' } }, (response) => {
-      let text = "";
-      response.on("data", (chunk) => (text += chunk));
-      response.on("end", () => resolve(text));
-    })
-      .on("error", reject)
-      .end();
-  });
+test("the WSDL address escapes the Host header and falls back without one or with an empty one", async () => {
+  const wsdlWith = (options: RequestOptions) =>
+    new Promise<string>((resolve, reject) => {
+      request(`${mock.url}/ehvd.wsdl`, options, (response) => {
+        let text = "";
+        response.on("data", (chunk) => (text += chunk));
+        response.on("end", () => resolve(text));
+      })
+        .on("error", reject)
+        .end();
+    });
+  const escaped = await wsdlWith({ headers: { host: 'a"b&c' } });
   assert.equal(escaped.includes('<soap12:address location="http://a&quot;b&amp;c/"/>'), true);
+  const empty = await wsdlWith({ setHost: false, headers: { host: "" } });
+  assert.equal(empty.includes('<soap12:address location="http://localhost:8095/"/>'), true);
 
   const fallback = await new Promise<string>((resolve, reject) => {
     const socket = connect(mock.port, "127.0.0.1", () => socket.end("GET /ehvd.wsdl HTTP/1.0\r\n\r\n"));

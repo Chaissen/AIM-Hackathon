@@ -84,8 +84,8 @@ services:
       context: .
       dockerfile: services/ehvd-mock/Dockerfile
     environment:
-      EHVD_ALLOWLIST: "${EHVD_ALLOWLIST:-127.0.0.0/8, ::1/128, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7}"
-      EHVD_SCHEMA_ERRORS: ${EHVD_SCHEMA_ERRORS:-http-403}
+      EHVD_ALLOWLIST: ${EHVD_ALLOWLIST:-}
+      EHVD_SCHEMA_ERRORS: ${EHVD_SCHEMA_ERRORS:-}
     ports:
       - "8095:8095"
     healthcheck:

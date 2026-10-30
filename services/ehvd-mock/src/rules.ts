@@ -22,9 +22,12 @@ const isIdChar = (char: string) => isAsciiLetter(char) || isDigit(char) || char 
 const isOidChar = (char: string) => isDigit(char) || char === ".";
 const isRoleChar = (char: string) => isDigit(char) || char === "." || isLatinLetter(char);
 const isOidArc = (arc: string) => arc === "0" || (arc !== "" && arc[0] !== "0" && [...arc].every(isDigit));
+// ITU-T X.660 allows only 0, 1, and 2 as the first arc, and below 0 and 1 only 0 to 39 as the second.
 const isOid = (text: string) => {
   const arcs = text.split(".");
-  return arcs.length >= 2 && arcs.every(isOidArc);
+  if (arcs.length < 2 || !arcs.every(isOidArc)) return false;
+  const [first, second] = arcs;
+  return first === "2" || ((first === "0" || first === "1") && Number(second) < 40);
 };
 
 type TextRule = { maxLength?: number; allowed: (char: string) => boolean; wildcard?: true; form?: (text: string) => boolean };

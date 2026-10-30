@@ -34,11 +34,11 @@ function parseAllowlist(text: string): Allowlist {
 }
 
 export function parseConfig(env: Record<string, string | undefined>): Config {
-  const schemaErrors = env.EHVD_SCHEMA_ERRORS ?? "http-403";
+  const schemaErrors = env.EHVD_SCHEMA_ERRORS || "http-403";
   if (schemaErrors !== "http-403" && schemaErrors !== "fault-6001") {
     throw new Error(`EHVD_SCHEMA_ERRORS must be http-403 or fault-6001, not "${schemaErrors}"`);
   }
-  return { allowlist: parseAllowlist(env.EHVD_ALLOWLIST ?? DEFAULT_ALLOWLIST), schemaErrors };
+  return { allowlist: parseAllowlist(env.EHVD_ALLOWLIST || DEFAULT_ALLOWLIST), schemaErrors };
 }
 
 // Node reports IPv4 clients of a dual-stack socket as ::ffff:a.b.c.d.

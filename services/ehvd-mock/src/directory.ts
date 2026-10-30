@@ -1,20 +1,12 @@
+import { chamber, idKinds, stateGovernment, type IdKind } from "./codes.ts";
 import { generateEntries } from "./generated.ts";
 import type { GdaAddress, GdaRelationship, GdaRoles, GdaStatus, GdaTimestamps } from "./soap.ts";
 
 export const EHVD_AUTHORITY = "1.2.40.0.34";
 
-const idKinds = {
-  kaNr: "1.2.40.0.34.4.10",
-  arztNr: "1.2.40.0.34.4.18",
-  ambuNr: "1.2.40.0.34.4.20",
-  vpnr: "1.2.40.0.10.1.4.3.2",
-  gbrId: "1.2.40.0.34.4.23",
-} as const;
-
-type IdKind = (typeof idKinds)[keyof typeof idKinds];
-
 export type DirectoryEntry = {
   oid: string;
+  getGdaOnly?: true;
   otherIds?: { kind: IdKind; number: string }[];
   status: GdaStatus;
   firstname?: string;
@@ -36,8 +28,6 @@ export type DirectoryEntry = {
 export const RESERVED_6003 = "1.2.40.0.34.3.1.99.9.6003";
 
 const active: GdaStatus = { ehvdstatus: "Aktiv", elgastatus: "Aktiv" };
-const chamber = "Registrierungsstelle:Österreichische Ärztekammer";
-const stateGovernment = "Registrierungsstelle:Amt der Landesregierung";
 
 const klinikum = "1.2.40.0.34.3.1.99.1.1";
 const labor = "1.2.40.0.34.3.1.99.1.2";
@@ -197,6 +187,7 @@ const idAustriaTestDoctor: DirectoryEntry = {
 
 const withoutTimestamps: DirectoryEntry = {
   oid: "1.2.40.0.34.3.1.99.9.6004",
+  getGdaOnly: true,
   status: active,
   surname: "ordy test entry without timestamps",
   description: [stateGovernment],

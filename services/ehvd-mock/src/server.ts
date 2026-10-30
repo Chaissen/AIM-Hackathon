@@ -19,7 +19,7 @@ function loadWsdl() {
     throw new Error(`docs/ehvd/eHVD.wsdl must contain ${REAL_LOCATION} exactly once`);
   }
   return (host: string | undefined) =>
-    Buffer.concat([wsdl.subarray(0, at), Buffer.from(`location="${escapeXml(`http://${host ?? "localhost:8095"}/`)}"`), wsdl.subarray(at + REAL_LOCATION.length)]);
+    Buffer.concat([wsdl.subarray(0, at), Buffer.from(`location="${escapeXml(`http://${host || "localhost:8095"}/`)}"`), wsdl.subarray(at + REAL_LOCATION.length)]);
 }
 
 async function readBody(req: IncomingMessage) {
