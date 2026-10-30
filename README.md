@@ -18,18 +18,19 @@ Status on `main`, 30 October 2026: the scenario does not run end to end yet. Dr.
 | Simulated ID Austria (Keycloak) | Works: the real ID Austria claim names, five test citizens, `pnpm citizen` for more. ordy's ID Austria login is not built yet. |
 | eHVD mock, the Austrian eHealth directory of healthcare professionals and organisations | Works: SOAP 1.2 with the real eHVD WSDL and synthetic entries. ordy does not call it yet. |
 | Document parser and patient check | Built and tested on the scenario documents and our [extra test documents](track/scenario/extra/index.md), which also list the parser's known gaps. Not connected to an upload yet. |
-| Identity checks at login (level, name, person number, eHVD claim) and the Matrix notices | Built and tested. Not called yet, because the login is missing. |
+| Identity checks at login (level, name, person number, eHVD claim) and the Matrix notices | Built and tested. Not called yet, because the login, sending, and filing are missing. |
 | Sending the request by email or SMS, the ID Austria login in ordy, the answer upload | Not built yet |
-| FHIR mapping and filing (Observations, DiagnosticReport, DocumentReference, Provenance, Task) | Not built yet |
+| FHIR filing: one transaction Bundle with Provenance, Task, Practitioner, and Organization, and the `answer_filed` audit entry | Built and tested. Not called yet, because the upload and the mappers are missing. |
+| FHIR mappers: Observations and DiagnosticReport for the lab result, DocumentReference for the rehab report | Not built yet |
 | eHVD address check and release check in ordy | Not built yet |
-| Metric scripts (`pnpm validate`, `pnpm audit:check`) | Not built yet |
+| Metric runner (`pnpm scenario`, `pnpm validate`, `pnpm audit:check`) | Built and tested. It reports the steps that need the missing parts as blocked and their metrics as not measured. |
 | AI fallback parser | Optional, not built |
 
 [Timeline](docs/TIMELINE.md) has the tasks and owners.
 
 ## Run it
 
-Requirements: Docker with Compose v2, Node.js 22.9 or newer, pnpm 10 (`corepack enable`, or `npm install -g pnpm@10` on Node.js 25 and newer, which no longer ship Corepack), and Java 17 or newer, only for the HL7 validator. These ports must be free: 3010, 5433, 8008, 8081, 8090, 8025, 1025, 8080, and 8095. [Development](docs/DEVELOPMENT.md) has the full guide and troubleshooting.
+Requirements: Docker with Compose v2, Node.js 22.9 or newer, pnpm 10 (`corepack enable`, or `npm install -g pnpm@10` on Node.js 25 and newer, which no longer ship Corepack), and Java 17 or newer and internet access, only for the HL7 validator, which checks LOINC codes against tx.fhir.org. These ports must be free: 3010, 5433, 8008, 8081, 8090, 8025, 1025, 8080, and 8095. [Development](docs/DEVELOPMENT.md) has the full guide and troubleshooting.
 
 ```bash
 git clone https://github.com/Chaissen/AIM-Hackathon.git
@@ -77,7 +78,7 @@ Check that it works:
 Element (Dr. Hofer) ──Matrix──▶ Synapse ◀──sync── ordy bot (tsx) ──createCaller──┐
    └─ widget (iframe, React) ──tRPC + Matrix OpenID token────────────────────────┤
 Outside person ──email/SMS link──▶ Next.js pages (React) ──tRPC──────────────────┤
-   └─ login ──OpenID Connect──▶ Keycloak (simulated ID Austria) ──ID token───────┤
+   └─ login ──▶ Keycloak (simulated ID Austria) ──ID token──▶ /auth/callback ────┤
                                                                                  ▼
                                           appRouter (tRPC v11, zod) ── Postgres (Drizzle)
                                                                     ├─ eHVD mock (SOAP 1.2)
@@ -92,7 +93,7 @@ Dr. Hofer fills in the request form in the ordy widget inside her Matrix room. T
 |---|---|---|
 | ordy web | Built: Next.js 16, tRPC v11, zod, Drizzle, shadcn/ui | Widget for Dr. Hofer, outside portal, identity checks, parser, patient check, FHIR mapping, audit log, SMS screen |
 | ordy bot | Built: Node.js process with a small Matrix client on `fetch` | `!help` and `!status` in Dr. Hofer's room |
-| eHVD mock | Built: Node.js service in `services/ehvd-mock/` | The Austrian eHealth directory with the real SOAP interface and synthetic entries |
+| eHVD mock | Built: Node.js service in `services/ehvd-mock/` | Our mock of the eHVD with the real SOAP interface and synthetic entries |
 | Synapse and Element Web | Reused | Matrix server for `klinikum.example` and Dr. Hofer's chat client |
 | Keycloak | Configured | Simulated ID Austria with the real claim names |
 | HAPI FHIR | Reused | FHIR R4 server |
@@ -102,7 +103,7 @@ Dr. Hofer fills in the request form in the ordy widget inside her Matrix room. T
 
 The main flow uses no AI model. Parsing, the identity checks, and the patient check are deterministic. An optional AI fallback parser, not built yet, may only read documents, never decide, and its answers always wait for Dr. Hofer ([AI rules](docs/COMPLIANCE_AND_SAFETY.md#ai-rules)).
 
-Simulated in the demo: ID Austria (Keycloak, without the phone-app confirmation), the eHVD (our mock), email (Mailpit), and SMS (the SMS screen). Every reused part can be replaced, for example Keycloak by real ID Austria. [Whitepaper](docs/WHITEPAPER.md#what-is-real-and-what-is-simulated) says what each part becomes in production, and [Architecture](docs/ARCHITECTURE.md) has the details.
+Simulated in the demo: ID Austria (Keycloak, without the phone-app confirmation), the eHVD (our mock), email (Mailpit), and SMS (the SMS screen). Every part we did not build can be replaced, for example Keycloak by real ID Austria. [Whitepaper](docs/WHITEPAPER.md#what-is-real-and-what-is-simulated) says what each part becomes in production, and [Architecture](docs/ARCHITECTURE.md) has the details.
 
 | Part | Where | Notes |
 |---|---|---|
@@ -120,15 +121,15 @@ Dependencies must be public for at least 7 days (`minimumReleaseAge` in `pnpm-wo
 
 ## Design answers
 
-Short answers to the five questions of the track. They describe our design. Of the checks they name, the identity checks at login and the patient check are built and unit-tested, but not connected to the flow yet. [Status](#status) says what runs, and the [Whitepaper](docs/WHITEPAPER.md#design-answers) has the full answers and the reasons.
+Short answers to the five questions of the track. They describe our design. Of what they describe, the identity checks at login, the patient check, and the filing Bundle with Provenance and Task are built and unit-tested, but not connected to the flow yet. [Status](#status) says what runs, and the [Whitepaper](docs/WHITEPAPER.md#design-answers) has the full answers and the reasons.
 
 ### 1. How does an outside person prove who they are if they are in no directory?
 
-They log in with ID Austria, the Austrian state electronic ID. It gives ordy their verified name, birth date, and a person number (bPK) that stays the same for our service. ordy compares the name with the name Dr. Hofer typed. Two things back this up: the link reached only the email address or phone number Dr. Hofer gave, and ordy checks the physician who released the document in the eHVD, the Austrian eHealth directory of healthcare professionals. After the first verified answer, ordy stores the person number, so only that exact person can answer as "Eva Brandl" again. The sender needs no account with us and no entry in the PGK directory.
+They log in with ID Austria, the Austrian state electronic ID. It gives ordy their verified name, birth date, and a person number (bPK) that stays the same for our service. ordy compares the name with the name Dr. Hofer typed. Two things back this up. The link went only to the email address or phone number Dr. Hofer gave, so the person has access to that inbox or phone. And for a healthcare professional such as Dr. Brandl, ordy checks the eHVD, the Austrian eHealth directory, which lists her role and organisation. After her first filed answer, ordy stores the person number, so only that exact person can answer as Eva Brandl at Labor Kanalstraße again. The sender needs no account with us and no entry in the PGK directory.
 
 ### 2. Which identity check do you require for each type of document and why?
 
-Every outside person sees the patient once the identity check passes. So every sender, for every document type, needs an ID Austria login with full function, a name that matches the person Dr. Hofer named, and the stored person number once one is known. In our reading of Austrian law, only the physician responsible for the content may release a document, so ordy also checks that physician in the eHVD:
+Every outside person sees the patient once the identity check passes. So every sender, for every document type, needs an ID Austria login with full function (the identity was checked in person once), a name that matches the person Dr. Hofer named, and the stored person number once one is known. In our reading of Austrian law, only the physician responsible for the content may release a document, so ordy also checks that physician in the eHVD:
 
 | Document | Release check | Why |
 |---|---|---|
@@ -163,14 +164,14 @@ At the clinic, next to the Matrix server and the FHIR server it already runs. Pa
 
 ## Metrics
 
-We measure the four track metrics on the scenario, on the frozen build. The results are pending until the flow runs end to end. [Whitepaper](docs/WHITEPAPER.md#how-we-measure-the-metrics) has the method in full.
+We measure the four track metrics on the scenario, on the frozen build. `pnpm scenario` runs request 1, M1 to M3, and request 2 against the running stack and writes this table to `out/metrics/metrics.md`. The stopwatch test with someone new is done by hand. The results are pending until the flow runs end to end. [Whitepaper](docs/WHITEPAPER.md#how-we-measure-the-metrics) has the method in full.
 
 | Metric | Target | How we measure | Result |
 |---|---|---|---|
-| FHIR validation | 0 errors | Run the HL7 validator (`-version 4.0`) on every resource filed during a scenario run and count issues with severity `error`. `pnpm validate` will do this. | Pending |
+| FHIR validation | 0 errors | Run the HL7 validator (`-version 4.0`) on every resource filed during a scenario run and count issues with severity `error` or `fatal`. `pnpm validate` runs the same check on its own. | Pending |
 | Effort for the outside person | 0 installs, 0 accounts, under 2 minutes | Someone new answers request 1 with a stopwatch running from opening the email in Mailpit to pressing send. The audit timestamps from `link_opened` to `answer_sent` confirm the time. ID Austria counts as an existing state ID, not as an account with us. | Pending |
-| Misdeliveries caught | 3 of 3 | Run M1, M2, and M3 from [`misdelivery.md`](track/scenario/misdelivery.md) on request 1. Each must show the outcome the test names and a `misdelivery_caught` audit entry. | Pending |
-| Audit coverage | 6 of 6 | Check that a request has all six event types, each with who, what, and when: `request_sent`, `link_opened`, `identity_checked`, `answer_sent`, `answer_filed`, `misdelivery_caught`. `pnpm audit:check` will do this. | Pending |
+| Misdeliveries caught | 3 of 3 | Run M1, M2, and M3 from [`misdelivery.md`](track/scenario/misdelivery.md) with request 1. M2 and M3 run on request 1 itself. M1 sends request 1 to the mistyped address, which makes it a request of its own. Each must show the outcome the test names and a `misdelivery_caught` audit entry. | Pending |
+| Audit coverage | 6 of 6 on request 1 | Check that request 1 has all six event types, each with who, what, and when: `request_sent`, `link_opened`, `identity_checked`, `answer_sent`, `answer_filed`, `misdelivery_caught`. `pnpm audit:check` lists them per request. | Pending |
 
 Not a metric result yet: the login checks for M1 and M2 and the patient check for M3 pass as unit tests in `pnpm test` (`src/server/identity/login.test.ts`, `src/server/documents/patient-check.test.ts`), but not end to end.
 
