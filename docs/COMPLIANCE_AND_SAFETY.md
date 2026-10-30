@@ -104,7 +104,7 @@ The README and the video show this text:
 | Message content rule and its check | Dev 1 builds it, Doc 1 approves template changes |
 | Identity rules | Dev 3 builds them, Doc 1 approves policy changes |
 | AI rules | Dev 3 |
-| Disclaimer everywhere it belongs | Dev 1 in the README and the app, Doc 2 in the video |
+| Documentation and video disclaimer | Dev 1 in the README, Doc 2 in the video |
 | Final safety sign-off | Doc 1 |
 
 ## Clinical review
