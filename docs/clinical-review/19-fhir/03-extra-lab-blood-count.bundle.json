@@ -1,0 +1,750 @@
+{
+  "resourceType": "Bundle",
+  "type": "transaction",
+  "entry": [
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000001",
+      "resource": {
+        "resourceType": "Practitioner",
+        "name": [
+          {
+            "family": "Hofer",
+            "given": [
+              "Lena"
+            ],
+            "prefix": [
+              "Dr."
+            ]
+          }
+        ],
+        "identifier": [
+          {
+            "system": "urn:ietf:rfc:3986",
+            "value": "urn:oid:1.2.40.0.34.3.2.99.1.1"
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "Practitioner",
+        "ifNoneExist": "identifier=urn:ietf:rfc:3986|urn:oid:1.2.40.0.34.3.2.99.1.1"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
+      "resource": {
+        "resourceType": "Practitioner",
+        "name": [
+          {
+            "family": "Brandl",
+            "given": [
+              "Eva"
+            ],
+            "prefix": [
+              "Dr."
+            ]
+          }
+        ],
+        "identifier": [
+          {
+            "system": "urn:ietf:rfc:3986",
+            "value": "urn:oid:1.2.40.0.34.3.2.99.1.2"
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "Practitioner",
+        "ifNoneExist": "identifier=urn:ietf:rfc:3986|urn:oid:1.2.40.0.34.3.2.99.1.2"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000003",
+      "resource": {
+        "resourceType": "Organization",
+        "name": "Labor Kanalstraße",
+        "identifier": [
+          {
+            "system": "urn:ietf:rfc:3986",
+            "value": "urn:oid:1.2.40.0.34.3.1.99.1.2"
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "Organization",
+        "ifNoneExist": "identifier=urn:ietf:rfc:3986|urn:oid:1.2.40.0.34.3.1.99.1.2"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000004",
+      "resource": {
+        "resourceType": "Organization",
+        "name": "ID Austria (simulation)",
+        "identifier": [
+          {
+            "system": "urn:ietf:rfc:3986",
+            "value": "http://localhost:8080/realms/idaustria-sim"
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "Organization",
+        "ifNoneExist": "identifier=urn:ietf:rfc:3986|http://localhost:8080/realms/idaustria-sim"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000005",
+      "resource": {
+        "resourceType": "DiagnosticReport",
+        "status": "final",
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/v2-0074",
+                "code": "LAB"
+              }
+            ]
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "11502-2"
+            }
+          ],
+          "text": "Labor Kanalstraße: lab report"
+        },
+        "subject": {
+          "reference": "Patient/maria-beispiel"
+        },
+        "effectiveDateTime": "2026-10-26T07:50:00+01:00",
+        "issued": "2026-10-26T10:15:00+01:00",
+        "performer": [
+          {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000003"
+          }
+        ],
+        "resultsInterpreter": [
+          {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000002"
+          }
+        ],
+        "result": [
+          {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000006"
+          },
+          {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000007"
+          },
+          {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000008"
+          },
+          {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000009"
+          },
+          {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000010"
+          },
+          {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000011"
+          }
+        ],
+        "conclusion": "Mild anaemia with slightly raised platelets and CRP. Please check for a source of inflammation before the procedure.",
+        "presentedForm": [
+          {
+            "contentType": "text/markdown; charset=utf-8",
+            "data": "IyBMYWJvciBLYW5hbHN0cmHDn2U6IGxhYiByZXBvcnQKClBhdGllbnQ6IE1hcmlhIEJlaXNwaWVsLCBib3JuIDEyIE1hcmNoIDE5NjEKUmVxdWVzdGVkIGJ5OiBEci4gTGVuYSBIb2ZlciwgS2xpbmlrdW0gQmVpc3BpZWxzdGFkdApTYW1wbGUgdGFrZW46IDI2IE9jdG9iZXIgMjAyNiwgMDc6NTAKUmVwb3J0ZWQ6IDI2IE9jdG9iZXIgMjAyNiwgMTA6MTUKCnwgVGVzdCB8IFJlc3VsdCB8IFVuaXQgfCBSZWZlcmVuY2UgcmFuZ2UgfCBMT0lOQyBjb2RlIHwKfC0tLXwtLS18LS0tfC0tLXwtLS18CnwgSGFlbW9nbG9iaW4gfCAxMS40IHwgZy9kTCB8IDEyLjAgdG8gMTYuMCB8IDcxOC03IHwKfCBMZXVrb2N5dGVzIHwgNy45IHwgMTBeOS9MIHwgNC4wIHRvIDEwLjAgfCA2NjkwLTIgfAp8IEVyeXRocm9jeXRlcyB8IDMuODIgfCAxMF4xMi9MIHwgMy45MCB0byA1LjIwIHwgNzg5LTggfAp8IEhhZW1hdG9jcml0IHwgMzQuNiB8ICUgfCAzNi4wIHRvIDQ2LjAgfCA0NTQ0LTMgfAp8IFBsYXRlbGV0cyB8IDQxMiB8IDEwXjkvTCB8IDE1MCB0byA0MDAgfCA3NzctMyB8CnwgQy1yZWFjdGl2ZSBwcm90ZWluIHwgMTQgfCBtZy9MIHwgPCA1IHwgMTk4OC01IHwKCk1pbGQgYW5hZW1pYSB3aXRoIHNsaWdodGx5IHJhaXNlZCBwbGF0ZWxldHMgYW5kIENSUC4gUGxlYXNlIGNoZWNrIGZvciBhIHNvdXJjZSBvZiBpbmZsYW1tYXRpb24gYmVmb3JlIHRoZSBwcm9jZWR1cmUuCgpWYWxpZGF0ZWQgYnk6IERyLiBFdmEgQnJhbmRsLCBsYWIgcGh5c2ljaWFuCg=="
+          }
+        ],
+        "identifier": [
+          {
+            "system": "urn:aim-t2:answer",
+            "value": "3:5d61cd65d5e77928ee750a985d5976d47e46d23c8caec43018e2b5cdaff938d9:output"
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "DiagnosticReport",
+        "ifNoneExist": "identifier=urn:aim-t2:answer|3:5d61cd65d5e77928ee750a985d5976d47e46d23c8caec43018e2b5cdaff938d9:output"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000006",
+      "resource": {
+        "resourceType": "Observation",
+        "status": "final",
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                "code": "laboratory"
+              }
+            ]
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "718-7"
+            }
+          ],
+          "text": "Haemoglobin"
+        },
+        "subject": {
+          "reference": "Patient/maria-beispiel"
+        },
+        "effectiveDateTime": "2026-10-26T07:50:00+01:00",
+        "issued": "2026-10-26T10:15:00+01:00",
+        "performer": [
+          {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000002"
+          }
+        ],
+        "valueQuantity": {
+          "value": 11.4,
+          "unit": "g/dL",
+          "system": "http://unitsofmeasure.org",
+          "code": "g/dL"
+        },
+        "interpretation": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+                "code": "L"
+              }
+            ]
+          }
+        ],
+        "referenceRange": [
+          {
+            "low": {
+              "value": 12,
+              "unit": "g/dL",
+              "system": "http://unitsofmeasure.org",
+              "code": "g/dL"
+            },
+            "high": {
+              "value": 16,
+              "unit": "g/dL",
+              "system": "http://unitsofmeasure.org",
+              "code": "g/dL"
+            },
+            "text": "12.0 to 16.0"
+          }
+        ],
+        "identifier": [
+          {
+            "system": "urn:aim-t2:answer",
+            "value": "3:5d61cd65d5e77928ee750a985d5976d47e46d23c8caec43018e2b5cdaff938d9:result-1"
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "Observation",
+        "ifNoneExist": "identifier=urn:aim-t2:answer|3:5d61cd65d5e77928ee750a985d5976d47e46d23c8caec43018e2b5cdaff938d9:result-1"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000007",
+      "resource": {
+        "resourceType": "Observation",
+        "status": "final",
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                "code": "laboratory"
+              }
+            ]
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "6690-2"
+            }
+          ],
+          "text": "Leukocytes"
+        },
+        "subject": {
+          "reference": "Patient/maria-beispiel"
+        },
+        "effectiveDateTime": "2026-10-26T07:50:00+01:00",
+        "issued": "2026-10-26T10:15:00+01:00",
+        "performer": [
+          {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000002"
+          }
+        ],
+        "valueQuantity": {
+          "value": 7.9,
+          "unit": "10^9/L",
+          "system": "http://unitsofmeasure.org",
+          "code": "10*9/L"
+        },
+        "interpretation": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+                "code": "N"
+              }
+            ]
+          }
+        ],
+        "referenceRange": [
+          {
+            "low": {
+              "value": 4,
+              "unit": "10^9/L",
+              "system": "http://unitsofmeasure.org",
+              "code": "10*9/L"
+            },
+            "high": {
+              "value": 10,
+              "unit": "10^9/L",
+              "system": "http://unitsofmeasure.org",
+              "code": "10*9/L"
+            },
+            "text": "4.0 to 10.0"
+          }
+        ],
+        "identifier": [
+          {
+            "system": "urn:aim-t2:answer",
+            "value": "3:5d61cd65d5e77928ee750a985d5976d47e46d23c8caec43018e2b5cdaff938d9:result-2"
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "Observation",
+        "ifNoneExist": "identifier=urn:aim-t2:answer|3:5d61cd65d5e77928ee750a985d5976d47e46d23c8caec43018e2b5cdaff938d9:result-2"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000008",
+      "resource": {
+        "resourceType": "Observation",
+        "status": "final",
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                "code": "laboratory"
+              }
+            ]
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "789-8"
+            }
+          ],
+          "text": "Erythrocytes"
+        },
+        "subject": {
+          "reference": "Patient/maria-beispiel"
+        },
+        "effectiveDateTime": "2026-10-26T07:50:00+01:00",
+        "issued": "2026-10-26T10:15:00+01:00",
+        "performer": [
+          {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000002"
+          }
+        ],
+        "valueQuantity": {
+          "value": 3.82,
+          "unit": "10^12/L",
+          "system": "http://unitsofmeasure.org",
+          "code": "10*12/L"
+        },
+        "interpretation": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+                "code": "L"
+              }
+            ]
+          }
+        ],
+        "referenceRange": [
+          {
+            "low": {
+              "value": 3.9,
+              "unit": "10^12/L",
+              "system": "http://unitsofmeasure.org",
+              "code": "10*12/L"
+            },
+            "high": {
+              "value": 5.2,
+              "unit": "10^12/L",
+              "system": "http://unitsofmeasure.org",
+              "code": "10*12/L"
+            },
+            "text": "3.90 to 5.20"
+          }
+        ],
+        "identifier": [
+          {
+            "system": "urn:aim-t2:answer",
+            "value": "3:5d61cd65d5e77928ee750a985d5976d47e46d23c8caec43018e2b5cdaff938d9:result-3"
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "Observation",
+        "ifNoneExist": "identifier=urn:aim-t2:answer|3:5d61cd65d5e77928ee750a985d5976d47e46d23c8caec43018e2b5cdaff938d9:result-3"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000009",
+      "resource": {
+        "resourceType": "Observation",
+        "status": "final",
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                "code": "laboratory"
+              }
+            ]
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "4544-3"
+            }
+          ],
+          "text": "Haematocrit"
+        },
+        "subject": {
+          "reference": "Patient/maria-beispiel"
+        },
+        "effectiveDateTime": "2026-10-26T07:50:00+01:00",
+        "issued": "2026-10-26T10:15:00+01:00",
+        "performer": [
+          {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000002"
+          }
+        ],
+        "valueQuantity": {
+          "value": 34.6,
+          "unit": "%",
+          "system": "http://unitsofmeasure.org",
+          "code": "%"
+        },
+        "interpretation": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+                "code": "L"
+              }
+            ]
+          }
+        ],
+        "referenceRange": [
+          {
+            "low": {
+              "value": 36,
+              "unit": "%",
+              "system": "http://unitsofmeasure.org",
+              "code": "%"
+            },
+            "high": {
+              "value": 46,
+              "unit": "%",
+              "system": "http://unitsofmeasure.org",
+              "code": "%"
+            },
+            "text": "36.0 to 46.0"
+          }
+        ],
+        "identifier": [
+          {
+            "system": "urn:aim-t2:answer",
+            "value": "3:5d61cd65d5e77928ee750a985d5976d47e46d23c8caec43018e2b5cdaff938d9:result-4"
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "Observation",
+        "ifNoneExist": "identifier=urn:aim-t2:answer|3:5d61cd65d5e77928ee750a985d5976d47e46d23c8caec43018e2b5cdaff938d9:result-4"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000010",
+      "resource": {
+        "resourceType": "Observation",
+        "status": "final",
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                "code": "laboratory"
+              }
+            ]
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "777-3"
+            }
+          ],
+          "text": "Platelets"
+        },
+        "subject": {
+          "reference": "Patient/maria-beispiel"
+        },
+        "effectiveDateTime": "2026-10-26T07:50:00+01:00",
+        "issued": "2026-10-26T10:15:00+01:00",
+        "performer": [
+          {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000002"
+          }
+        ],
+        "valueQuantity": {
+          "value": 412,
+          "unit": "10^9/L",
+          "system": "http://unitsofmeasure.org",
+          "code": "10*9/L"
+        },
+        "interpretation": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+                "code": "H"
+              }
+            ]
+          }
+        ],
+        "referenceRange": [
+          {
+            "low": {
+              "value": 150,
+              "unit": "10^9/L",
+              "system": "http://unitsofmeasure.org",
+              "code": "10*9/L"
+            },
+            "high": {
+              "value": 400,
+              "unit": "10^9/L",
+              "system": "http://unitsofmeasure.org",
+              "code": "10*9/L"
+            },
+            "text": "150 to 400"
+          }
+        ],
+        "identifier": [
+          {
+            "system": "urn:aim-t2:answer",
+            "value": "3:5d61cd65d5e77928ee750a985d5976d47e46d23c8caec43018e2b5cdaff938d9:result-5"
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "Observation",
+        "ifNoneExist": "identifier=urn:aim-t2:answer|3:5d61cd65d5e77928ee750a985d5976d47e46d23c8caec43018e2b5cdaff938d9:result-5"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000011",
+      "resource": {
+        "resourceType": "Observation",
+        "status": "final",
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                "code": "laboratory"
+              }
+            ]
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "1988-5"
+            }
+          ],
+          "text": "C-reactive protein"
+        },
+        "subject": {
+          "reference": "Patient/maria-beispiel"
+        },
+        "effectiveDateTime": "2026-10-26T07:50:00+01:00",
+        "issued": "2026-10-26T10:15:00+01:00",
+        "performer": [
+          {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000002"
+          }
+        ],
+        "valueQuantity": {
+          "value": 14,
+          "unit": "mg/L",
+          "system": "http://unitsofmeasure.org",
+          "code": "mg/L"
+        },
+        "referenceRange": [
+          {
+            "text": "< 5"
+          }
+        ],
+        "identifier": [
+          {
+            "system": "urn:aim-t2:answer",
+            "value": "3:5d61cd65d5e77928ee750a985d5976d47e46d23c8caec43018e2b5cdaff938d9:result-6"
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "Observation",
+        "ifNoneExist": "identifier=urn:aim-t2:answer|3:5d61cd65d5e77928ee750a985d5976d47e46d23c8caec43018e2b5cdaff938d9:result-6"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000012",
+      "resource": {
+        "resourceType": "Provenance",
+        "text": {
+          "status": "generated",
+          "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\">Sent by Dr. Eva Brandl on 29 October 2026 at 14:02. Identity checked with ID Austria (simulation), full function, level high. The eHVD confirms Dr. Eva Brandl as responsible for the content at Labor Kanalstraße, found by the eHVD OID in the ID Austria login.</div>"
+        },
+        "target": [
+          {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000005"
+          },
+          {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000006"
+          },
+          {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000007"
+          },
+          {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000008"
+          },
+          {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000009"
+          },
+          {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000010"
+          },
+          {
+            "reference": "urn:uuid:00000000-0000-4000-8000-000000000011"
+          }
+        ],
+        "occurredDateTime": "2026-10-29T14:02:00+01:00",
+        "recorded": "2026-10-29T14:02:12+01:00",
+        "policy": [
+          "urn:aim-t2:identity-policy:lab-result:v1"
+        ],
+        "agent": [
+          {
+            "type": {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/provenance-participant-type",
+                  "code": "author"
+                }
+              ]
+            },
+            "who": {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000002"
+            },
+            "onBehalfOf": {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000003"
+            }
+          }
+        ],
+        "signature": [
+          {
+            "type": [
+              {
+                "system": "urn:iso-astm:E1762-95:2013",
+                "code": "1.2.840.10065.1.12.1.10"
+              }
+            ],
+            "when": "2026-10-29T14:01:40+01:00",
+            "who": {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000004"
+            },
+            "sigFormat": "application/jose",
+            "data": "ZXlKaGJHY2lPaUpTVXpJMU5pSXNJblI1Y0NJNklrcFhWQ0o5LmV5SnBjM01pT2lKb2RIUndPaTh2Ykc5allXeG9iM04wT2pnd09EQXZjbVZoYkcxekwybGtZWFZ6ZEhKcFlTMXphVzBpTENKaGRXUWlPaUp2Y21SNUlpd2lhV0YwSWpveE56a3pNamM0T1RBd0xDSmhkWFJvWDNScGJXVWlPakUzT1RNeU56ZzVNREFzSW1WNGNDSTZNVGM1TXpJM09USXdNQ3dpWjJsMlpXNWZibUZ0WlNJNklrVjJZU0lzSW1aaGJXbHNlVjl1WVcxbElqb2lRbkpoYm1Sc0lpd2lZbWx5ZEdoa1lYUmxJam9pTVRrM09TMHdOUzB4TkNJc0luVnlianB3ZG5CbmRtRjBPbTlwWkdNdVluQnJJam9pUjBnNlRtcDBjRFkwWjBJeE1HaHdValZ6V1dVMlNIaG5iVTlSU21zd1BTSXNJblZ5Ympwd2RuQm5kbUYwT205cFpHTXVaV2xrWDJsa1lWOXNaWFpsYkNJNkluVnlianBsYVdSbmRtRjBPbVZwWkM1emRHRjBkWE11Wm5Wc2JDSXNJblZ5Ympwd2RuQm5kbUYwT205cFpHTXVaV2xrWDJOcGRHbDZaVzVmY1dGaFgyVnBaR0Z6WDJ4bGRtVnNJam9pYUhSMGNEb3ZMMlZwWkdGekxtVjFjbTl3WVM1bGRTOU1iMEV2YUdsbmFDSXNJblZ5Ympwd2RuQm5kbUYwT205cFpHTXVaV2xrWDJsa1pXNTBhWFI1WDNOMFlYUjFjMTlzWlhabGJDSTZJbWgwZEhBNkx5OWxhV1F1WjNZdVlYUXZaVWxFTDNOMFlYUjFjeTkwWlhOMGFXUmxiblJwZEhraUxDSjFjbTQ2Y0had1ozWmhkRHB2YVdSakxuQjJjRjkyWlhKemFXOXVJam9pTWk0eUlpd2lkWEp1T21WcFpHZDJZWFE2WVhSMGNtbGlkWFJsY3k1blpHRWlPaUpsZVVwdVdrZEZhVTl1YzJsaFYxRnBUMjV6YVdJeWJHdFRXRTU2WkZkc2RWb3dSakZrUjJoMlkyMXNNR1ZUU1RaSmFrVjFUV2swTUUxRE5IZE1hazB3U1dsM2FXRlhVV2xQYVVsNFRHcEpkVTVFUVhWTlF6UjZUa00wZWt4cVNYVlBWR3QxVFZNMGVVbHVNVGxtVVQwOUluMC5kVzV6YVdkdVpXUWdjbVYyYVdWM0lHTnZjSGs="
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "Provenance",
+        "ifNoneExist": "target=urn:uuid:00000000-0000-4000-8000-000000000005"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Task",
+        "id": "ordy-request-3",
+        "status": "completed",
+        "intent": "order",
+        "description": "Request for a lab result",
+        "for": {
+          "reference": "Patient/maria-beispiel"
+        },
+        "authoredOn": "2026-10-29T09:00:00+01:00",
+        "requester": {
+          "reference": "urn:uuid:00000000-0000-4000-8000-000000000001"
+        },
+        "owner": {
+          "reference": "urn:uuid:00000000-0000-4000-8000-000000000002"
+        },
+        "restriction": {
+          "period": {
+            "end": "2026-11-05T09:00:00+01:00"
+          }
+        },
+        "output": [
+          {
+            "type": {
+              "text": "Lab result"
+            },
+            "valueReference": {
+              "reference": "urn:uuid:00000000-0000-4000-8000-000000000005"
+            }
+          }
+        ]
+      },
+      "request": {
+        "method": "PUT",
+        "url": "Task/ordy-request-3"
+      }
+    }
+  ]
+}

@@ -1,12 +1,12 @@
 import type { LabResult, RehabReport } from "@/server/documents/types";
+import type { ReleaseHoldReason } from "@/server/ehvd/release-check";
 import type { AnswerFiled } from "@/server/fhir/file-answer";
 import type { AnswerFiling, OrganizationParty, Person } from "@/server/fhir/filing";
 import type { MapContext } from "@/server/fhir/mappers";
 import type { RequestRow } from "@/server/requests/service";
 
 // What the answer flow needs from the eHVD release check (T15), the FHIR mappers (T12, T14), and the filing (T13).
-// They are passed in, so the flow runs and is tested with stand-ins. Until the release check lands, the default below
-// holds every answer for Dr. Hofer.
+// They are passed in, so the flow runs and is tested with stand-ins. `answerDeps` in deps.ts passes the real ones.
 
 /** A document the request service can file: a lab result or a rehab discharge report. */
 export type FileableDocument = LabResult | RehabReport;
@@ -22,7 +22,7 @@ export type ReleaseCheckInput = {
   sender: Sender;
 };
 
-/** An eHVD entry. Only its OID matters here; `GdaDescriptor` from the eHVD client (T15) has it. */
+/** An eHVD entry. Only its OID matters here; `GdaDescriptor` from the eHVD client (T15) has it, so `checkRelease` fits. */
 type EhvdEntry = { id: { id: string } };
 
 /**
@@ -40,18 +40,9 @@ export type ReleaseCheckResult =
    * Kanalstraße." `organisation` and `practitioner` are what the check found before it held, or null; the
    * practitioner always carries the responsible person's name. Accept files with their OIDs.
    */
-  | { verdict: "hold"; reason: string; sentence: string; organisation: EhvdEntry | null; practitioner: EhvdEntry | null };
+  | { verdict: "hold"; reason: ReleaseHoldReason; sentence: string; organisation: EhvdEntry | null; practitioner: EhvdEntry | null };
 
 export type ReleaseCheck = (input: ReleaseCheckInput) => Promise<ReleaseCheckResult>;
-
-/** Until the eHVD client (T15) lands, nobody is confirmed, so every answer is held. Never a pass. */
-export const releaseCheckNotConnected: ReleaseCheck = async () => ({
-  verdict: "hold",
-  reason: "ehvd_unreachable",
-  sentence: "The eHVD release check is not connected yet, so ordy could not confirm who released the document.",
-  organisation: null,
-  practitioner: null,
-});
 
 export type AnswerToFile = {
   request: RequestRow;

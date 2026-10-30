@@ -11,10 +11,19 @@ import { acceptAnswer, FilingOutcomeOpen, NoHeldAnswer, rejectAnswer } from "@/s
 import { auditActor, recordAudit } from "@/server/audit/record";
 import type { Db } from "@/server/db";
 import { auditLog } from "@/server/db/schema";
+import { type AddressCheck as EhvdAddressCheck, addressWarning, checkAddress } from "@/server/ehvd/address-check";
 import { nameWords } from "@/server/identity/names";
 import { displayName } from "@/server/matrix/client";
 import { taskStatus, TransitionError } from "@/server/requests/lifecycle";
-import { applyEvent, createRequest, getRequest, listRequests, type RequestRow, sendAnyway } from "@/server/requests/service";
+import {
+  type AddressCheck,
+  applyEvent,
+  createRequest,
+  getRequest,
+  listRequests,
+  type RequestRow,
+  sendAnyway,
+} from "@/server/requests/service";
 
 // Postgres `serial` ends at 2^31 - 1; a larger id would reach the database as an error.
 const byId = z.object({ id: z.number().int().positive().max(2_147_483_647) });
@@ -47,6 +56,27 @@ const ownRequestProcedure = clinicProcedure.input(byId).use(async ({ ctx, input,
   if (request?.requester !== ctx.actor.mxid) throw notFound(input.id);
   return next({ ctx: { ...ctx, request } });
 });
+
+/** The eHVD's answer as the request service stores it (docs/EHVD.md, "The address check"). */
+const stored = (check: EhvdAddressCheck): AddressCheck =>
+  check.result === "pass"
+    ? { passed: true }
+    : check.result === "mismatch"
+      ? { passed: false, domain: check.domain, expectedDomain: check.expectedDomain }
+      : { passed: false, unchecked: true };
+
+/**
+ * The warning next to Send anyway for a request that waits for it. A mismatch is rebuilt from its audit entry. Why
+ * the eHVD could not confirm an address is not stored, so a reload says only that.
+ */
+function pendingWarning(request: RequestRow, audit: (typeof auditLog.$inferSelect)[]): string | null {
+  if (request.state !== "awaiting_confirmation") return null;
+  const caught = audit.find((a) => a.event === "misdelivery_caught" && a.outcome === "address_mismatch");
+  const detail = caught?.detail as { domain: string; expectedDomain: string } | undefined;
+  return detail
+    ? addressWarning({ result: "mismatch", domain: detail.domain, expectedDomain: detail.expectedDomain }, request.org)
+    : "The eHVD could not confirm the address, so the request has not been sent.";
+}
 
 function conflict(e: unknown): never {
   if (e instanceof TransitionError) throw new TRPCError({ code: "CONFLICT", message: e.message, cause: e });
@@ -118,6 +148,8 @@ export const requestRouter = createTRPCRouter({
       throw new TRPCError({ code: "BAD_REQUEST", message: "Enter the person's given name and family name" });
     }
 
+    // The address check against the eHVD (T15). An SMS always passes it.
+    const check = await checkAddress({ ...contact, org: input.org });
     const { request, token } = await createRequest(
       ctx.db,
       {
@@ -130,21 +162,27 @@ export const requestRouter = createTRPCRouter({
         requester: ctx.actor.mxid,
         requesterName: (await displayName(ctx.actor.mxid)) ?? ctx.actor.mxid,
       },
-      // TODO(T15): the address check against the eHVD decides this.
-      { passed: true },
+      stored(check),
     );
     if (request.state === "sent") printLink(request, token);
-    return summary(request);
+    return { ...summary(request), addressWarning: check.result === "pass" ? null : addressWarning(check, input.org) };
   }),
 
-  get: ownRequestProcedure.query(async ({ ctx }) => ({ ...summary(ctx.request), audit: await auditOf(ctx.db, [ctx.request.id]) })),
+  get: ownRequestProcedure.query(async ({ ctx }) => {
+    const audit = await auditOf(ctx.db, [ctx.request.id]);
+    return { ...summary(ctx.request), addressWarning: pendingWarning(ctx.request, audit), audit };
+  }),
 
   list: clinicProcedure.query(async ({ ctx }) => {
     const listed = await listRequests(ctx.db, ctx.actor.mxid);
     const audit = await auditOf(ctx.db, listed.map((r) => r.id));
-    return listed.map((r) => ({ ...summary(r), audit: audit.filter((a) => a.requestId === r.id) }));
+    return listed.map((r) => {
+      const own = audit.filter((a) => a.requestId === r.id);
+      return { ...summary(r), addressWarning: pendingWarning(r, own), audit: own };
+    });
   }),
 
+  /** Dr. Hofer confirms the address after the warning. The request goes out with a new 7-day link. */
   sendAnyway: ownRequestProcedure.mutation(async ({ ctx }) => {
     const sent = await sendAnyway(ctx.db, ctx.request.id, auditActor(ctx.actor)).catch(conflict);
     if (!sent) throw notFound(ctx.request.id);

@@ -65,6 +65,9 @@ importers:
       react-dom:
         specifier: 19.3.0
         version: 19.3.0(react@19.3.0)
+      saxes:
+        specifier: 6.0.0
+        version: 6.0.0
       superjson:
         specifier: ^2.2.6
         version: 2.2.6

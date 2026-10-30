@@ -20,7 +20,7 @@ import { type AnswerToFile, NotFiled, type ReleaseCheckInput, type ReleaseCheckR
 import { submitAnswer } from "./submit";
 
 // Requests 1 and 2 from the upload to the HAPI server from FHIR_BASE_URL, through the mappers (T12, T14) and the
-// filing (T13). The eHVD is a stand-in until the release check (#44) lands. The patient is the demo's Maria Beispiel; everything else is this run's. Deletes its rows and what it filed afterwards. Skipped when Postgres or
+// filing (T13). The eHVD is a stand-in here; `src/server/ehvd/release-check.test.ts` covers the real one. The patient is the demo's Maria Beispiel; everything else is this run's. Deletes its rows and what it filed afterwards. Skipped when Postgres or
 // HAPI is not running.
 const unreachable = await Promise.all([db.execute(sql`select 1`), capabilities(AbortSignal.timeout(3000))]).then(
   () => false,
