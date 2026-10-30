@@ -54,11 +54,12 @@ async function Landing({ params, searchParams }: PageProps<"/r/[token]">) {
           </Alert>
         )}
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <Button size="lg" asChild>
-            <a href={`/auth/login?token=${encodeURIComponent(token)}`}>
+          <form action="/auth/login" method="post">
+            <input type="hidden" name="token" value={token} />
+            <Button size="lg" type="submit">
               <ShieldCheck /> Log in with ID Austria
-            </a>
-          </Button>
+            </Button>
+          </form>
           <span className="text-sm text-muted-foreground">Valid until {formatDate(request.expiresAt)}</span>
         </div>
       </section>

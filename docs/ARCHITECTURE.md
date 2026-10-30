@@ -176,7 +176,7 @@ Before sending, the request service compares the words of the message with the p
 | Route | What it does |
 |---|---|
 | `GET /r/{token}` | Writes `link_opened`. Shows the requesting doctor and clinic and a **Log in with ID Austria** button. |
-| `GET /auth/login` | Redirects to Keycloak with `state`, `nonce`, PKCE, and `prompt=login`. |
+| `POST /auth/login` | The landing page's form posts here. Redirects to Keycloak with `state`, `nonce`, PKCE, and `prompt=login`. |
 | `GET /auth/callback` | Swaps the code for tokens, verifies the ID token, ends the Keycloak session, and stores the ID token on the request. The identity checks and `identity_checked` follow with T08. |
 | `GET /auth/failed` | Says the login has expired and asks the person to open the link again. |
 | `GET /r/{token}/answer` | Shows the patient, the requested document, the upload field, and fields for the patient's name and birth date. Only while the request is `verified`, and only for the person whose person number the request stores. |
