@@ -7,6 +7,7 @@ import { sessionSecret } from "@/server/auth/session-secret";
 import type { CheckResult, Verdict } from "@/server/identity/checks";
 import type { Db, Tx } from "@/server/db";
 import { auditLog } from "@/server/db/schema";
+import type { AnswerFiled } from "@/server/fhir/file-answer";
 import type { RequestState } from "@/server/requests/lifecycle";
 
 // The six audit events with who, what, and when. docs/ARCHITECTURE.md, "Audit log".
@@ -22,7 +23,7 @@ type Entries = {
   link_opened: { outcome: "shown" | "refused"; detail: { state: RequestState } };
   identity_checked: { outcome: Verdict; detail: { checks: IdentityCheck[] } };
   answer_sent: { outcome: "received"; detail: { sha256: string; size: number } };
-  answer_filed: { outcome: "filed"; detail: { resources: string[]; provenance: string } };
+  answer_filed: { outcome: "filed"; detail: AnswerFiled };
   misdelivery_caught:
     | { outcome: "address_mismatch"; detail: { domain: string; expectedDomain: string } }
     // The actor already names the person who failed.

@@ -5,7 +5,7 @@ import { type AuditActor, type AuditEntry, recordAudit } from "@/server/audit/re
 import type { Db, Tx } from "@/server/db";
 import { bindings, requests } from "@/server/db/schema";
 import type { LoginTransition } from "@/server/identity/login";
-import { initialState, MAX_FAILED_CHECKS, OPEN_STATES, type RequestEvent, transition } from "./lifecycle";
+import { initialState, MAX_FAILED_CHECKS, OPEN_STATES, type RequestEvent, transition, TransitionError } from "./lifecycle";
 import { hashLinkToken, isLinkToken, LINK_TTL_MS, newLinkToken } from "./link-token";
 
 // Reads and state changes of requests. Every caller goes through here: the tRPC router, the portal pages, and later the login and filing.
@@ -140,6 +140,8 @@ export async function applyEvent(
     await expireDueRequests(tx, id);
     const [row] = await tx.select().from(requests).where(eq(requests.id, id)).for("update");
     if (!row) return null;
+    // The type already refuses a login's event; this holds for a caller that casts too.
+    if ((Object.values(LOGIN_EVENT) as RequestEvent[]).includes(event)) throw new TransitionError(row.state, event);
     const state = transition(row.state, event, row.failedChecks);
     const [updated] = await tx.update(requests).set({ state }).where(eq(requests.id, id)).returning();
     return (await then?.(tx, updated)) ?? updated;

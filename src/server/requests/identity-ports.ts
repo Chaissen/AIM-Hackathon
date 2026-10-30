@@ -46,10 +46,12 @@ const checkDetail = z.strictObject({
 type LoginAuditEntry = Parameters<IdentityCheckPorts["recordAudit"]>[0];
 
 /**
- * A login writes `identity_checked` with its verdict and `misdelivery_caught` with `wrong_person`, both with the checks.
- * The entry is parsed, not cast, so the audit types hold for the login too and nothing else reaches the log.
+ * A login writes `identity_checked` with its verdict and `misdelivery_caught` with `wrong_person`, both with the checks,
+ * as the ID Austria person or, without a login, as an anonymous browser. The entry is parsed, not cast, so the audit
+ * types hold for the login too and no other detail reaches the log.
  */
 function loginAuditEntry({ event, requestId, actorKind, actor, outcome, detail }: LoginAuditEntry): AuditEntry {
+  if (actorKind !== "outside_person" && actorKind !== "anonymous") throw new Error(`A login does not write as ${actorKind}`);
   const base = { requestId: requestId ?? null, actor: { kind: actorKind, id: actor }, detail: checkDetail.parse(detail) };
   const checked = verdict.safeParse(outcome);
   if (event === "identity_checked" && checked.success) return { ...base, event, outcome: checked.data };

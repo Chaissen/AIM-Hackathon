@@ -386,4 +386,13 @@ test("the login's audit port writes only the entries the audit types allow", asy
   await assert.rejects(write({ ...entry, detail: { checks, reason: "a sentence" } }), { name: "ZodError" });
   await assert.rejects(write({ ...entry, outcome: "maybe", detail: { checks } }), /does not write identity_checked with maybe/);
   await assert.rejects(write({ ...entry, event: "answer_sent", detail: { checks } }), /does not write answer_sent/);
+  await assert.rejects(write({ ...entry, actorKind: "service", detail: { checks } }), /does not write as service/);
+});
+
+test("applyEvent refuses a login's events, even from a caller that casts", { skip: noDb }, async () => {
+  const { request } = await seed();
+  for (const event of ["identity_pass", "identity_hold", "identity_fail"] as const) {
+    await assert.rejects(applyEvent(db, request.id, event as never), TransitionError, event);
+  }
+  assert.equal((await getRequest(db, request.id))?.state, "sent");
 });
