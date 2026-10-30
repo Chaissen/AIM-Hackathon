@@ -54,7 +54,7 @@ The request service stores each request with one state. The FHIR Task for the re
 |---|---|---|
 | `awaiting_confirmation` | The address check failed and Dr. Hofer has not confirmed yet | `draft` |
 | `sent` | The email or SMS went out | `requested` |
-| `identity_held` | The name matched only partly, and Dr. Hofer decides | `on-hold` |
+| `identity_held` | The identity check held: the name matched only partly, the requested name had no words, or the eHVD could not be reached. Dr. Hofer decides. | `on-hold` |
 | `verified` | The identity check passed, and the outside person can answer | `in-progress` |
 | `answer_held` | The answer arrived, but the eHVD could not confirm the role, and Dr. Hofer decides | `on-hold` |
 | `filed` | The answer is on the FHIR server | `completed` |
@@ -69,7 +69,7 @@ The request service stores each request with one state. The FHIR Task for the re
 | Dr. Hofer clicks **Send anyway** | `send_anyway` | `awaiting_confirmation` | `sent` |
 | Identity check passes | `identity_pass` | `sent` | `verified` |
 | The verified person logs in again, for example after the session expired | `identity_pass` | `verified` | `verified` |
-| Identity check matches the name partly | `identity_hold` | `sent` | `identity_held` |
+| Identity check holds: partial name, requested name without words, or eHVD unreachable | `identity_hold` | `sent` | `identity_held` |
 | Identity check fails for the first or second time | `identity_fail` | `sent` or `verified` | unchanged |
 | Identity check fails for the third time | `identity_fail` | `sent` or `verified` | `locked` |
 | Dr. Hofer clicks **Accept** | `accept` | `identity_held` | `verified` |
@@ -83,7 +83,7 @@ The request service stores each request with one state. The FHIR Task for the re
 
 The open states are `awaiting_confirmation`, `sent`, `identity_held`, `verified`, and `answer_held`. Any other pair of state and event is refused. So a login while Dr. Hofer decides on a held identity or a held answer changes nothing.
 
-A failed identity check does not change the state, so the real person can still answer a forwarded link. The failure goes to the audit log and to Dr. Hofer. `failed_checks` counts the failures.
+A failed identity check does not change the state, so the real person can still answer a forwarded link. The failure goes to the audit log and to Dr. Hofer. `failed_checks` counts the failures. If Keycloak cannot be reached, the check holds without a state change and does not count toward the lock. A login in any state other than `sent` changes no state. A hold stores the held person's bPK in `person_number`, and **Accept** keeps it, so only the accepted person can answer. [Identity checks](IDENTITY.md#identity-checks) has the details.
 
 No job watches the expiry. Before the request service reads a request, it sets that request to `expired` if it is open and past `expires_at`. Before it lists requests, it does the same for all of them (`expireDueRequests` in `src/server/requests/service.ts`). `applyEvent` in the same file locks the request row while it changes the state, so two events on one request never overlap. Its callback writes the audit entry for the change in the same transaction.
 
@@ -93,7 +93,7 @@ The link token and the 7 days start when the request goes out. **Send anyway** (
 
 - The link token is 32 random bytes, encoded URL-safe. The database stores only its SHA-256 hash.
 - The link is valid for 7 days. It accepts one filed answer.
-- Three failed identity checks lock the link. Dr. Hofer can send a new request.
+- Three failed identity checks lock a link that is still `sent`. Dr. Hofer can send a new request. In the other states the failures are counted and logged, but only `sent` has a transition to `locked`.
 - Until the identity check passes, the page shows only the requesting doctor and clinic.
 - The link works in `sent`, `identity_held`, `verified`, and `answer_held`. An unknown, malformed, expired, cancelled, locked, or filed link shows the same "This link does not work" page.
 
@@ -133,13 +133,14 @@ The request service posts notices in Dr. Hofer's room as the bot user, with `not
 | When | Notice |
 |---|---|
 | The request goes out | "Request 1 sent to Dr. Eva Brandl (Labor Kanalstraße) by email." |
-| An identity check fails (M1, M2) | "Request 1 was opened by someone who is not Dr. Eva Brandl (ID Austria name: Anna Huber). Nothing was shown or filed. Check the address." |
+| The name check fails (M1, M2) | "Request 1 was opened by someone who is not Dr. Eva Brandl (ID Austria name: Anna Huber). Nothing was shown or filed. Check the address." |
+| Another identity check fails, the name matched | "Request 1 was opened by Eva Brandl, but the identity check failed. The ID Austria login has only basic function, and a request needs full function. Nothing was shown or filed." |
 | The patient check fails (M3) | "The answer to request 1 is about a different patient. Name and birth date do not match Maria Beispiel. Nothing was filed." |
 | The name matches only partly | "Request 1 is on hold. The ID Austria name Petra Brandl matches Dr. Eva Brandl only in part. Accept or reject the person in the widget." |
 | The release check does not pass | "The answer to request 1 is on hold. The eHVD does not list Dr. Eva Brandl as a member of Labor Kanalstraße. Accept or reject the answer in the widget." |
 | The answer is filed | "Lab result for Maria Beispiel from Dr. Eva Brandl is filed. Identity checked with ID Austria. 4 values, all within the reference range." |
 
-The caller writes the reason sentence of a held notice. A filed lab result with values outside the reference range says how many, for example "4 values, 1 outside the reference range." A rehab discharge report has no values, so its filed notice ends after "Identity checked with ID Austria."
+The caller writes the reason sentence of a held notice and of a failed identity check whose name matched. A filed lab result with values outside the reference range says how many, for example "4 values, 1 outside the reference range." A rehab discharge report has no values, so its filed notice ends after "Identity checked with ID Austria."
 
 ## Outgoing messages
 
@@ -193,6 +194,8 @@ The parser reads headings and tables from markdown-it tokens and splits `Key: va
 The document kind picks the mapper. `lab report` goes to the lab mapper and `discharge report` goes to the rehab mapper. Any other kind becomes a DocumentReference with the text attached, held for Dr. Hofer.
 
 The parser lives in `src/server/documents/`. `parseDocument()` returns a typed `LabResult`, `RehabReport`, or generic document (`types.ts`), or a list of reasons the uploader can act on; it never throws on content and never returns a half-read document. It refuses a document without a heading or a readable `Patient` line, a known key on more than one line with different values (a second `Patient` line could slip past the patient check), a lab report without exactly one result table, a result that is not a number (also `1,245`, which could mean 1245 or 1.245), a LOINC code with a wrong format or check digit, and a missing or unreadable date or stay line that the kind needs. Inside a `##` section only known keys such as `Written by` count, so a sentence with a colon stays text. Outside the sections a line with an unknown key such as `Note:` is a field and free text, so it still reaches the conclusion. A byte order mark at the start is ignored. Person lines split off titles such as `Dr.`, `Dr.in`, or `Prim.` with the same rule as `nameWords`. It converts the unit `10^9/L` to UCUM `10*9/L`, computes `N`, `H`, or `L` from the reference range, and reads a stay that names the month once, twice, or crosses a year. `checkAnswerPatient()` in `patient-check.ts` runs `samePatient()` on the document and on the form. A patient record without a family name or birth date never matches. `uploadHash()` gives the SHA-256 that stays in the audit log when an upload is discarded.
+
+`extra.test.ts` runs our extra test documents from `track/scenario/extra/` through the parser and the patient check ([Development](DEVELOPMENT.md#extra-test-documents)). Their index lists the gaps the parser still has: one-sided ranges such as `< 5`, and units that need more than `^` to `*` to become UCUM (`µmol/L`, `µg/dL`, `mIU/L`).
 
 ### AI fallback (optional, cut first)
 
@@ -291,7 +294,9 @@ src/
     audit/record.ts           recordAudit() for the six audit events
     fhir/                     FHIR client, mappers planned (T12 to T14)
     documents/                parser and patient check (T10, T11), typed records in types.ts
-    identity/names.ts         name words and subset test from Identity, shared by the patient check and T08
+    identity/names.ts         name words, subset and shared-word tests from Identity, shared by the patient check and T08
+    identity/checks.ts        identity checks at login: level, name, person number, eHVD claim (T08)
+    identity/login.ts         what a check result does: state, audit entries, page, notice, and runIdentityChecks for the callback (T08)
     ehvd/oid.ts               OID check shared by the login and pnpm citizen
     ehvd/                     eHVD SOAP client, planned (T15)
     matrix/client.ts          Matrix client-server API
@@ -307,7 +312,7 @@ scripts/
   citizen.ts                  add a test citizen to the simulated ID Austria
   validate.ts                 planned, T18: HL7 validator on every filed resource
   audit-check.ts              planned, T17: six event types per request
-track/                        track brief, scenario, patient.json, and test documents
+track/                        track brief, scenario, patient.json, test documents, and our extra set in scenario/extra/
 ```
 
 ## Run it
