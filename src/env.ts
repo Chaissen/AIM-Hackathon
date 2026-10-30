@@ -4,6 +4,8 @@ import { z } from "zod";
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PUBLIC_URL: z.url().default("http://localhost:3010"),
+  WORKSPACE_URL: z.url().default("http://localhost:8081"),
+  ORDY_WEB_UPSTREAM: z.string().min(1).default("host.docker.internal:3010"),
   // The clinic that runs ordy, named in the portal and in every email and SMS.
   CLINIC_NAME: z.string().min(1).default("Klinikum Beispielstadt"),
   // Empty disables outside-person sessions until setup generates a private key.

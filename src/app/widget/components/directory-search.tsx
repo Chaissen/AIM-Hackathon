@@ -85,7 +85,7 @@ export function DirectorySearch() {
         </p>
       ) : search.isError ? (
         <p role="alert" className="text-sm text-destructive">
-          The search did not go through. Check your Element sign-in, then try again.
+          The search did not go through. Check your network sign-in, then try again.
         </p>
       ) : (
         <Results name={submitted.name} result={search.data} onRequest={(entry) => startRequest(draftOf(entry))} />

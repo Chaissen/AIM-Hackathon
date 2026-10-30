@@ -1,6 +1,6 @@
 "use client";
 
-import { ChartColumn, ExternalLink, Inbox, LayoutGrid, ListChecks, type LucideIcon, Menu, Plus, ScrollText, UserRound, Users } from "lucide-react";
+import { ChartColumn, ExternalLink, Inbox, LayoutGrid, ListChecks, LogOut, type LucideIcon, Menu, MessagesSquare, Plus, ScrollText, UserRound, Users } from "lucide-react";
 import { useState } from "react";
 
 import { Logo } from "@/components/logo";
@@ -23,6 +23,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { demoToolsEnabled } from "@/lib/demo-tools";
 import { countByFilter } from "@/lib/request-status";
 
+import { useWorkspace } from "../workspace/context";
+
 import { useMe, useRequests } from "./data";
 import { useWidgetRoute } from "./use-widget-route";
 import { widgetHref, type WidgetRoute } from "./widget-route";
@@ -39,6 +41,7 @@ const SECTION: Record<View, View> = {
   patients: "patients",
   patient: "patients",
   contacts: "contacts",
+  messages: "messages",
   audit: "audit",
   metrics: "metrics",
 };
@@ -51,6 +54,7 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
       { label: "Requests", icon: ListChecks, route: { view: "requests", filter: "all" } },
       { label: "Patients", icon: UserRound, route: { view: "patients" } },
       { label: "Contacts", icon: Users, route: { view: "contacts" } },
+      { label: "Messages", icon: MessagesSquare, route: { view: "messages", room: null } },
     ],
   },
   {
@@ -78,6 +82,7 @@ export function WidgetNav({ onNavigate }: { onNavigate?: () => void }) {
   const route = useWidgetRoute();
   const attention = useAttentionCount();
   const me = useMe();
+  const workspace = useWorkspace();
   const current = (target: WidgetRoute) => (SECTION[route.view] === target.view ? "page" : undefined);
 
   return (
@@ -86,7 +91,7 @@ export function WidgetNav({ onNavigate }: { onNavigate?: () => void }) {
         <a href={widgetHref({ view: "overview" })} onClick={onNavigate} className="w-fit px-1">
           <Logo />
         </a>
-        {me.isPending ? <Skeleton className="mx-1 h-4 w-32" /> : <p className="truncate px-1 text-xs text-dim">{me.data?.clinic}</p>}
+        {me.isPending && !workspace ? <Skeleton className="mx-1 h-4 w-32" /> : <p className="truncate px-1 text-xs text-dim">{me.data?.clinic ?? workspace?.session.user.clinic}</p>}
         <Button asChild className="w-full">
           <a href={widgetHref(NEW_REQUEST)} onClick={onNavigate} aria-current={current(NEW_REQUEST)}>
             <Plus /> New request
@@ -99,7 +104,7 @@ export function WidgetNav({ onNavigate }: { onNavigate?: () => void }) {
             <SidebarGroupLabel className="eyebrow h-7 font-normal text-dim">{group.label}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {group.items.map((item) => (
+                {group.items.filter((item) => item.route.view !== "messages" || workspace !== null).map((item) => (
                   <SidebarMenuItem key={item.label}>
                     <SidebarMenuButton asChild isActive={current(item.route) === "page"}>
                       <a href={widgetHref(item.route)} onClick={onNavigate} aria-current={current(item.route)}>
@@ -154,18 +159,26 @@ function DemoTools() {
 
 function UserBlock() {
   const me = useMe();
-  if (me.isPending)
-    return (
-      <div className="grid gap-1.5 p-2">
-        <Skeleton className="h-4 w-28" />
-        <Skeleton className="h-3 w-40" />
-      </div>
-    );
-  if (me.error) return <p className="p-2 text-xs text-dim">Could not load who you are. Reload the widget.</p>;
+  const workspace = useWorkspace();
+  const identity = me.data ?? workspace?.session.user;
   return (
     <div className="grid gap-0.5 p-2 leading-tight">
-      <span className="truncate text-sm font-medium text-loud">{me.data.displayName}</span>
-      <span className="truncate font-mono text-xs text-muted-foreground">{me.data.mxid}</span>
+      {identity ? (
+        <>
+          <span className="truncate text-sm font-medium text-loud">{identity.displayName}</span>
+          <span className="truncate font-mono text-xs text-muted-foreground">{identity.mxid}</span>
+        </>
+      ) : me.isPending ? (
+        <div className="grid gap-1.5">
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="h-3 w-40" />
+        </div>
+      ) : <p className="text-xs text-dim">Could not load who you are. Reload this page.</p>}
+      {workspace && (
+        <Button variant="ghost" size="sm" onClick={workspace.signOut} className="mt-2 justify-start px-0 text-dim">
+          <LogOut /> Sign out
+        </Button>
+      )}
     </div>
   );
 }
@@ -183,7 +196,7 @@ export function NavSheet() {
       <SheetContent side="left" className="gap-0 p-0">
         <SheetHeader className="sr-only">
           <SheetTitle>Navigation</SheetTitle>
-          <SheetDescription>The widget&apos;s views.</SheetDescription>
+          <SheetDescription>Your workspace views.</SheetDescription>
         </SheetHeader>
         <Sidebar collapsible="none" className="h-full w-full">
           <WidgetNav onNavigate={() => setOpen(false)} />

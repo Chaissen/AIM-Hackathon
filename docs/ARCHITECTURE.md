@@ -7,8 +7,9 @@ This page describes what runs, how the parts talk, and what the request service 
 | Component | What it does | Built or reused | Image or library | Port |
 |---|---|---|---|---|
 | Synapse | Matrix homeserver for `klinikum.example` | Reused | [`matrixdotorg/synapse`](https://hub.docker.com/r/matrixdotorg/synapse) | 8008 |
-| Element Web | Dr. Hofer's chat client | Reused | [`vectorim/element-web`](https://hub.docker.com/r/vectorim/element-web) | 8081 |
-| Request service (ordy) | Outside portal, widget, identity checks, parser, FHIR mapper, audit log, SMS screen | Built | TypeScript: [Next.js](https://nextjs.org/docs) 16 (App Router), [tRPC](https://trpc.io/docs) v11, [zod](https://zod.dev/), [Drizzle](https://orm.drizzle.team/), [openid-client](https://github.com/panva/openid-client) (T07), [markdown-it](https://github.com/markdown-it/markdown-it) (T10), [Nodemailer](https://nodemailer.com/) (T06), UI with [shadcn/ui](https://ui.shadcn.com/) on Tailwind CSS | 3010 |
+| Workspace gateway | Public entry to the ordy workspace; forwards to Next.js | Configured | `nginx:stable-alpine`, template in `docker/workspace/` | 8081 |
+| Element Web (optional) | Legacy Matrix client and embedded widget compatibility | Reused | [`vectorim/element-web`](https://hub.docker.com/r/vectorim/element-web), Compose profile `legacy-element` | 8082 |
+| Request service (ordy) | Workspace, Messages, outside portal, optional widget, identity checks, parser, FHIR mapper, audit log, SMS screen | Built | TypeScript: [Next.js](https://nextjs.org/docs) 16 (App Router), [tRPC](https://trpc.io/docs) v11, [zod](https://zod.dev/), [Drizzle](https://orm.drizzle.team/), [openid-client](https://github.com/panva/openid-client) (T07), [markdown-it](https://github.com/markdown-it/markdown-it) (T10), [Nodemailer](https://nodemailer.com/) (T06), UI with [shadcn/ui](https://ui.shadcn.com/) on Tailwind CSS | 3010 |
 | Matrix bot | Notices and `!status` in Dr. Hofer's room | Built | TypeScript process in `src/bot/`, small Matrix client on `fetch` in `src/server/matrix/client.ts` | none |
 | Postgres | Requests, bindings, audit log | Reused | [`postgres:17-alpine`](https://hub.docker.com/_/postgres) | 5433, mapped to 5432 in the container |
 | Simulated ID Austria | OpenID Connect login with fake citizens | Configured (T02) | [Keycloak](https://www.keycloak.org/server/containers) | 8080 |
@@ -22,20 +23,19 @@ The Matrix bot runs as a second Node.js process next to Next.js, because Next.js
 Every reused part can be replaced. Synapse can be any Matrix homeserver, Keycloak can be real ID Austria or another OpenID Connect provider, the eHVD mock can be the real eHVD web service, Mailpit can be any SMTP server, and HAPI can be any FHIR R4 server.
 
 ```
- Dr. Hofer                                               Outside person
- Element Web                                             browser
-     |                                                      |   |
-     v                                                      |   | login
-  Synapse <---- ordy bot (Node.js) --+                      |   v
-     |                    createCaller   |                      |  Keycloak (simulated ID Austria)
-     +-- widget (iframe) ---tRPC--> Request service <-----------+   |
-                              (Next.js + tRPC router)              |
-                               |   |   |   |   <-- signed token-+
-                               |   |   |   +--> HAPI FHIR
-                               |   |   +------> Postgres: requests, bindings, audit log
-                               |   +----------> eHVD mock (SOAP 1.2)
-                               +--------------> Mailpit or Gmail SMTP (email), /sms page (SMS)
+Dr. Hofer -> workspace gateway -> ordy workspace (Next.js)
+                                    +-> tRPC -> Synapse <- ordy bot
+                                    +-> tRPC -> Postgres, eHVD, HAPI, SMTP
+
+Outside person -> request link -> outside portal (Next.js)
+                                    +-> ID Austria -> /auth/callback
+                                    +-> tRPC -> the same request service
+
+Optional Element -> Synapse
+                 +-> /widget iframe -> tRPC
 ```
+
+The gateway preserves the public host, port, and forwarded scheme, supports streaming and development WebSockets, and does not cache authenticated responses. `ORDY_WEB_UPSTREAM` defaults to `host.docker.internal:3010`; Linux uses the host-gateway mapping. [Deployment](DEPLOYMENT.md) gives the old-Element port migration and the separate public-hostname change.
 
 ## Document types
 
@@ -79,11 +79,11 @@ The request service stores each request with one state. The FHIR Task for the re
 | Dr. Hofer clicks **Cancel** | `cancel` | any open state | `cancelled` |
 | 7 days pass | `expire` | any open state | `expired` |
 
-The open states are `awaiting_confirmation`, `sent`, `identity_held`, `verified`, and `answer_held`. Any other pair of state and event is refused. `accepts(state, event)` reads the same table, and `REQUESTER_EVENTS` lists the four events Dr. Hofer triggers: `send_anyway`, `accept`, `reject`, and `cancel`. The widget imports `accepts` in the browser, so `lifecycle.ts` must not import server code at runtime.
+The open states are `awaiting_confirmation`, `sent`, `identity_held`, `verified`, and `answer_held`. Any other pair of state and event is refused. `accepts(state, event)` reads the same table, and `REQUESTER_EVENTS` lists the four events Dr. Hofer triggers: `send_anyway`, `accept`, `reject`, and `cancel`. The shared workflow UI imports `accepts` in the browser, so `lifecycle.ts` must not import server code at runtime.
 
-The widget names each state and sorts it into one of four buckets with `STATUS` in `src/lib/request-status.ts`. The overview counts, the tabs of the Requests view, the sidebar badge, and the attention pill all read that table. `bucketOf()` derives the bucket from the lifecycle table instead of a hand-written list. An open state that accepts `send_anyway` or `accept` needs Dr. Hofer, any other open state waits, `filed` is received, and every other state is closed.
+The shared workflow UI names each state and sorts it into one of four buckets with `STATUS` in `src/lib/request-status.ts`. The overview counts, the tabs of the Requests view, the sidebar badge, and the attention pill all read that table. `bucketOf()` derives the bucket from the lifecycle table instead of a hand-written list. An open state that accepts `send_anyway` or `accept` needs Dr. Hofer, any other open state waits, `filed` is received, and every other state is closed.
 
-| State | Label in the widget | Bucket |
+| State | UI label | Bucket |
 |---|---|---|
 | `awaiting_confirmation` | Check address | attention |
 | `sent` | Waiting for reply | waiting |
@@ -128,11 +128,19 @@ The link token and the 7 days start when the request goes out. **Send anyway** (
 - Until the identity check passes, the page shows only the requesting doctor and clinic.
 - The link works in `sent`, `identity_held`, `verified`, and `answer_held`. An unknown, malformed, expired, cancelled, locked, or filed link shows the same "This link does not work" page.
 
-## Widget
+<a id="widget"></a>
 
-Dr. Hofer sends requests and makes every decision about them in the ordy widget. `pnpm matrix:bootstrap` pins it in her room. There are no chat commands for requests.
+## Workspace and optional widget
 
-The widget uses `matrix-widget-api` to get a Matrix OpenID token from Element after the user approves identity sharing. It takes Element's origin from the `parentUrl` parameter that Element appends to the widget URL, because Element sends no referrer. The widget sends the token as `Authorization: Bearer` with every clinic tRPC call. The request service checks the token with Synapse (`verifyOpenIdToken` in `src/server/matrix/client.ts`). It accepts only users on its own homeserver, `MATRIX_SERVER_NAME`, which is `klinikum.example` in the demo. The checked Matrix ID is the actor in the audit log.
+Dr. Hofer sends requests, reviews decisions, and reads room messages in the ordy workspace at `/`. It uses the existing ordy components and workflow views directly. Matrix remains the messaging backend. There are no chat commands for requests.
+
+Members sign in with an existing account on `MATRIX_SERVER_NAME`. `POST /api/workspace/session` logs into the configured Synapse as a separate workspace device. The access token is authenticated and encrypted with a purpose-derived key from the private `ORDY_SECRET`, then stored in the `ordy_workspace_session` cookie. The cookie is HttpOnly, SameSite=Lax, scoped to `/`, and expires after at most eight hours. HTTPS configuration or production enables Secure. JavaScript receives only the member's public identity and expiry, never the Matrix token.
+
+`GET /api/workspace/session` and workspace tRPC calls verify the token with Matrix `whoami`. Expired or revoked credentials end access; an unavailable homeserver produces a recoverable error. Sign out clears the cookie and requests revocation of only this workspace device while the cookie is valid. Remote revocation is best effort, so an expired cookie or unavailable Synapse can leave the device on the account. The clinical query provider unmounts on logout, expiry, or an unauthorized response, and a new identity gets a fresh cache. All session responses are private and no-store.
+
+The workspace sends `x-ordy-workspace: 1` on its tRPC calls. This selects only the workspace cookie, without falling through to an outside-person ID Austria session or an OpenID bearer token. Calls without that header retain the existing outside-portal and widget identity paths. Sign-in, sign-out, and workspace mutations require an exact Origin from `WORKSPACE_URL` or `PUBLIC_URL`, including its port. `WORKSPACE_URL` defaults to `http://localhost:8081`; `PUBLIC_URL` remains the outside-link base, normally `http://localhost:3010` locally. Request ownership and clinical release rules are unchanged.
+
+`/widget` remains optional Element compatibility. `pnpm matrix:bootstrap` pins it in Dr. Hofer's room. It uses `matrix-widget-api` to get a Matrix OpenID token after identity-sharing approval. It takes Element's origin from the appended `parentUrl` parameter and sends the token as `Authorization: Bearer`. The server checks it with Synapse and accepts only its configured homeserver. The verified Matrix ID is the audit actor in both entry points.
 
 Patient, request, document, directory, and audit data come only from these procedures, all built on `clinicProcedure`:
 
@@ -141,25 +149,25 @@ Patient, request, document, directory, and audit data come only from these proce
 - `document.forRequest`, `document.filedResources`, and `document.forPatient`
 - `directory.search` and `metrics.overview`
 
-Neither `/widget` nor `/audit` embeds that data in its initial HTML or React server payload. Tokens and the clinic query cache stay in memory and are discarded on expiry or unmount. [Storage](#storage) says who sees what.
+The root, `/widget`, and `/audit` do not embed clinical data in their initial HTML or React server payload. Clinical data is fetched after authentication. The optional widget keeps its OpenID token and query cache in memory and discards them on expiry or unmount. [Storage](#storage) says who sees what.
 
 ### Shell and navigation
 
-`src/app/widget/page.tsx` renders `WidgetApp` (`app.tsx`) inside `ClinicAccess`. `WidgetApp` picks the view from the URL hash, and `WidgetShell` (`shell.tsx`) frames it. The navigation is defined once, in `WidgetNav` (`nav.tsx`):
+`src/app/page.tsx` renders `WorkspaceAccess`, which signs the member in and renders the shared `WidgetApp`. The optional `src/app/widget/page.tsx` renders it inside `ClinicAccess`. `WidgetApp` picks the view from the URL hash, and `WidgetShell` frames it. The navigation is defined once, in `WidgetNav` (`nav.tsx`):
 
 - the clinic name and a **New request** button
-- **Work**: Overview, Requests with the number of requests that need Dr. Hofer, Patients, and Contacts
+- **Work**: Overview, Requests with the number of requests that need Dr. Hofer, Patients, Contacts, and Messages in workspace mode
 - **Oversight**: Audit log and Metrics, open to every network member, as `clinic.audit` already is
 - **Demo tools**, only outside a production build: a card that opens the recipient's inbox, `/inbox` ([Outside portal](#outside-portal)), in a new tab
-- the display name and Matrix ID of the signed-in member
+- the display name and Matrix ID of the signed-in member, plus **Sign out** in workspace mode
 
-From 1024px of iframe width, which is Element's top container or the maximised widget, the navigation is a sidebar. It is sticky and scrolls on its own, so it fits the top container's height of about 350px. Below 1024px, in Element's right panel at 360 to about 900px, a sticky top bar takes its place. It holds a menu button, the breadcrumb, a pill with the attention count that links to the **Needs attention** tab, and a **New request** button. The menu button opens `WidgetNav` in a sheet from the left, and any navigation closes it.
+From 1024px, the navigation is a sidebar. It is sticky and scrolls on its own; the same layout also fits an optional Element frame. Below 1024px, a sticky top bar takes its place. It holds a menu button, the breadcrumb, a pill with the attention count that links to the **Needs attention** tab, and a **New request** button. The menu button opens `WidgetNav` in a sheet from the left, and any navigation closes it.
 
 Inside a view, the layout follows the width the view really has. `<main>` is a container query root (`@container/main`), so two-column splits and hidden table columns depend on its width, not the window's. That holds in the fixture preview too ([Development](DEVELOPMENT.md#add-a-ui-component)). A toast confirms each action.
 
 ### Views and hash routes
 
-Each view has a hash route on `/widget`. `parseWidgetRoute()` in `src/app/widget/widget-route.ts` turns `location.hash` into a `WidgetRoute`, and `widgetHref()` turns a route back into a hash. Anything unknown, such as a bad id or filter, is the overview. Links inside the widget are plain hash links, and every route change scrolls to the top. The views live in `src/app/widget/views/`, and the parts they share, such as the request table and the decision panel, in `src/app/widget/components/`.
+The workspace and optional `/widget` share hash routes. `parseWidgetRoute()` in `src/app/widget/widget-route.ts` turns `location.hash` into a `WidgetRoute`, and `widgetHref()` turns a route back into a hash. Anything unknown, such as a bad id or filter, is the overview. Links inside the app are plain hash links, and every route change scrolls to the top. The views live in `src/app/widget/views/`, and the parts they share, such as the request table and the decision panel, in `src/app/widget/components/`.
 
 | View | Hash route | What it shows | Procedures |
 |---|---|---|---|
@@ -172,8 +180,19 @@ Each view has a hash route on `/widget`. `parseWidgetRoute()` in `src/app/widget
 | Contacts | `#/contacts` | See [Contacts and the directory](#contacts-and-the-directory) | `clinic.contacts`, `directory.search` |
 | Audit log | `#/audit`, or with `?event=` and an audit event | The whole audit log, filtered by event, with the details as labelled pairs. Only the caller's own requests link to their page. `GET /audit` shows the same table. | `clinic.audit`, `request.list` |
 | Metrics | `#/metrics` | See [Metrics view](#metrics-view) | `metrics.overview` |
+| Messages (workspace only) | `#/messages`, or `#/messages/<encoded room reference>` | Joined rooms, text history, notices, and a message composer | `chat.rooms`, `chat.timeline`, `chat.send` |
 
-The hash leaves Element's widget query parameters, such as `parentUrl`, alone, so a frame reload still connects to Element. Element always loads the pinned URL. So a hash route lasts for the iframe's session. Back, forward, and a frame reload keep it, and reopening the widget starts at the overview. For the same reason, a Matrix notice cannot link into a view. A prefilled New request keeps its draft in memory (`DraftProvider` in `draft.tsx`), so names, addresses, and patient choices never go into the hash. Only the patient id in `#/patients/<id>` does, and it stays in the iframe's history.
+Back, Forward, and reload retain the hash and selected room. The old `#/room/#outside-documents:klinikum.example` form opens Messages with that room reference after sign-in. Unknown or malformed routes fall back to the overview. A prefilled New request keeps its draft in memory (`DraftProvider`), so names, addresses, and patient choices never go into the hash. Patient routes contain only the patient id.
+
+In Element, the hash leaves widget query parameters such as `parentUrl` intact. Reopening its pinned URL starts at the overview. Messages is omitted from its navigation; a manually entered Messages hash offers a link to the full workspace.
+
+### Messages
+
+The `chat` router requires `workspaceProcedure`: a verified clinic actor plus that user's server-only Matrix client. It lists only joined rooms and rechecks membership before reading history or sending, even when Matrix would permit world-readable history. It resolves aliases and uses the configured room as the default when joined.
+
+History includes plain text, notices, and emotes, with sender names and timestamps. Older pages use Matrix cursors; refresh retrieves recent history. Rendering uses text, never Matrix HTML. Sends use the member's identity and a client transaction ID that is retained for a retry. Ordinary messages are limited to 4,000 characters. An encryption-state lookup must succeed before a send, and encrypted rooms are explicitly unsupported: the app never sends plaintext to them.
+
+The workspace does not support E2EE, media, room creation or joining, invitations, account administration, reactions, or read receipts. Use synthetic data only. Desktop Messages has a room list beside the conversation; narrow screens use a room picker.
 
 `request.list` returns a member's newest 100 requests, so the counts and tables cover those 100.
 
@@ -187,9 +206,9 @@ The hash leaves Element's widget query parameters, such as `parentUrl`, alone, s
 | `identity` | `identity_held` | "Is this the right person?", with the ID Austria name of the held login matching the request's bound person number, the requested name, and the check that held: a partial name, a requested name without words, or the eHVD out of reach | **Accept**, **Reject** |
 | `answer` | `answer_held` | "Check this document before it goes into the record", with the sender and the hold reason. While a `kept_answers` row exists, it adds "The last Accept may have filed the answer. Click Accept again." | **Add to record**, which is **Accept** on a held answer, and **Reject** |
 
-Each button calls the `request` procedure of its event. Afterwards the widget reloads every `request` and `document` query.
+Each button calls the `request` procedure of its event. Afterwards the shared UI reloads every `request` and `document` query.
 
-| Part of the widget | Effect |
+| UI action | Effect |
 |---|---|
 | **Send request** on New request | Creates a request and sends the email or SMS |
 | **Send anyway** | Sends a request despite the address warning |
@@ -293,7 +312,7 @@ The application log names the request id, the step that failed (reading the pati
 
 ordy sends no SMS. In development, `pnpm dev` prints an SMS request's link in its log as `Request <id>: http://localhost:3010/r/<token>`, so the portal can be tried without it.
 
-Locally every email goes to Mailpit, which catches any address. For the demo, it goes through Gmail as ordysoftware@gmail.com, on `smtp.gmail.com` port 465 with TLS from the start. The scenario's `.example` addresses cannot receive mail. With `MAIL_TEAM_INBOXES` set, every email goes to the team inboxes instead of the request's address. The `To` header still names the request's address, so the email for request 1 reads as sent to `eva.brandl@labor-kanal.example`. If `SMTP_USER` is set and `MAIL_TEAM_INBOXES` is empty, the request service sends nothing. A real relay would deliver to any address typed in the widget. [Development](DEVELOPMENT.md#send-email-through-gmail) has the setup.
+Locally every email goes to Mailpit, which catches any address. For the demo, it goes through Gmail as ordysoftware@gmail.com, on `smtp.gmail.com` port 465 with TLS from the start. The scenario's `.example` addresses cannot receive mail. With `MAIL_TEAM_INBOXES` set, every email goes to the team inboxes instead of the request's address. The `To` header still names the request's address, so the email for request 1 reads as sent to `eva.brandl@labor-kanal.example`. If `SMTP_USER` is set and `MAIL_TEAM_INBOXES` is empty, the request service sends nothing. A real relay would deliver to any address typed in the request form. [Development](DEVELOPMENT.md#send-email-through-gmail) has the setup.
 
 Before sending, the request service compares the words of the subject and the text with three kinds of forbidden words:
 
@@ -342,7 +361,7 @@ The answer page posts `FormData` with the link token, the file, and the patient'
 6. The release check (`checkRelease`, T15). A hold is the `answer_unconfirmed` event: the answer goes into `held_answers`, Dr. Hofer gets the held notice with the check's sentence, and the sender gets "Thank you, your document arrived". An error in the check is a hold too, never a pass.
 7. A pass is the `answer_confirmed` event. The request row stays locked while the FHIR transaction runs, and the state `filed`, `answer_filed`, and the person number binding commit only if the FHIR server took the whole answer. Two uploads at the same time file once. Dr. Hofer gets the filed notice, and the sender "Thank you, your document is filed". If the FHIR server refuses the answer, nothing changes, and the sender can send again. If the outcome is unknown, for example after a timeout, the server may have filed it ([Retries](FHIR.md#retries)). The answer then goes into `kept_answers` while the row is still locked, and until it is filed, or the server refuses it, the request takes no other upload: the next send files the kept answer exactly as it was, with no new eHVD lookup and no new parse, and does not read the new file. In both cases the sender gets "The document could not be filed right now. Send it again in a few minutes." A send with another file while an answer is kept gets `earlier_answer`: "Thank you, your earlier document is filed" or "Your earlier document is still being filed", and in both cases "The file you just chose was not read." An answer about to be held also yields to an answer kept in between. A filed or otherwise closed request keeps no ID token: `applyEvent` and expiry clear `id_token`.
 
-`acceptAnswer` in `src/server/answers/held.ts` files a held answer when Dr. Hofer clicks **Accept** in the widget (`request.accept` on `answer_held`), with the policy `accepted-by-requester` and her Matrix ID in `request_decided` and as `acceptedBy` in `answer_filed`. The Organization and the responsible person carry the eHVD OIDs the release check found before it held, if any. **Reject** (`request.reject`) is the `reject` event through `rejectAnswer`, which deletes the answer and writes `request_decided`. Both take the Matrix ID of the member who clicked, and do nothing unless it is the one who sent the request and the request is `answer_held`. If the request turns `answer_held` while a plain Accept or Reject runs, the router refuses it with a conflict, so a held answer is never filed or dropped past the answer flow. An Accept whose filing outcome is unknown keeps the answer as in step 7: the request stays held, the next Accept files exactly that answer, and Reject is refused ("Click Accept again") until it is filed or refused. `applyEvent` deletes the held answer whenever a request leaves `answer_held`, and expiry deletes it too.
+`acceptAnswer` in `src/server/answers/held.ts` files a held answer when Dr. Hofer clicks **Accept** in the workspace or optional widget (`request.accept` on `answer_held`), with the policy `accepted-by-requester` and her Matrix ID in `request_decided` and as `acceptedBy` in `answer_filed`. The Organization and the responsible person carry the eHVD OIDs the release check found before it held, if any. **Reject** (`request.reject`) is the `reject` event through `rejectAnswer`, which deletes the answer and writes `request_decided`. Both take the Matrix ID of the member who clicked, and do nothing unless it is the one who sent the request and the request is `answer_held`. If the request turns `answer_held` while a plain Accept or Reject runs, the router refuses it with a conflict, so a held answer is never filed or dropped past the answer flow. An Accept whose filing outcome is unknown keeps the answer as in step 7: the request stays held, the next Accept files exactly that answer, and Reject is refused ("Click Accept again") until it is filed or refused. `applyEvent` deletes the held answer whenever a request leaves `answer_held`, and expiry deletes it too.
 
 The release check and the mappers are passed in (`src/server/answers/ports.ts`, `answerDeps` in `deps.ts`). The filing is `fileAnswer` from T13, through `fhirFiling` in `fhir-filing.ts`. It passes its own `audit`, because `fileAndRecord` writes `answer_filed` in the database transaction that sets the request to `filed`. `fhirFiling` throws `NotFiled` when the Bundle was never sent or HAPI refused it; any other error leaves the outcome open. `mapClinical` there runs the lab or the rehab mapper (T12, T14). The release check is `checkRelease` from T15 (`src/server/ehvd/release-check.ts`) against the eHVD from `EHVD_URL`.
 
@@ -365,7 +384,7 @@ The parser lives in `src/server/documents/`. `parseDocument()` returns a typed `
 
 ### AI fallback (optional, cut first)
 
-If the parser cannot read a document, the AI fallback may read it. It follows one rule: code decides everything that carries safety or meaning, and the model never chooses a value. The patient check stays deterministic. An answer the fallback reads always waits until Dr. Hofer accepts it in the widget.
+If the parser cannot read a document, the AI fallback may read it. It follows one rule: code decides everything that carries safety or meaning, and the model never chooses a value. The patient check stays deterministic. An answer the fallback reads always waits until Dr. Hofer accepts it in the workspace or optional widget.
 
 `parseWithFallback()` in `src/server/documents/fallback.ts` runs `parseDocument()` first. It goes on only when that fails for its format and a reader is configured. The reader in `anthropic-reader.ts` calls the Anthropic Messages API with structured outputs (`AI_FALLBACK_MODEL`, default `claude-opus-5-5`). It uses no server-side fallback model, so the model named in the README is the only one that reads a document. Without `ANTHROPIC_API_KEY` the fallback is off. Tests inject a stub reader and never call the network.
 
@@ -424,7 +443,7 @@ If code cannot read the file, the model is not called and the uploader gets the 
 | The model's reading agrees with code's | `{ ok: true, document, held }` | Held for Dr. Hofer with the record |
 | The model's reading differs from code's | `{ ok: false, errors, held }` | Held for Dr. Hofer with the file only. `held.unverified` lists the differing values |
 
-`held.reason` goes into the held notice and names no document content. `held.unverified` quotes the model's values, so it may appear in the widget but never in Matrix or the audit log. Accepting or rejecting a held answer is the widget's job (T05). Wiring the fallback into the upload is part of the answer flow, which calls `parseWithFallback(markdown, anthropicReader())` in place of `parseDocument(markdown)`. The test fixtures in `src/server/documents/fixtures/` are Maria's lab result and rehab report with another heading, other key and column names, dotted dates, and ranges written with `-`.
+`held.reason` goes into the held notice and names no document content. `held.unverified` quotes the model's values, so it may appear in the workspace or optional widget but never in Matrix or the audit log. Accepting or rejecting a held answer uses the shared request UI (T05). Wiring the fallback into the upload is part of the answer flow, which calls `parseWithFallback(markdown, anthropicReader())` in place of `parseDocument(markdown)`. The test fixtures in `src/server/documents/fixtures/` are Maria's lab result and rehab report with another heading, other key and column names, dotted dates, and ranges written with `-`.
 
 ## Storage
 
@@ -492,13 +511,15 @@ The IP hash is an HMAC-SHA256 with a key derived from `ORDY_SECRET`, cut to 16 h
 
 ## Configuration
 
-Configuration is read in `src/env.ts`. Service addresses and demo accounts have defaults. Outside-person sessions require a private `ORDY_SECRET`; an empty, short, or known placeholder key cannot sign or authenticate sessions. Setup generates a random key and preserves it across reruns. `.env.example` lists the variables.
+Configuration is read in `src/env.ts`. Service addresses and demo accounts have defaults. Workspace and outside-person sessions require a private `ORDY_SECRET`; an empty, short, or known placeholder key cannot authenticate sessions. Setup generates a random key and preserves it across reruns. `.env.example` lists the variables.
 
 | Variable | Default |
 |---|---|
 | `PUBLIC_URL` | `http://localhost:3010` |
+| `WORKSPACE_URL` | `http://localhost:8081`, the browser origin for the workspace gateway |
+| `ORDY_WEB_UPSTREAM` | `host.docker.internal:3010`, the gateway's Next.js upstream |
 | `CLINIC_NAME` | `Klinikum Beispielstadt`, named in the portal and in every email and SMS |
-| `ORDY_SECRET` | empty (outside-person sessions disabled); setup writes a private 32-byte random key to `.env` |
+| `ORDY_SECRET` | empty (workspace and outside-person sessions disabled); setup writes a private 32-byte random key to `.env` |
 | `DATABASE_URL` | `postgres://ordy:ordy@localhost:5433/ordy` |
 | `FHIR_BASE_URL` | `http://localhost:8090/fhir` |
 | `MATRIX_HOMESERVER_URL`, `MATRIX_SERVER_NAME` | `http://localhost:8008`, `klinikum.example` |
@@ -525,9 +546,10 @@ To switch to real ID Austria, change `OIDC_METADATA_URL`, `OIDC_CLIENT_ID`, and 
 Files marked *planned* do not exist yet. The task id says who builds them.
 
 ```
-docker-compose.yml            Synapse, Element, HAPI, Mailpit, Postgres, Keycloak, eHVD mock
+docker-compose.yml            workspace gateway, Synapse, optional Element, HAPI, Mailpit, Postgres, Keycloak, eHVD mock
 .env.example                  all variables with demo values
-docker/element/config.json    Element config
+docker/workspace/default.conf.template   nginx proxy to the Next.js app
+docker/element/config.json    optional Element config
 docker/synapse/               generated homeserver.yaml (git ignores it)
 docker/keycloak/idaustria-sim-realm.json   simulated ID Austria: client, mappers, test citizens
 docs/ehvd/eHVD.wsdl           the real eHVD WSDL, version 2 from BRZ
@@ -543,7 +565,10 @@ src/
   app/                        Next.js pages and route handlers
     api/trpc/[trpc]/route.ts  tRPC endpoint
     api/healthz/route.ts      health check for scripts and containers
-    widget/                   the widget inside Element: app.tsx, shell.tsx and nav.tsx, the hash routes in widget-route.ts, views/, shared parts in components/, request-form.tsx, presets.ts, and the draft in draft.tsx
+    api/workspace/session/route.ts   workspace sign-in, session metadata, and logout
+    page.tsx                  workspace entry
+    workspace/                sign-in, session lifecycle, and Messages UI
+    widget/                   shared workspace views and optional Element widget: app.tsx, shell.tsx and nav.tsx, the hash routes in widget-route.ts, views/, shared parts in components/, request-form.tsx, presets.ts, and the draft in draft.tsx
     r/[token]/                outside portal: landing page, answer page, and the held, refused, and unavailable pages (T09)
     auth/                     ID Austria login and callback route handlers, expired-login page. The callback runs the identity checks (T08)
     sms/page.tsx              SMS screen, a stub. No task builds the SMS log, because T06 sends email only
@@ -555,10 +580,10 @@ src/
   lib/                        code shared by server and browser: document types, request input, address parsing and warnings (address-check.ts), the widget's state labels and buckets (request-status.ts), history and progress from audit entries (request-story.ts), identity check texts, the outside person's audit actor, demoToolsEnabled, `cn`
   trpc/                       React client for tRPC (TanStack Query)
   server/
-    api/trpc.ts               context and procedures: public, clinic, eid
+    api/trpc.ts               context and procedures: public, clinic, eid, workspace
     api/own-request.ts        ownRequestProcedure: one request, only for the member who sent it
     api/root.ts               app router and createCaller
-    api/routers/              one router per area: request, document, clinic, directory, metrics, portal, health
+    api/routers/              one router per area: request, document, clinic, directory, metrics, portal, health, chat
     db/                       Drizzle schema and client
     requests/                 request lifecycle, link tokens, the request service, mirrorTask for its FHIR Task, notifyRequest for its notices, and pendingDecision for the widget
     answers/                  the answer flow: submitAnswer, acceptAnswer, rejectAnswer, fhirFiling, and the ports for the release check and the mappers (T09)
@@ -574,6 +599,8 @@ src/
     ehvd/search.ts            directory search for the widget, with English code labels in labels.ts
     ehvd/release-check.ts     release check when an answer arrives (T15)
     fhir/filing.ts            one answer as a transaction Bundle with Provenance and Task; fhir/file-answer.ts posts it (T13)
+    auth/workspace-session.ts   encrypted workspace cookie and verified Matrix identity
+    matrix/workspace.ts       joined-room history and user-identity sends
     matrix/client.ts          Matrix client-server API
     matrix/notices.ts         notice texts and notifyRoom for Dr. Hofer's room
     metrics/                  metrics from audit rows, validator runner, metrics table (T17, T18), the live metrics for the widget (live.ts), and the last runs from out/metrics/ (runs.ts)
@@ -601,11 +628,11 @@ track/                        track brief, scenario, patient.json, test document
 
 ## Run it
 
-[Development](DEVELOPMENT.md) has the full guide. In short:
+[Development](DEVELOPMENT.md) has the full guide. Existing installations must first follow the port migration in [Deployment](DEPLOYMENT.md).
 
 1. `./scripts/setup.sh` once. It creates `.env`, starts the containers, registers the Matrix users, migrates the database, loads the patient, and creates Dr. Hofer's room with the widget.
 2. `pnpm dev` starts Next.js on `http://localhost:3010` and the bot.
-3. Open Element at `http://localhost:8081` and log in as `lena.hofer` / `hofer-demo-2026`. The room "Dr. Hofer · Outside documents" is there. Send `!status`.
+3. Open the ordy workspace at `http://localhost:8081` and log in as `lena.hofer` / `hofer-demo-2026`. Open **Messages**, select "Dr. Hofer · Outside documents", and send `!status`. The optional Element client uses port 8082 and the `legacy-element` profile.
 4. Mailpit is at `http://localhost:8025`. The SMS screen at `http://localhost:3010/sms` is a stub. Outside a production build, `http://localhost:3010/inbox` shows both, with a button that opens each email's link as the recipient.
 
 ## Sources

@@ -44,7 +44,7 @@ export type Crumb = { label: string; route?: WidgetRoute };
  * Every view's frame: the header with the breadcrumb and the view's actions, then the content as a container-query
  * root, so a view lays itself out by the width it really has.
  */
-export function ShellPage({ crumbs, actions, children }: { crumbs: readonly Crumb[]; actions?: React.ReactNode; children: React.ReactNode }) {
+export function ShellPage({ crumbs, actions, children, wide = false }: { crumbs: readonly Crumb[]; actions?: React.ReactNode; children: React.ReactNode; wide?: boolean }) {
   const route = useWidgetRoute();
   const attention = useAttentionCount();
 
@@ -89,7 +89,7 @@ export function ShellPage({ crumbs, actions, children }: { crumbs: readonly Crum
           </Button>
         )}
       </header>
-      <main className="@container/main mx-auto w-full max-w-6xl p-3 lg:p-6">{children}</main>
+      <main className={`@container/main mx-auto w-full p-3 lg:p-6 ${wide ? "max-w-none" : "max-w-6xl"}`}>{children}</main>
     </>
   );
 }

@@ -1,5 +1,9 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
+
+import { useWorkspace } from "../workspace/context";
+import { MessagesView } from "../workspace/messages";
 import { DraftProvider } from "./draft";
 import { WidgetShell } from "./shell";
 import { useWidgetRoute } from "./use-widget-route";
@@ -12,9 +16,8 @@ import { PatientView } from "./views/patient";
 import { PatientsView } from "./views/patients";
 import { RequestView } from "./views/request";
 import { RequestsView } from "./views/requests";
-import type { WidgetRoute } from "./widget-route";
+import { widgetHref, type WidgetRoute } from "./widget-route";
 
-/** The widget behind ClinicAccess: the hash picks the view, the shell frames it. */
 export function WidgetApp() {
   const route = useWidgetRoute();
   return (
@@ -27,6 +30,7 @@ export function WidgetApp() {
 }
 
 function View({ route }: { route: WidgetRoute }) {
+  const workspace = useWorkspace();
   switch (route.view) {
     case "overview":
       return <OverviewView />;
@@ -42,6 +46,14 @@ function View({ route }: { route: WidgetRoute }) {
       return <PatientView id={route.id} />;
     case "contacts":
       return <ContactsView />;
+    case "messages":
+      return workspace ? <MessagesView room={route.room} /> : (
+        <div className="grid justify-items-start gap-3 p-6">
+          <h1 className="text-2xl">Messages</h1>
+          <p className="text-sm text-dim">Conversations are available in the full ordy workspace.</p>
+          <Button asChild><a href={`/${widgetHref(route)}`} target="_blank" rel="noopener">Open workspace</a></Button>
+        </div>
+      );
     case "audit":
       return <AuditView event={route.event} />;
     case "metrics":

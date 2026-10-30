@@ -1,3 +1,4 @@
+import { chatRouter } from "@/server/api/routers/chat";
 import { healthRouter } from "@/server/api/routers/health";
 import { clinicRouter } from "@/server/api/routers/clinic";
 import { directoryRouter } from "@/server/api/routers/directory";
@@ -9,6 +10,7 @@ import { createCallerFactory, createTRPCRouter } from "@/server/api/trpc";
 
 export const appRouter = createTRPCRouter({
   clinic: clinicRouter,
+  chat: chatRouter,
   directory: directoryRouter,
   document: documentRouter,
   health: healthRouter,

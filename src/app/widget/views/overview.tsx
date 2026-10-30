@@ -39,7 +39,7 @@ export function OverviewView() {
 
         {requests.error ? (
           <LoadError title="Could not load your requests" onRetry={() => requests.refetch()}>
-            Check your Element sign-in and the database, then try again.
+            Check your network sign-in and the database, then try again.
           </LoadError>
         ) : (
           <>
