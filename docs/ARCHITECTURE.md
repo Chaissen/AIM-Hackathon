@@ -443,7 +443,7 @@ scripts/
   seed-fhir.ts                Maria Beispiel into HAPI
   citizen.ts                  add a test citizen to the simulated ID Austria
   validate.ts                 HL7 validator on every filed resource or on given files (T18)
-  audit-check.ts              six event types per request, each with who, what, and when (T17)
+  audit-check.ts              six event types per request, each with who, what, and when (T17); --effort for the timed test (T19)
   scenario.ts                 request 1, M1 to M3, request 2, and the four metrics in one run (T17, T18)
   clinical-review-export.ts   the filing Bundles for the clinical review in docs/clinical-review/19-fhir/ (#19)
 track/                        track brief, scenario, patient.json, test documents, and our extra set in scenario/extra/
