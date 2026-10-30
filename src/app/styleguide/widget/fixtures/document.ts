@@ -49,7 +49,7 @@ export function documentFixtures(store: FixtureStore): RouterFixtures<"document"
     },
 
     // HAPI holds every filed answer for the patient. The DiagnosticReport's date is the lab's report time, the
-    // DocumentReference's the filing time, as the mappers write them.
+    // DocumentReference's the filing time, as the mappers write them. Every one of them was filed by ordy here.
     forPatient: ({ patientId }) => {
       const documents = store.requests
         .filter((r) => r.patientId === patientId)
@@ -60,9 +60,11 @@ export function documentFixtures(store: FixtureStore): RouterFixtures<"document"
           const answer = toDocumentView(markdown);
           const date = answer?.document.type === "lab-result" ? answer.document.reported : filing.at.toISOString();
           const title = answer?.document.title ?? filing.output;
-          return [{ reference: filing.output, type: r.docType, title, date, document: answer?.document ?? null, original: answer?.original ?? null }];
+          return [
+            { reference: filing.output, type: r.docType, title, date, filedAt: filing.at, document: answer?.document ?? null, original: answer?.original ?? null },
+          ];
         })
-        .sort((a, b) => Date.parse(b.date ?? "") - Date.parse(a.date ?? ""));
+        .sort((a, b) => (b.filedAt?.getTime() ?? 0) - (a.filedAt?.getTime() ?? 0));
       return { status: "ok", documents };
     },
   };

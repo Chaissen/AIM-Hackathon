@@ -147,7 +147,7 @@ Patient, request, document, directory, and audit data come only from these proce
 - `clinic.me`, `clinic.patients`, `clinic.patient`, `clinic.contacts`, and `clinic.audit`
 - `request.create`, `request.get`, `request.list`, `request.preview`, `request.checkRecipient`, `request.sendAnyway`, `request.accept`, `request.reject`, and `request.cancel`
 - `document.forRequest`, `document.filedResources`, and `document.forPatient`
-- `directory.search` and `metrics.overview`
+- `directory.listed`, `directory.search`, and `metrics.overview`
 
 The root, `/widget`, and `/audit` do not embed clinical data in their initial HTML or React server payload. Clinical data is fetched after authentication. The optional widget keeps its OpenID token and query cache in memory and discards them on expiry or unmount. [Storage](#storage) says who sees what.
 
@@ -155,11 +155,11 @@ The root, `/widget`, and `/audit` do not embed clinical data in their initial HT
 
 `src/app/page.tsx` renders `WorkspaceAccess`, which signs the member in and renders the shared `WidgetApp`. The optional `src/app/widget/page.tsx` renders it inside `ClinicAccess`. `WidgetApp` picks the view from the URL hash, and `WidgetShell` frames it. The navigation is defined once, in `WidgetNav` (`nav.tsx`):
 
-- the clinic name and a **New request** button
+- the clinic name in a card, and a **New request** button
 - **Work**: Overview, Requests with the number of requests that need Dr. Hofer, Patients, Contacts, and Messages in workspace mode
 - **Oversight**: Audit log and Metrics, open to every network member, as `clinic.audit` already is
 - **Demo tools**, only outside a production build: a card that opens the recipient's inbox, `/inbox` ([Outside portal](#outside-portal)), in a new tab
-- the display name and Matrix ID of the signed-in member, plus **Sign out** in workspace mode
+- the initials, display name, and Matrix ID of the signed-in member, plus **Sign out** in workspace mode
 
 From 1024px, the navigation is a sidebar. It is sticky and scrolls on its own; the same layout also fits an optional Element frame. Below 1024px, a sticky top bar takes its place. It holds a menu button, the breadcrumb, a pill with the attention count that links to the **Needs attention** tab, and a **New request** button. The menu button opens `WidgetNav` in a sheet from the left, and any navigation closes it.
 
@@ -176,8 +176,8 @@ The workspace and optional `/widget` share hash routes. `parseWidgetRoute()` in 
 | Request | `#/requests/<id>` | See [The request page](#the-request-page). Another member's request reads as not found. | `request.get`, `document.forRequest`, `document.filedResources` |
 | New request | `#/new` | See [New request](#new-request) | `clinic.patients`, `request.checkRecipient`, `request.preview`, `request.create` |
 | Patients | `#/patients` | The patients on HAPI, up to 50, with the birth date and the counts of open and received requests | `clinic.patients`, `request.list` |
-| Patient | `#/patients/<id>` | Name, birth date, and address, **Request a document**, the documents filed for the patient with the newest open, and the caller's requests about the patient | `clinic.patient`, `document.forPatient`, `request.list` |
-| Contacts | `#/contacts` | See [Contacts and the directory](#contacts-and-the-directory) | `clinic.contacts`, `directory.search` |
+| Patient | `#/patients/<id>` | Name, birth date, and address, **Request a document**, a card per document filed for the patient, newest first, titled by the document type with the responsible physician and when ordy received it, and a card with the caller's requests about the patient | `clinic.patient`, `document.forPatient`, `request.list` |
+| Contacts | `#/contacts` | See [Contacts and the directory](#contacts-and-the-directory) | `clinic.contacts`, `directory.listed`, `directory.search` |
 | Audit log | `#/audit`, or with `?event=` and an audit event | The whole audit log, filtered by event, with the details as labelled pairs. Only the caller's own requests link to their page. `GET /audit` shows the same table. | `clinic.audit`, `request.list` |
 | Metrics | `#/metrics` | See [Metrics view](#metrics-view) | `metrics.overview` |
 | Messages (workspace only) | `#/messages`, or `#/messages/<encoded room reference>` | Joined rooms, text history, notices, and a message composer | `chat.rooms`, `chat.timeline`, `chat.send` |
@@ -218,9 +218,9 @@ Each button calls the `request` procedure of its event. Afterwards the shared UI
 
 ### The request page
 
-The request page shows the title, the status, and who was asked, then **Cancel request** while the state accepts `cancel`, the decision panel, five progress steps, the document, the history, the details, and **Technical details**.
+The request page shows the title, the status, and who was asked, then **Cancel request** while the state accepts `cancel` and no decision is pending (the panel's **Cancel** or **Reject** ends the request then), the decision panel, five progress steps, the document, the history, the details, and **Technical details**.
 
-The document comes from `document.forRequest`, which has two sources. A held answer's text is `held_answers.markdown`. A filed answer's text is the Markdown attachment of the FHIR resource that the request's `answer_filed` entry names as `output` ([FHIR](FHIR.md#reading-filed-documents-back)). Both go through `parseDocument()` (`toDocumentView()` in `src/server/documents/view.ts`), so held and filed answers share one view. A lab result shows as a table with a bar for where each value sits in its reference range, and a rehab report as its sections. Only `document.forRequest` returns a held answer's text, and only to the member who sent the request. When the FHIR server cannot be reached, the resource is gone, or its text does not parse, the page says so. An alert counts the uploads the patient check stopped (`misdelivery_caught` with `patient_mismatch`).
+The document comes from `document.forRequest`, which has two sources. A held answer's text is `held_answers.markdown`. A filed answer's text is the Markdown attachment of the FHIR resource that the request's `answer_filed` entry names as `output` ([FHIR](FHIR.md#reading-filed-documents-back)). Both go through `parseDocument()` (`toDocumentView()` in `src/server/documents/view.ts`), so held and filed answers share one view. The card is titled by the heading's kind, such as "Lab report", and its description gives the sample and report times of a lab result or the author of a rehab report, plus "Not in the record yet" for a held answer. A lab result shows as a table with a bar for where each value sits in its reference range, and a rehab report as its sections. Only `document.forRequest` returns a held answer's text, and only to the member who sent the request. When the FHIR server cannot be reached, the resource is gone, or its text does not parse, the page says so. An alert counts the uploads the patient check stopped (`misdelivery_caught` with `patient_mismatch`).
 
 The history and the five progress steps (Sent, Opened, Sender confirmed, Answered, Received) come from the request's audit entries, through `historyOf()` and `progressOf()` in `src/lib/request-story.ts`. The details show the patient, the address, the channel, the link's expiry while the link works, the requester, and the message as it went out, which `request.get` returns as `message`. ordy keeps only the link's hash, so the link in that message ends in `/r/…`.
 
@@ -252,7 +252,7 @@ The organisation is a plain text field. Suggestions from `directory.search` were
 
 Contacts lists the people outside the network that Dr. Hofer asked for documents. `clinic.contacts` groups her requests by given name, family name, and organisation, the key of `bindings`, and takes the channel, address, and document type of the newest request. A person shows as **Verified sender** once `bindings` holds a person number for them at that organisation, which the first filed answer stores, and as **Not verified yet** before. **Request** opens New request prefilled from the newest request.
 
-Below that, the healthcare directory searches the eHVD by name with `directory.search` when Dr. Hofer presses Enter. It is a search box, not a list, because `GdaSearch` needs a surname and the eHVD mock alone has 313 entries. Each result shows the name, the roles and specialties, the organisations it is a member of, whether it is active, and its OID. An active person has a **Request** button. It prefills the name, the first organisation, and a document type, which is a lab result for the lab medicine specialty and a rehab report for a member of a hospital. [eHVD](EHVD.md#how-ordy-uses-the-ehvd-t15) has the search rule.
+Below that, the healthcare directory shows a table before any search: the entries of `EHVD_DIRECTORY_OIDS` from `directory.listed`, by default the scenario's three organisations and five doctors, Dr. Eva Brandl-Huber inactive. The eHVD has no call that lists entries, since `GdaSearch` needs a surname and the eHVD mock alone has 313 entries, so the list is configured and each entry is looked up with `GetGDA`. A search with Enter runs `directory.search` and shows its hits in the same table, with **Show listed entries** (or Escape) to go back. Both procedures return the same entry. The table shows the name with the title, under it a person's organisations (or city) or an organisation's type and city, then Details (a person's specialties, an organisation's mail domain), Status (Active or Inactive), and the OID. Details shows from 36rem of container width and Status from 28rem; below that their content sits under the name. The OID shows from 48rem. An active person outside the network has a **Request** button. It prefills the name, the first organisation, and a document type, which is a lab result for the lab medicine specialty and a rehab report for a member of a hospital. A person who is a member of `CLINIC_NAME`'s organisation, such as Dr. Hofer herself, gets none, because ordy cannot map a Matrix ID to an eHVD OID. In the table above, a contact shows the eHVD title, such as "Dr.", when a listed person has the same given name, family name, and organisation; ordy makes no eHVD call per contact for it. The entries stay in the React Query cache in memory only. [eHVD](EHVD.md#how-ordy-uses-the-ehvd-t15) has the lookup and search rules.
 
 ### Metrics view
 
@@ -472,9 +472,9 @@ Every clinic procedure is built on `clinicProcedure`. A procedure about one requ
 | Router | Through `ownRequestProcedure` | Through `clinicProcedure` alone | Who sees what |
 |---|---|---|---|
 | `request` | `get`, `sendAnyway`, `accept`, `reject`, `cancel` | `create`, `list`, `preview`, `checkRecipient` | The caller's own requests only. `list` returns their newest 100. `preview` reads the patient from the FHIR server, and `checkRecipient` reads the eHVD and `bindings`. Neither writes anything. |
-| `document` | `forRequest`, `filedResources` | `forPatient` | `forRequest` is the only procedure that returns a held answer's text. `forPatient` shows every network member the documents filed for a patient, as `clinic.patients` shows every patient. |
+| `document` | `forRequest`, `filedResources` | `forPatient` | `forRequest` is the only procedure that returns a held answer's text. `forPatient` shows every network member the documents filed for a patient, as `clinic.patients` shows every patient, never a held answer. Its `filedAt` is the time of the `answer_filed` entry that names the resource as `output`, null for a document ordy did not file. |
 | `clinic` | | `me`, `patients`, `patient`, `contacts`, `audit` | Patients for every network member. `contacts` groups the caller's own requests. `audit` shows the whole log, its newest 500 entries, to every network member, for the demo. |
-| `directory` | | `search` | The eHVD for every network member |
+| `directory` | | `listed`, `search` | The eHVD for every network member |
 | `metrics` | | `overview` | The four targets over every request, as `clinic.audit` reads the whole log. The per-request table lists only the caller's requests. |
 
 ## Audit log
@@ -530,6 +530,7 @@ Configuration is read in `src/env.ts`. Service addresses and demo accounts have 
 | `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | `request-service`, `request-service-demo-2026` |
 | `KEYCLOAK_ADMIN_USER`, `KEYCLOAK_ADMIN_PASSWORD` | `admin`, demo value (`pnpm citizen` only) |
 | `EHVD_URL` | `http://localhost:8095/` |
+| `EHVD_DIRECTORY_OIDS` | The eHVD OIDs the Contacts view lists before any search, comma-separated, at most 50. Default: the eight scenario entries of the eHVD mock. Empty lists none. |
 | `SMTP_HOST`, `SMTP_PORT` | `smtp.gmail.com`, `465`. Port 465 uses TLS from the start. Any other port upgrades with STARTTLS when the server offers it, and requires it when `SMTP_USER` is set. |
 | `SMTP_USER`, `SMTP_PASSWORD` | `ordysoftware@gmail.com`, empty. The password is the account's Gmail app password and goes only into `.env`. An empty `SMTP_USER` sends without a login. |
 | `MAIL_FROM` | `ordy · Klinikum Beispielstadt <ordysoftware@gmail.com>`. Gmail replaces a sender address that is not the account's own. |
@@ -597,6 +598,7 @@ src/
     ehvd/client.ts            eHVD SOAP client (T15), with soap.ts for the messages and xml.ts for the parser
     ehvd/address-check.ts     address check before sending (T15), and the advisory recipient check
     ehvd/search.ts            directory search for the widget, with English code labels in labels.ts
+    ehvd/listing.ts           the directory's listed entries, EHVD_DIRECTORY_OIDS looked up with GetGDA
     ehvd/release-check.ts     release check when an answer arrives (T15)
     fhir/filing.ts            one answer as a transaction Bundle with Provenance and Task; fhir/file-answer.ts posts it (T13)
     auth/workspace-session.ts   encrypted workspace cookie and verified Matrix identity
@@ -606,6 +608,7 @@ src/
     metrics/                  metrics from audit rows, validator runner, metrics table (T17, T18), the live metrics for the widget (live.ts), and the last runs from out/metrics/ (runs.ts)
     mail/message.ts           request email and SMS templates and the content check (T06)
     mail/send.ts              sendRequestEmail over SMTP, through Gmail to the team inboxes (T06)
+    mail/fake-smtp.ts         an SMTP server in the process that keeps emails, for the mail tests and pnpm demo:seed
     auth/eid-session.ts       outside person's session cookie and login cookie
     auth/id-austria.ts        OpenID Connect login: discovery, code swap, Keycloak logout, claims for the identity checks
     portal/data.ts            data loaders for the portal, the login, and the SMS page. The SMS log is a stub; T06 sends email only
@@ -614,9 +617,11 @@ src/
   bot/                        Matrix bot process and commands
 scripts/
   setup.sh                    one-time setup
-  reset.sh                    empty Postgres and HAPI, reload the patient
+  reset.sh                    empty Postgres and HAPI, reload the patients
   bootstrap-matrix.ts         room, invites, widget
-  seed-fhir.ts                Maria Beispiel into HAPI
+  seed-fhir.ts                the three synthetic patients into HAPI
+  demo-seed.ts, demo/         a populated workspace through the real code paths (pnpm demo:seed)
+  fixtures/                   the patients Johann Muster and Petra Probst, and the demo seed's own document
   citizen.ts                  add a test citizen to the simulated ID Austria
   validate.ts                 HL7 validator on every filed resource or on given files (T18)
   audit-check.ts              six event types per request, each with who, what, and when (T17); --effort for the timed test (T19)

@@ -35,6 +35,11 @@ const filedDetail = z.object({ acceptedBy: z.string().optional() });
 const domains = z.object({ domain: z.string(), expectedDomain: z.string() });
 const decision = z.object({ from: z.enum(REQUEST_STATES) });
 const upload = z.object({ sha256: z.string() });
+const heldChecks = z.object({ checks: z.array(z.object({ check: z.string(), result: z.string(), reason: z.string() })) });
+
+/** A hold whose checks include the partial name match, the hold a doctor sees most. */
+const partialName = (detail: unknown) =>
+  heldChecks.safeParse(detail).data?.checks.some((c) => c.check === "name" && c.result === "hold" && c.reason === "partial") ?? false;
 
 const chronological = (audit: readonly AuditRow[]) => [...audit].sort((a, b) => a.at.getTime() - b.at.getTime() || a.id - b.id);
 
@@ -56,7 +61,7 @@ function describe(row: AuditRow, request: StoryRequest): { text: string; tone: T
   const person = name ?? "Someone";
   switch (row.event) {
     case "request_sent": {
-      const channel = request.channel === "email" ? "email" : "SMS";
+      const channel = request.channel === "email" ? "email" : "text message";
       const confirmed = sentDetail.safeParse(row.detail).data?.sentAnyway ? " after you confirmed the address" : "";
       return { text: `Sent by ${channel} to ${request.address}${confirmed}`, tone: "pass" };
     }
@@ -68,6 +73,7 @@ function describe(row: AuditRow, request: StoryRequest): { text: string; tone: T
       if (row.outcome === "pass") return { text: `${person} confirmed who they are with ID Austria`, tone: "pass" };
       // Without a login there is no person: Keycloak could not be reached.
       if (row.outcome === "hold" && name === null) return { text: "A login could not be finished, because ID Austria could not be reached", tone: "hold" };
+      if (row.outcome === "hold" && partialName(row.detail)) return { text: `${person} logged in, but the name only partly matches`, tone: "hold" };
       if (row.outcome === "hold") return { text: `${person} logged in and needs your check`, tone: "hold" };
       if (row.outcome === "fail") return { text: `${person} logged in and was turned away`, tone: "fail" };
       return unreadable(row);
@@ -89,7 +95,8 @@ function describe(row: AuditRow, request: StoryRequest): { text: string; tone: T
     case "request_decided": {
       if (row.outcome === "cancelled") return { text: "You cancelled the request", tone: "none" };
       const from = decision.safeParse(row.detail).data?.from;
-      const decided = from === "identity_held" ? "the person" : from === "answer_held" ? "the document" : null;
+      const decided = from === "identity_held" ? "the sender" : from === "answer_held" ? "the document" : null;
+      if (from === "identity_held" && row.outcome === "accepted") return { text: "You confirmed the sender", tone: "pass" };
       if (decided && row.outcome === "accepted") return { text: `You accepted ${decided}`, tone: "pass" };
       if (decided && row.outcome === "rejected") return { text: `You rejected ${decided}`, tone: "none" };
       return unreadable(row);

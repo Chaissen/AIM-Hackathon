@@ -18,9 +18,9 @@ const fixtureSet = z.enum(FIXTURE_SETS).catch("seeded");
 /** The set named by `?fixtures=`; anything else is `seeded`. */
 export const parseFixtureSet = (value: string | null): FixtureSet => fixtureSet.parse(value);
 
-const widgetFixtures = (store: FixtureStore): Fixtures => ({
+const widgetFixtures = (store: FixtureStore, { listed }: { listed: boolean }): Fixtures => ({
   clinic: clinicFixtures(store),
-  directory: directoryFixtures(),
+  directory: directoryFixtures({ listed }),
   document: documentFixtures(store),
   metrics: metricsFixtures(store),
   request: requestFixtures(store),
@@ -29,9 +29,9 @@ const widgetFixtures = (store: FixtureStore): Fixtures => ({
 export function fixtureLinkFor(set: FixtureSet): TRPCLink<AppRouter> {
   switch (set) {
     case "seeded":
-      return fixtureLink(widgetFixtures(seededStore()), 150);
+      return fixtureLink(widgetFixtures(seededStore(), { listed: true }), 150);
     case "empty":
-      return fixtureLink(widgetFixtures(emptyStore()), 150);
+      return fixtureLink(widgetFixtures(emptyStore(), { listed: false }), 150);
     case "failing":
       return failingLink(300);
     default:

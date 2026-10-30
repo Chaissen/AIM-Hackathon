@@ -166,11 +166,13 @@ test("filed answers read back from the FHIR server, by request and by patient", 
   );
   assert.deepEqual(resources.status === "ok" && resources.resources[0].resource.presentedForm, presentedForm);
 
+  // The report was filed at 13:02:12 UTC, and the discharge report, which no request filed, is dated the same moment.
+  // A tie keeps the search order, DiagnosticReport first.
   assert.deepEqual(await clinic.document.forPatient({ patientId }), {
     status: "ok",
     documents: [
-      { reference: discharge, type: "rehab-report", title: "Reha Waldblick: discharge report", date: "2026-10-29T14:02:12+01:00", ...view(rehabReportMaria) },
-      { reference: report, type: "lab-result", title: "Labor Kanalstraße: lab report", date: "2026-10-22T11:40:00+02:00", ...view(labResultMaria) },
+      { reference: report, type: "lab-result", title: "Labor Kanalstraße: lab report", date: "2026-10-22T11:40:00+02:00", filedAt, ...view(labResultMaria) },
+      { reference: discharge, type: "rehab-report", title: "Reha Waldblick: discharge report", date: "2026-10-29T14:02:12+01:00", filedAt: null, ...view(rehabReportMaria) },
     ],
   });
 

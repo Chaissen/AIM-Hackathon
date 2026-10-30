@@ -58,11 +58,15 @@ The check compares whole words. A substring check would block every message, bec
 
 The ID token holds the sender's name, birth date, and person number. That is more than the record strictly needs. We keep it because it is the only proof of the identity check that does not depend on trusting our own database. A production version could keep only a hash of the token and keep the token itself in a separate archive with stricter access.
 
+The eHVD entries that the Contacts view lists or finds are not stored. Only network members can request them (`directory.listed` and `directory.search`), and the widget keeps them in its in-memory query cache, never in browser storage, a file, or the database.
+
 Application logs hold request ids, timings, check results, and validator outcomes, never document text or patient names. The workspace gateway disables access logs and limits nginx errors to critical diagnostics, because request URLs can contain bearer links or clinical query inputs. External proxies must follow the logging guidance in [Deployment](DEPLOYMENT.md).
 
 Workspace calls explicitly select their clinic cookie with `x-ordy-workspace: 1`. Outside-person requests retain the separate ID Austria path, including when both sessions exist in one browser. Joined-room checks apply to every chat read and send. Existing requester ownership and clinical release rules are unchanged.
 
-`pnpm reset` (`scripts/reset.sh`) empties Postgres and HAPI and reloads `patient.json`. It does not empty the Gmail inbox, and the links in older emails then say "This link does not work". We run it before the pitch.
+`pnpm reset` (`scripts/reset.sh`) empties Postgres and HAPI and reloads the three synthetic patients: Maria Beispiel from `track/scenario/patient.json`, and Johann Muster and Petra Probst from `scripts/fixtures/patients/`. It does not empty the Gmail inbox, and the links in older emails then say "This link does not work". We run it before the pitch.
+
+`pnpm demo:seed` creates only synthetic data: requests about these three patients to the test citizens at `.example` addresses and made-up `+43 660 000 01xx` numbers, with the synthetic documents from `track/scenario/documents/` and `scripts/fixtures/documents/`. It runs the real checks and state changes, the expiry of one request included. It sends no email: each request email passes the content check above, and the seed then keeps it in its own process instead of handing it to Gmail, to read the link. It prints request ids, states, and document types only, and checks the rules above on what it stored before it ends ([Demo](DEMO.md#a-populated-workspace)).
 
 ## AI rules
 
@@ -86,7 +90,7 @@ AI is optional in this project. If we build the AI fallback parser:
 | EHDS, primary use | FHIR R4 output fits the European move toward exchangeable health records |
 | ÄrzteG 1998 §§ 2, 3, 31, 49; MTD-Gesetz 2024 §§ 4, 5; KAKuG §§ 2, 7, 24 | Only the physician responsible for the content releases a document. The release check confirms that person in the eHVD, see [Identity and misdelivery](IDENTITY.md#who-may-release-a-document). Pending clinical sign-off, see [the review for issue #18](clinical-review/SIGNOFF_18_IDENTITY_AND_RELEASE.md). |
 | ID Austria terms | Real use needs a registered service provider. [Identity and misdelivery](IDENTITY.md) has the steps. |
-| eHVD terms | Real use needs a registration with the health ministry |
+| eHVD terms | Real use needs a registration with the health ministry. The application (§ 9 GTelV 2013) must name every call ordy makes, including the `GetGDA` lookups of the Contacts view's configured entries, and their purpose: checking who a request goes to and who answers. |
 
 ## Disclaimer
 

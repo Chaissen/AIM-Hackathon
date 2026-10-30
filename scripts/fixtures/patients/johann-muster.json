@@ -1,0 +1,38 @@
+{
+  "resourceType": "Patient",
+  "id": "johann-muster",
+  "identifier": [
+    {
+      "system": "urn:example:klinikum-beispielstadt:mrn",
+      "value": "KB-000187"
+    }
+  ],
+  "active": true,
+  "name": [
+    {
+      "use": "official",
+      "family": "Muster",
+      "given": ["Johann"]
+    }
+  ],
+  "telecom": [
+    {
+      "system": "phone",
+      "value": "+43 660 000 0142",
+      "use": "mobile"
+    }
+  ],
+  "gender": "male",
+  "birthDate": "1948-07-02",
+  "address": [
+    {
+      "line": ["Lindengasse 8"],
+      "city": "Beispielstadt",
+      "postalCode": "1000",
+      "country": "AT"
+    }
+  ],
+  "managingOrganization": {
+    "display": "Klinikum Beispielstadt"
+  }
+}

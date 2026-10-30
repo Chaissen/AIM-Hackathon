@@ -40,7 +40,7 @@ export function RequestTable({ requests, limit, hidePatient = false }: { request
           const updated = lastActivity(r);
           return (
             <TableRow key={r.id} className="cursor-pointer" onClick={() => navigate(route)}>
-              <TableCell className="font-medium">
+              <TableCell className="font-medium whitespace-normal">
                 <a href={widgetHref(route)} className="text-loud underline-offset-4 hover:underline">
                   {hidePatient ? document : (patient(r.patientId)?.name ?? r.patientId)}
                 </a>

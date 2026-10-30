@@ -4,17 +4,20 @@ import { cn } from "@/lib/utils";
 import type { LabRow } from "@/server/documents/types";
 import type { DocumentView as Doc } from "@/server/documents/view";
 
-type LabResult = Extract<Doc, { type: "lab-result" }>;
+export type LabResult = Extract<Doc, { type: "lab-result" }>;
 type RehabReport = Extract<Doc, { type: "rehab-report" }>;
 
 /** The heading of a report's sections, one level below the heading the document sits under. */
 type SectionHeading = "h3" | "h4";
 
-/** A held or filed answer as Dr. Hofer reads it: the lab table with range bars, or the rehab report's sections. */
-export function DocumentView({ doc, sectionHeading }: { doc: Doc; sectionHeading: SectionHeading }) {
+/**
+ * A held or filed answer as Dr. Hofer reads it: the lab table with range bars, or the rehab report's sections.
+ * `labDates: false` leaves out the lab's sample and report times, for a card whose description shows them.
+ */
+export function DocumentView({ doc, sectionHeading, labDates = true }: { doc: Doc; sectionHeading: SectionHeading; labDates?: boolean }) {
   switch (doc.type) {
     case "lab-result":
-      return <LabResultView doc={doc} />;
+      return <LabResultView doc={doc} dates={labDates} />;
     case "rehab-report":
       return <RehabReportView doc={doc} sectionHeading={sectionHeading} />;
     default:
@@ -22,12 +25,23 @@ export function DocumentView({ doc, sectionHeading }: { doc: Doc; sectionHeading
   }
 }
 
-function LabResultView({ doc }: { doc: LabResult }) {
+/** When the lab took the sample and when it reported the result. */
+export function LabDates({ doc }: { doc: LabResult }) {
+  return (
+    <>
+      Sample taken <Time at={new Date(doc.sampleTaken)} /> · Reported <Time at={new Date(doc.reported)} />
+    </>
+  );
+}
+
+function LabResultView({ doc, dates }: { doc: LabResult; dates: boolean }) {
   return (
     <div className="grid gap-4">
-      <p className="text-xs text-muted-foreground">
-        Sample taken <Time at={new Date(doc.sampleTaken)} /> · Reported <Time at={new Date(doc.reported)} />
-      </p>
+      {dates && (
+        <p className="text-xs text-muted-foreground">
+          <LabDates doc={doc} />
+        </p>
+      )}
       <Table>
         <TableHeader>
           <TableRow>

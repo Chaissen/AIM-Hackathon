@@ -36,7 +36,7 @@ cd AIM-Hackathon
 3. builds the eHVD mock image and starts the containers from `docker-compose.yml`. It then waits for Synapse, Postgres, HAPI, Keycloak with the `idaustria-sim` realm, and the eHVD mock. HAPI needs about a minute the first time.
 4. registers the Matrix users `@lena.hofer` (Dr. Hofer) and `@ordy` (the bot)
 5. runs the database migrations (`pnpm db:migrate`)
-6. loads Maria Beispiel from `track/scenario/patient.json` into HAPI (`pnpm fhir:seed`)
+6. loads the three synthetic patients into HAPI (`pnpm fhir:seed`): Maria Beispiel from `track/scenario/patient.json`, and Johann Muster and Petra Probst from `scripts/fixtures/patients/`
 7. creates the room `#outside-documents:klinikum.example`, joins Dr. Hofer and the bot, sets her display name to "Dr. Lena Hofer", and pins the widget (`pnpm matrix:bootstrap`). Its URL includes the widget ID and its registration sets `waitForIframeLoad: false`, so Element waits for the widget API to be ready before negotiating capabilities
 
 For an existing installation that serves Element on 8081, follow [the workspace migration](DEPLOYMENT.md#migrate-an-existing-element-entry) before starting the new gateway. The optional legacy widget still uses `pnpm matrix:bootstrap` to update its authentication handshake.
@@ -92,11 +92,12 @@ Test citizens for the ID Austria login: `eva.brandl` / `demo-eva`, `stefan.kern`
 | `pnpm typecheck` | Generates the Next.js route types, then runs `tsc` on ordy and on the eHVD mock |
 | `pnpm lint` | ESLint |
 | `pnpm test` | The `*.test.ts` files under `src/` and `services/`, with Node's test runner through tsx. The request tests use the Postgres and FHIR server at the default addresses from `src/env.ts`, because `pnpm test` does not read `.env`. They delete their rows afterwards and are skipped when the servers are not running. Request ids still move on, so run `pnpm reset` before a demo. The mail tests send request 1's email to a fake SMTP server on 127.0.0.1 that they start themselves, and read it back. They always run and never reach Gmail. The request tests send no email. |
-| `pnpm reset` | Empties Postgres and HAPI, and reloads the patient. Matrix users and the room stay. The Gmail inbox keeps its emails, and their links then say "This link does not work". Run it before every demo. |
+| `pnpm reset` | Empties Postgres and HAPI, and reloads the three patients. Matrix users and the room stay. The Gmail inbox keeps its emails, and their links then say "This link does not work". Run it before every demo. |
 | `pnpm db:generate --name <name>` | Writes a SQL migration to `drizzle/` from the schema |
 | `pnpm db:migrate` | Applies pending migrations |
 | `pnpm db:studio` | Opens Drizzle Studio to browse the database |
-| `pnpm fhir:seed` | Puts `Patient/maria-beispiel` on HAPI |
+| `pnpm fhir:seed` | Puts the three synthetic patients on HAPI: `Patient/maria-beispiel` from `track/scenario/patient.json`, and `Patient/johann-muster` and `Patient/petra-probst` from `scripts/fixtures/patients/`. A second run updates them. |
+| `pnpm demo:seed` | Fills Dr. Hofer's workspace with eleven synthetic requests in every state, through the real code paths, for showing a populated workspace. It refuses while she has requests; `--force` adds another set. Needs the containers and `pnpm fhir:seed`, not `pnpm dev`. [Demo](DEMO.md#a-populated-workspace) lists the requests. |
 | `pnpm matrix:bootstrap` | Creates the room if needed, joins Dr. Hofer and the bot, sets her display name, and pins the widget |
 | `pnpm citizen --given Peter --family Muster --birthdate 1970-01-01` | Adds a test citizen to the simulated ID Austria and prints the username, password, bPK, and eHVD OID. [Identity and misdelivery](IDENTITY.md#add-a-test-citizen) lists the options. |
 | `pnpm validate` | Runs the HL7 validator on every resource named in an `answer_filed` entry and counts the errors. `--since <time>` takes only the entries from that time on. `pnpm validate <file or folder>` checks hand-made resources instead. Needs Java. [FHIR](FHIR.md#validation) has the details. |

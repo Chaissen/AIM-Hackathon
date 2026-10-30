@@ -4,8 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Plus, UserRoundX } from "lucide-react";
 
 import { CalendarDate, Time } from "@/components/time";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DOCUMENT_TYPES } from "@/lib/document-types";
@@ -29,7 +29,7 @@ export function PatientView({ id }: { id: string }) {
   const trpc = useTRPC();
   const patient = useQuery(trpc.clinic.patient.queryOptions({ id }, { retry: false }));
 
-  // Keyed by the id, so moving to another patient starts with that patient's newest document open.
+  // Keyed by the id, so moving to another patient starts from the top of that patient's page.
   if (patient.data) return <PatientPage key={patient.data.id} patient={patient.data} />;
   return (
     <ShellPage crumbs={[PATIENTS, { label: id }]}>
@@ -87,47 +87,72 @@ function PatientPage({ patient }: { patient: Patient }) {
           </Button>
         </div>
 
-        <section className="grid gap-3" aria-labelledby="documents">
-          <h2 id="documents" className="text-base">
-            Documents in the record
-          </h2>
-          <PatientDocuments patientId={patient.id} />
-        </section>
+        <PatientDocuments patientId={patient.id} />
 
-        <section className="grid gap-3" aria-labelledby="requests">
-          <h2 id="requests" className="text-base">
-            Requests
-          </h2>
-          <PatientRequests patient={patient} />
-        </section>
+        <Card size="sm">
+          <CardHeader>
+            <CardTitle>
+              <CardHeading>Requests</CardHeading>
+            </CardTitle>
+          </CardHeader>
+          {/* The table runs edge to edge, so it fits 360px; its cells bring their own padding. */}
+          <CardContent className="px-0">
+            <PatientRequests patient={patient} />
+          </CardContent>
+        </Card>
       </div>
     </ShellPage>
   );
 }
 
-/** The documents filed for the patient on HAPI, newest first, by `document.forPatient`. */
+/** A card title as an h2, so a report's h3 sections nest under it. The classes undo the base h2 style. */
+function CardHeading({ children }: { children: React.ReactNode }) {
+  return <h2 className="font-semibold [font-stretch:inherit]">{children}</h2>;
+}
+
+/** Stands in for the document cards while they load, fail, or when the record holds none. */
+function DocumentsNote({ children }: { children: React.ReactNode }) {
+  return (
+    <Card size="sm">
+      <CardHeader>
+        <CardTitle>
+          <CardHeading>Documents</CardHeading>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>{children}</CardContent>
+    </Card>
+  );
+}
+
+/** The documents filed for the patient on HAPI, newest first, by `document.forPatient`. One card per document. */
 function PatientDocuments({ patientId }: { patientId: string }) {
   const trpc = useTRPC();
   const docs = useQuery(trpc.document.forPatient.queryOptions({ patientId }, { retry: false }));
 
   if (docs.error) {
     return (
-      <InlineRetry onRetry={() => docs.refetch()}>Could not load the documents.</InlineRetry>
+      <DocumentsNote>
+        <InlineRetry onRetry={() => docs.refetch()}>Could not load the documents.</InlineRetry>
+      </DocumentsNote>
     );
   }
-  if (docs.isPending) return <Skeleton className="h-24" />;
+  if (docs.isPending) return <Skeleton className="h-40" />;
   switch (docs.data.status) {
     case "unavailable":
       return (
-        <InlineRetry role="status" onRetry={() => docs.refetch()}>
-          The FHIR server could not be reached.
-        </InlineRetry>
+        <DocumentsNote>
+          <InlineRetry role="status" onRetry={() => docs.refetch()}>
+            The FHIR server could not be reached.
+          </InlineRetry>
+        </DocumentsNote>
       );
     case "ok":
       return docs.data.documents.length === 0 ? (
-        <p className="text-sm text-dim">No documents in the record yet. A received answer is filed here.</p>
+        <DocumentsNote>
+          <p className="text-sm text-dim">No documents in the record yet. A received answer is filed here.</p>
+        </DocumentsNote>
       ) : (
-        <DocumentList documents={docs.data.documents} />
+        docs.data.documents.map((d) => <DocumentCard key={d.reference} document={d} />)
       );
     default:
       return docs.data satisfies never;
@@ -141,39 +166,50 @@ function instant(iso: string | null): Date | null {
   return Number.isNaN(at.getTime()) ? null : at;
 }
 
-/** One accordion item per document, the newest open. The content undoes the accordion's prose styling for the document. */
-function DocumentList({ documents }: { documents: readonly PatientDocument[] }) {
+/** The person the document names as responsible: the lab's validating physician, or the report's author. */
+function responsible(doc: PatientDocument["document"]): string | null {
+  if (!doc) return null;
+  return (doc.type === "lab-result" ? doc.validatedBy : doc.writtenBy)?.raw ?? null;
+}
+
+/**
+ * Titled by the document type, with who is responsible for it and when ordy received it. A document ordy did not file
+ * shows its own date instead.
+ */
+function DocumentCard({ document: d }: { document: PatientDocument }) {
+  const from = responsible(d.document);
+  const dated = d.filedAt ? null : instant(d.date);
   return (
-    <Accordion type="multiple" defaultValue={documents.slice(0, 1).map((d) => d.reference)}>
-      {documents.map((d) => {
-        const at = instant(d.date);
-        return (
-          <AccordionItem key={d.reference} value={d.reference}>
-            <AccordionTrigger className="py-4">
-              <span className="grid gap-0.5">
-                <span>{d.title}</span>
-                <span className="text-xs font-normal text-muted-foreground">
-                  {DOCUMENT_TYPES[d.type].label}
-                  {at && (
-                    <>
-                      {" · "}
-                      <Time at={at} />
-                    </>
-                  )}
-                </span>
-              </span>
-            </AccordionTrigger>
-            <AccordionContent className="text-foreground [&_p:not(:last-child)]:mb-0">
-              {d.document ? (
-                <DocumentView doc={d.document} sectionHeading="h4" />
-              ) : (
-                <p className="text-sm text-dim">ordy cannot show this document. It is in the record as {d.reference}.</p>
-              )}
-            </AccordionContent>
-          </AccordionItem>
-        );
-      })}
-    </Accordion>
+    <Card size="sm">
+      <CardHeader>
+        <CardTitle>
+          <CardHeading>{DOCUMENT_TYPES[d.type].label}</CardHeading>
+        </CardTitle>
+        {(from || d.filedAt || dated) && (
+          <CardDescription>
+            {from && `From ${from}`}
+            {from && (d.filedAt || dated) && " · "}
+            {d.filedAt && (
+              <>
+                {from ? "received" : "Received"} <Time at={d.filedAt} />
+              </>
+            )}
+            {dated && (
+              <>
+                {from ? "dated" : "Dated"} <Time at={dated} />
+              </>
+            )}
+          </CardDescription>
+        )}
+      </CardHeader>
+      <CardContent>
+        {d.document ? (
+          <DocumentView doc={d.document} sectionHeading="h3" />
+        ) : (
+          <p className="text-sm text-dim">ordy cannot show this document. It is in the record as {d.reference}.</p>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -182,17 +218,13 @@ function PatientRequests({ patient }: { patient: Patient }) {
 
   if (requests.error) {
     return (
-      <LoadError title="Could not load your requests" onRetry={() => requests.refetch()}>
-        Check your network sign-in and the database, then try again.
-      </LoadError>
+      <div className="px-(--card-spacing)">
+        <InlineRetry onRetry={() => requests.refetch()}>Could not load your requests.</InlineRetry>
+      </div>
     );
   }
-  if (requests.isPending) return <Skeleton className="h-24" />;
+  if (requests.isPending) return <Skeleton className="mx-(--card-spacing) h-24" />;
   const own = requests.data.filter((r) => r.patientId === patient.id);
-  if (own.length === 0) return <p className="text-sm text-dim">You have not asked for a document about {patient.name} yet.</p>;
-  return (
-    <div className="border border-border bg-card">
-      <RequestTable requests={own} hidePatient />
-    </div>
-  );
+  if (own.length === 0) return <p className="px-(--card-spacing) text-sm text-dim">You have not asked for a document about {patient.name} yet.</p>;
+  return <RequestTable requests={own} hidePatient />;
 }

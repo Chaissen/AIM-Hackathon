@@ -29,6 +29,7 @@ test("Brandl finds Dr. Eva Brandl at Labor Kanalstraße, Dr. Martin Brandl, and 
     oid: "1.2.40.0.34.3.2.99.1.2",
     kind: "person",
     name: "Dr. Eva Brandl",
+    title: "Dr.",
     given: "Eva",
     family: "Brandl",
     active: true,
@@ -38,6 +39,7 @@ test("Brandl finds Dr. Eva Brandl at Labor Kanalstraße, Dr. Martin Brandl, and 
     mailDomain: null,
     city: "Beispielstadt",
     suggestedDocType: "lab-result",
+    inNetwork: false,
   });
   assert.deepEqual(await names("Brandl"), [
     ["Dr. Eva Brandl", true],
@@ -64,6 +66,7 @@ test("Kanalstraße finds the lab with its mail domain", async () => {
         oid: LABOR,
         kind: "organisation",
         name: "Labor Kanalstraße",
+        title: null,
         given: null,
         family: "Labor Kanalstraße",
         active: true,
@@ -73,6 +76,7 @@ test("Kanalstraße finds the lab with its mail domain", async () => {
         mailDomain: "labor-kanal.example",
         city: "Beispielstadt",
         suggestedDocType: null,
+        inNetwork: false,
       },
     ],
   });
@@ -85,6 +89,17 @@ test("a member of a rehab clinic gets the rehab report suggested", async () => {
     result.entries.map(({ name, memberOf, suggestedDocType }) => ({ name, memberOf, suggestedDocType })),
     [{ name: "Dr. Johanna Leitner", memberOf: [{ oid: "1.2.40.0.34.3.1.99.1.3", name: "Reha Waldblick" }], suggestedDocType: "rehab-report" }],
   );
+});
+
+test("Dr. Lena Hofer and her clinic are in the network", async () => {
+  for (const query of ["Hofer", "Klinikum Beispielstadt"]) {
+    const result = await searchDirectory(query, client);
+    assert.equal(result.status, "ok");
+    assert.deepEqual(
+      result.entries.map(({ name, inNetwork }) => [name, inNetwork]),
+      [[query === "Hofer" ? "Dr. Lena Hofer" : query, true]],
+    );
+  }
 });
 
 test("a name the eHVD cannot search is invalid", async () => {

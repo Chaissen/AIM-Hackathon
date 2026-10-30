@@ -6,7 +6,7 @@ This page lists the FHIR R4 resources the request service files, how they refere
 
 | Resource | When | Purpose |
 |---|---|---|
-| [Patient](https://hl7.org/fhir/R4/patient.html) | Once, from `track/scenario/patient.json` | Maria Beispiel. Every clinical resource points at her through `subject`. |
+| [Patient](https://hl7.org/fhir/R4/patient.html) | Once, by `pnpm fhir:seed` | Maria Beispiel from `track/scenario/patient.json`, and the synthetic patients Johann Muster and Petra Probst from `scripts/fixtures/patients/`. Every clinical resource points at the request's patient through `subject`. |
 | [Task](https://hl7.org/fhir/R4/task.html) | Each request | Tracks the request from sent to filed and points at the filed results |
 | [Practitioner](https://hl7.org/fhir/R4/practitioner.html) | First contact with a person | Dr. Hofer, the outside people, and the document authors |
 | [Organization](https://hl7.org/fhir/R4/organization.html) | First contact with an organisation | Klinikum Beispielstadt, Labor Kanalstraße, Reha Waldblick, and "ID Austria (simulation)", which signs the identity proof |
@@ -255,7 +255,7 @@ The Task stays on the clinic's FHIR server. It is the only place outside the req
 
 ## Patient
 
-The request service puts `track/scenario/patient.json` on the server with `PUT Patient/maria-beispiel`. On the public test server `https://hapi.fhir.org/baseR4`, use an id with a team prefix, such as `aim-t2-<team>-maria-beispiel`, so the data does not mix with other teams' data. We prefer a local HAPI server.
+`pnpm fhir:seed` puts three synthetic patients on the server, each with a `PUT` to its id, so a second run updates them: `track/scenario/patient.json` as `Patient/maria-beispiel`, and `scripts/fixtures/patients/johann-muster.json` and `petra-probst.json` as `Patient/johann-muster` (born 1948-07-02, MRN `KB-000187`) and `Patient/petra-probst` (born 1975-11-19, MRN `KB-000204`). The two have the same shape as Maria, with the MRN system `urn:example:klinikum-beispielstadt:mrn`, a made-up `+43 660 000 01xx` mobile number, and an address in Beispielstadt. A request names its patient by this id, and the patient check reads that Patient. `pnpm demo:seed` sends requests about all three ([Demo](DEMO.md#a-populated-workspace)); only Maria's are filed. On the public test server `https://hapi.fhir.org/baseR4`, use an id with a team prefix, such as `aim-t2-<team>-maria-beispiel`, so the data does not mix with other teams' data. We prefer a local HAPI server.
 
 ## Reading filed documents back
 
