@@ -387,19 +387,28 @@ test("unreadable files and the wrong document type are refused with reasons", { 
   const noHeading = await submitAnswer(deps, { token, session, file: new TextEncoder().encode("Patient: Maria Beispiel\n"), form: maria });
   assert.equal(noHeading.outcome, "unreadable");
 
-  const tooLarge = await submitAnswer(deps, { token, session, file: new Uint8Array(512 * 1024 + 1).fill(0x61), form: maria });
+  const tooLarge = await submitAnswer(deps, { token, session, file: new Uint8Array(64 * 1024 + 1).fill(0x61), form: maria });
   assert.equal(tooLarge.outcome, "unreadable");
 
-  // Control characters are no text and could end up in a database error.
+  // The parser's line patterns slow down with the square of a line's length, so a long line never reaches them.
+  const longLine = await submitAnswer(deps, { token, session, file: new TextEncoder().encode(`# Laborbefund\n${"[".repeat(1_001)}\n`), form: maria });
+  assert.deepEqual(longLine, {
+    outcome: "unreadable",
+    errors: ["A line of the file is longer than 1000 characters. Upload the document as Markdown or text."],
+  });
+
+  // Control characters, C1 included, are no text and could end up in a database error.
   const control = await submitAnswer(deps, { token, session, file: new TextEncoder().encode("# Laborbefund\u0000\n"), form: maria });
   assert.equal(control.outcome, "unreadable");
+  const c1 = await submitAnswer(deps, { token, session, file: new TextEncoder().encode("# Laborbefund\u009B\n"), form: maria });
+  assert.equal(c1.outcome, "unreadable");
 
   const rehab = await submitAnswer(deps, { token, session, file: REHAB_MARIA, form: maria });
   assert.deepEqual(rehab, { outcome: "unreadable", errors: ['This request asks for a lab result. The heading of your document says "discharge report".'] });
 
   assert.equal(filed.length + notices.length, 0);
   assert.equal((await getRequest(db, request.id))?.state, "verified");
-  assert.deepEqual((await events(request.id)).filter((e) => e === "answer_sent:received").length, 5, "every upload is logged by its hash");
+  assert.deepEqual((await events(request.id)).filter((e) => e === "answer_sent:received").length, 7, "every upload is logged by its hash");
 });
 
 test("when the FHIR server refuses the answer, nothing is kept and the next upload is a new answer", { skip: noDb }, async () => {

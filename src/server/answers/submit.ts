@@ -18,7 +18,13 @@ import { type AnswerToFile, type FileableDocument, NotFiled, type ReleaseCheckRe
 // release check, then file and `answer_filed`, or hold for Dr. Hofer. The uploader learns only what they can act on.
 
 /** The scenario documents are about 2 KB. A larger upload is not a document from a lab or a rehab clinic. */
-export const MAX_UPLOAD_BYTES = 512 * 1024;
+export const MAX_UPLOAD_BYTES = 64 * 1024;
+
+/**
+ * The longest line in the scenario documents has about 200 characters. The parser's line patterns take time that grows
+ * with the square of a line's length, so a longer line is refused before it reaches them.
+ */
+export const MAX_LINE_CHARS = 1_000;
 
 export type AnswerUpload = {
   /** The link token from the page URL. The session alone is not enough, so another site cannot post an answer. */
@@ -65,7 +71,7 @@ export const answersFor = (request: RequestRow | null, session: EidSession): req
 function decodeText(bytes: Uint8Array): string | null {
   try {
     const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    return /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(text) ? null : text;
+    return /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/.test(text) ? null : text;
   } catch {
     return null;
   }
@@ -152,6 +158,9 @@ export async function submitAnswer(deps: AnswerDeps, upload: AnswerUpload): Prom
   if (size > MAX_UPLOAD_BYTES) return unreadable(`The file is larger than ${MAX_UPLOAD_BYTES / 1024} KB. Upload the document as Markdown or text.`);
   const markdown = decodeText(upload.file);
   if (markdown === null) return unreadable("The file is not a text file. Upload the document as Markdown or text.");
+  if (markdown.split("\n").some((line) => line.length > MAX_LINE_CHARS)) {
+    return unreadable(`A line of the file is longer than ${MAX_LINE_CHARS} characters. Upload the document as Markdown or text.`);
+  }
   const parsed = parseDocument(markdown);
   if (!parsed.ok) return unreadable(...parsed.errors);
   const doc = parsed.document;

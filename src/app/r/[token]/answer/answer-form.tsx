@@ -16,7 +16,7 @@ import { useTRPC } from "@/trpc/react";
 type Problem = { title: string; details?: string[]; loginAgain?: boolean };
 
 // MAX_UPLOAD_BYTES in src/server/answers/submit.ts. The server checks it again.
-const MAX_FILE_BYTES = 512 * 1024;
+const MAX_FILE_BYTES = 64 * 1024;
 
 // The texts the sender sees. docs/IDENTITY.md, M3, fixes the one for a document about someone else.
 const PATIENT_MISMATCH: Record<"document" | "form", string> = {

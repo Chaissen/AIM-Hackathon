@@ -14,7 +14,7 @@ import { db } from "@/server/db";
 import { anonymousBrowser } from "@/server/audit/record";
 import { answerDeps, type AnswerDeps } from "@/server/answers/deps";
 import type { AnswerToFile } from "@/server/answers/ports";
-import { auditLog, heldAnswers, keptAnswers, requests } from "@/server/db/schema";
+import { auditLog, bindings, heldAnswers, keptAnswers, requests } from "@/server/db/schema";
 import { capabilities, fhirFetch } from "@/server/fhir/client";
 import { findAnswerContext, findPublicRequest } from "@/server/portal/data";
 import { TransitionError } from "@/server/requests/lifecycle";
@@ -44,6 +44,7 @@ const noFhir = noDb || (await capabilities(AbortSignal.timeout(3_000)).then(() =
 const hofer = mxid(env.MATRIX_HOFER_USER);
 const clinic = createCaller(createContext({ kind: "clinic", mxid: hofer }));
 const created: number[] = [];
+const run = randomBytes(4).toString("hex");
 
 const request1 = {
   docType: "lab-result",
@@ -77,8 +78,8 @@ const auditOf = (requestId: number) => db.select().from(auditLog).where(eq(audit
 const decisionsOf = async (requestId: number) =>
   (await auditOf(requestId)).filter((a) => a.event === "request_decided").map((a) => [a.actorKind, a.actor, a.outcome, a.detail]);
 
-async function seedHeld(state: "identity_held" | "answer_held") {
-  const { request } = await seed();
+async function seedHeld(state: "identity_held" | "answer_held", overrides: Partial<NewRequest> = {}) {
+  const { request } = await seed(overrides);
   const to = state === "identity_held" ? "identity_held" : "verified";
   assert.equal(await applyLoginTransition(db, request.id, { from: "sent", to, personNumber: "GH:petra" }), true);
   if (state === "answer_held") assert.equal((await applyEvent(db, request.id, "answer_unconfirmed"))?.state, "answer_held");
@@ -97,6 +98,7 @@ after(async () => {
   if (!noDb && created.length) {
     await db.delete(auditLog).where(inArray(auditLog.requestId, created));
     await db.delete(requests).where(inArray(requests.id, created));
+    await db.delete(bindings).where(eq(bindings.org, `Labor Kanalstraße test ${run}`));
   }
   await db.$client.end();
 });
@@ -243,7 +245,8 @@ test("Reject cancels a held identity and a held answer and logs who rejected", {
 
 /** A request in `answer_held` with Maria's lab result held, as the answer flow (T09) leaves it. */
 async function seedHeldAnswer() {
-  const request = await seedHeld("answer_held");
+  // An organisation of its own: filing binds the person number, and the demo's Labor Kanalstraße must stay unbound.
+  const request = await seedHeld("answer_held", { org: `Labor Kanalstraße test ${run}` });
   await db.insert(heldAnswers).values({
     requestId: request.id,
     markdown: readFileSync(new URL("../../../../track/scenario/documents/lab-result-maria-beispiel.md", import.meta.url), "utf8"),

@@ -122,7 +122,11 @@ export async function findRequestByToken(db: Db, token: string): Promise<Request
 }
 
 export async function saveIdToken(db: Db, id: number, idToken: string): Promise<void> {
-  await db.update(requests).set({ idToken }).where(eq(requests.id, id));
+  // Only on an open request: a filing or a Cancel that commits during the login has cleared the token for good.
+  await db
+    .update(requests)
+    .set({ idToken })
+    .where(and(eq(requests.id, id), inArray(requests.state, OPEN_STATES)));
 }
 
 /** The requests one network member sent, newest first. */

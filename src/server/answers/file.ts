@@ -108,13 +108,8 @@ export async function fileAndRecord(
     let answer: AnswerToFile | undefined;
     try {
       const request = await applyEvent(outer, requestId, event, async (tx, locked, from) => {
-        const [binding] = await tx
-          .select()
-          .from(bindings)
-          .where(and(eq(bindings.given, locked.given), eq(bindings.family, locked.family), eq(bindings.org, locked.org)));
-        const known = binding && binding.personNumber === locked.personNumber ? binding.practitionerId : null;
-        answer = kept ? { ...kept.answer, request: locked, sentAt: new Date(kept.answer.sentAt) } : { request: locked, ...build(locked, known) };
         // Dr. Hofer's Accept is her decision, logged as the widget's other decisions are (T05). Filing completes it.
+        // Before the answer is built, so a failed insert never keeps an answer that was not sent.
         if (acceptedBy) {
           await recordAudit(tx, {
             event: "request_decided",
@@ -124,6 +119,12 @@ export async function fileAndRecord(
             detail: { from, to: locked.state },
           });
         }
+        const [binding] = await tx
+          .select()
+          .from(bindings)
+          .where(and(eq(bindings.given, locked.given), eq(bindings.family, locked.family), eq(bindings.org, locked.org)));
+        const known = binding && binding.personNumber === locked.personNumber ? binding.practitionerId : null;
+        answer = kept ? { ...kept.answer, request: locked, sentAt: new Date(kept.answer.sentAt) } : { request: locked, ...build(locked, known) };
         const filed = await deps.fileAnswer(answer);
         await recordAudit(tx, {
           event: "answer_filed",

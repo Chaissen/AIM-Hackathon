@@ -90,7 +90,7 @@ export const heldAnswers = pgTable("held_answers", {
 
 // An answer whose filing has an unknown outcome: the FHIR server may have filed it while the response was lost. Until
 // it is filed, or the server refuses it, the request takes no other upload, and the next send files exactly this
-// answer again. Lives only while the request is `verified`. docs/FHIR.md, "Retries".
+// answer again. Lives only while the request is `verified` or, after an Accept, `answer_held`. docs/FHIR.md, "Retries".
 export const keptAnswers = pgTable("kept_answers", {
   requestId: integer("request_id")
     .primaryKey()
