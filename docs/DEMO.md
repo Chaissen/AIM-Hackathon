@@ -38,9 +38,9 @@ The notices number the requests in the order they are created after `pnpm reset`
 
 ## Before recording
 
-1. Record on the frozen build. Run `pnpm reset`, then `pnpm dev`. Do not run `pnpm test` after the reset: its request tests move the request ids on. Keep the `pnpm dev` terminal off camera: until the SMS exists, request 2's link comes from its log. If a login returns to the landing page with `?login=failed`, read the `pnpm dev` log. If it says "A private ORDY_SECRET … is required", run `pnpm exec tsx scripts/init-env.ts` and restart `pnpm dev`.
-2. `pnpm reset` keeps the Matrix room and the notices from rehearsals. For a clean room, set a new `MATRIX_ROOM_ALIAS` in `.env`, run `pnpm matrix:bootstrap`, restart `pnpm dev`, and leave the old room in Element.
-3. Open these tabs: Element at http://localhost:8081 logged in as `lena.hofer` / `hofer-demo-2026` with the room "Dr. Hofer · Outside documents" and the ordy widget open, Mailpit at http://localhost:8025, the SMS screen at http://localhost:3010/sms, the recipient's inbox at http://localhost:3010/inbox, and HAPI FHIR's web UI at http://localhost:8090. The inbox shows Mailpit's emails and the SMS screen on one page, with an **Open as recipient** button for each email's link, and the widget's **Demo tools** card opens it. It is not in a production build. The base URL http://localhost:8090/fhir alone shows only an error, so use the search links in scenes 6 and 7.
+1. Record on the frozen build. If upgrading an installation that served Element on 8081, follow the [gateway migration](DEPLOYMENT.md#migrate-an-existing-element-entry) first. Run `pnpm reset`, then `pnpm dev`. Do not run `pnpm test` after the reset: its request tests move the request ids on. Keep the `pnpm dev` terminal off camera: until the SMS exists, request 2's link comes from its log. If a login returns to the landing page with `?login=failed`, read the `pnpm dev` log. If it says "A private ORDY_SECRET … is required", run `pnpm exec tsx scripts/init-env.ts` and restart `pnpm dev`.
+2. `pnpm reset` keeps the Matrix room and the notices from rehearsals. For a clean room, set a new `MATRIX_ROOM_ALIAS` in `.env`, run `pnpm matrix:bootstrap`, restart `pnpm dev`, and select the new room in the workspace's **Messages** view. Room administration is outside the workspace; use optional Element on port 8082 if needed.
+3. Open these tabs: the ordy workspace at http://localhost:8081 logged in as `lena.hofer` / `hofer-demo-2026`, with "Dr. Hofer · Outside documents" selected in **Messages**, Mailpit at http://localhost:8025, the SMS screen at http://localhost:3010/sms, the recipient's inbox at http://localhost:3010/inbox, and HAPI FHIR's web UI at http://localhost:8090. The inbox shows Mailpit's emails and the SMS screen on one page, with an **Open as recipient** button for each email's link, and the workspace's **Demo tools** card opens it. It is not in a production build. The base URL http://localhost:8090/fhir alone shows only an error, so use the search links in scenes 6 and 7.
 4. Every notice is a new message in the room until the "request sent" notice exists. Tests and rehearsals post into the same room, so use a clean room (step 2).
 5. Private windows of one browser share their cookies. Close every private window before you switch to the next outside person, or use a separate browser profile for each person.
 6. Keep the files ready: `track/scenario/documents/lab-result-maria-beispiel.md`, `lab-result-max-beispiel.md`, and `rehab-report-maria-beispiel.md`.
@@ -51,15 +51,15 @@ The notices number the requests in the order they are created after `pnpm reset`
 
 | Click | What you see | State |
 |---|---|---|
-| Show Element with Dr. Hofer's room and the pinned ordy widget | The room "Dr. Hofer · Outside documents" with the widget | Ready |
+| Show the ordy workspace and open **Messages** | The room "Dr. Hofer · Outside documents" in ordy's design, alongside the clinical navigation | Ready |
 
-Say: Outside labs still answer by fax. ordy lets Dr. Hofer ask from her Matrix room.
+Say: Outside labs still answer by fax. ordy gives Dr. Hofer one workspace for requests and Matrix messages.
 
 ## Scene 2: request 1, lab result by email (16 s)
 
 | Click | What you see | State |
 |---|---|---|
-| In the widget, pick **Lab result**, patient Maria Beispiel, Eva Brandl, Labor Kanalstraße, `eva.brandl@labor-kanal.example`, then **Send request** | The form, then the notice "Request 1 sent to Dr. Eva Brandl (Labor Kanalstraße) by email." in the room | Partly: the widget sends the request and shows request 1 below the form with the state "Sent". The room notice is not built. |
+| In the workspace, open **New request** and pick **Lab result**, patient Maria Beispiel, Eva Brandl, Labor Kanalstraße, `eva.brandl@labor-kanal.example`, then **Send request** | The form, then the notice "Request 1 sent to Dr. Eva Brandl (Labor Kanalstraße) by email." in the room | Partly: the workspace sends the request and shows request 1 below the form with the state "Sent". The room notice is not built. |
 | Open the email in Mailpit | "Secure request from Klinikum Beispielstadt", the link, the expiry date. No patient name, no birth date, no document type. | Ready (#4). It names Dr. Hofer by her Matrix display name, which `pnpm matrix:bootstrap` sets to "Dr. Lena Hofer". |
 
 Say: The email names only Dr. Hofer and the clinic, never the patient.
@@ -70,7 +70,7 @@ Say: The email names only Dr. Hofer and the clinic, never the patient.
 |---|---|---|
 | In a private window, open the link from the email | "Dr. Lena Hofer at Klinikum Beispielstadt sent you a request" and **Log in with ID Austria**. Nothing about the patient. | Ready |
 | Log in as `thomas.wagner` / `demo-thomas`, Dr. Brandl's colleague | "This request is for someone else. Nothing was shared with you." | Ready |
-| Switch to Element and look at the newest message in the room | "Request 1 was opened by someone who is not Eva Brandl (ID Austria name: Thomas Wagner). Nothing was shown or filed. Check the address." | Ready, as a new message, not in a thread. The widget's **Requests** view shows the same catch on request 1: "Identity checked" with `fail` and "Misdelivery caught" with `wrong_person`. |
+| Open **Messages** in the workspace and look at the newest message in the room | "Request 1 was opened by someone who is not Eva Brandl (ID Austria name: Thomas Wagner). Nothing was shown or filed. Check the address." | Ready, as a new message, not in a thread. The workspace's **Requests** view shows the same catch on request 1: "Identity checked" with `fail` and "Misdelivery caught" with `wrong_person`. |
 
 Say: A forwarded link is useless. Only the person Dr. Hofer named can open it.
 
@@ -88,7 +88,7 @@ Say: No account with us and nothing new to install: she logs in with her ID Aust
 | Click | What you see | State |
 |---|---|---|
 | Upload `lab-result-max-beispiel.md`, enter Maria Beispiel and 12 March 1961 in the form, send | "This document is about a different patient. Check the file and upload again." | Ready |
-| Switch to Element and look at the newest message | "The answer to request 1 is about a different patient. Name and birth date do not match Maria Beispiel. Nothing was filed." | Ready |
+| Open **Messages** in the workspace and look at the newest message | "The answer to request 1 is about a different patient. Name and birth date do not match Maria Beispiel. Nothing was filed." | Ready |
 
 Say: She entered Maria's details, but the file is about Max Beispiel. The notice never names him, and the upload is discarded.
 
@@ -97,7 +97,7 @@ Say: She entered Maria's details, but the file is about Max Beispiel. The notice
 | Click | What you see | State |
 |---|---|---|
 | Upload `lab-result-maria-beispiel.md`, enter Maria Beispiel and 12 March 1961, send | "Thank you, your document is filed. Klinikum Beispielstadt has it now. You can close this page." | Ready |
-| Switch to Element and look at the newest message | "Lab result for Maria Beispiel from Dr. Eva Brandl is filed. Identity checked with ID Austria. 4 values, all within the reference range." | Ready |
+| Open **Messages** in the workspace and look at the newest message | "Lab result for Maria Beispiel from Dr. Eva Brandl is filed. Identity checked with ID Austria. 4 values, all within the reference range." | Ready |
 | Open http://localhost:8090/fhir/DiagnosticReport?subject=Patient/maria-beispiel&_include=DiagnosticReport:result&_revinclude=Provenance:target&_pretty=true | One DiagnosticReport with four Observations and their LOINC codes (INR, aPTT, platelets, fibrinogen), and a Provenance that holds the ID Austria token | Ready |
 
 Say: Dr. Hofer gets structured values she can trend and reuse, not a scan, and the Provenance proves who sent them.
@@ -106,10 +106,10 @@ Say: Dr. Hofer gets structured values she can trend and reuse, not a scan, and t
 
 | Click | What you see | State |
 |---|---|---|
-| In the widget, pick **Rehab discharge report**, Stefan Kern, Reha Waldblick, `+43 660 000 0101`, send | The form switches to SMS. The notice "Request 2 sent to Stefan Kern (Reha Waldblick) by SMS." | Partly: the form switches to SMS and sends the request. The room notice is not built. |
+| In the workspace, open **New request** and pick **Rehab discharge report**, Stefan Kern, Reha Waldblick, `+43 660 000 0101`, send | The form switches to SMS. The notice "Request 2 sent to Stefan Kern (Reha Waldblick) by SMS." | Partly: the form switches to SMS and sends the request. The room notice is not built. |
 | Open the SMS screen and the link in it | The SMS on a phone frame, then the landing page | Not built: the SMS screen stays empty. Open the log link instead and say that the SMS is not sent yet. |
 | Log in as `stefan.kern` / `demo-stefan`, upload `rehab-report-maria-beispiel.md`, enter Maria Beispiel and 12 March 1961, send | The answer page, then "Thank you, your document is filed" | Ready with the log link |
-| Switch to Element and look at the newest message | "Rehab discharge report for Maria Beispiel from Stefan Kern is filed. Identity checked with ID Austria." | Ready |
+| Open **Messages** in the workspace and look at the newest message | "Rehab discharge report for Maria Beispiel from Stefan Kern is filed. Identity checked with ID Austria." | Ready |
 | Open http://localhost:8090/fhir/DocumentReference?subject=Patient/maria-beispiel&_revinclude=Provenance:target&_pretty=true | A DocumentReference with the report attached, and its Provenance | Ready |
 
 Say: Stefan Kern only sends the report. The Provenance names Dr. Leitner, who wrote it, as author and Stefan Kern as informant.
@@ -118,10 +118,10 @@ Say: Stefan Kern only sends the report. The Provenance names Dr. Leitner, who wr
 
 | Click | What you see | State |
 |---|---|---|
-| In the widget, send the lab request again to `eva.brandl@labor-kanaI.example`, with a capital I | The warning "The address domain `labor-kanaI.example` does not match Labor Kanalstraße (`labor-kanal.example`)." next to **Send anyway** and **Cancel** | Ready |
+| In the workspace, open **New request** and send the lab request again to `eva.brandl@labor-kanaI.example`, with a capital I | The warning "The address domain `labor-kanaI.example` does not match Labor Kanalstraße (`labor-kanal.example`)." next to **Send anyway** and **Cancel** | Ready |
 | Click **Send anyway**, then open the new email in Mailpit and its link in a fresh private window. | Only the requesting doctor and clinic | Ready: **Send anyway** sends the email with the new link (#4) |
 | Log in as `anna.huber` / `demo-anna`, who owns the mistyped address | "This request is for someone else. Nothing was shared with you." | Ready |
-| Switch to Element and look at the newest message | "Request 3 was opened by someone who is not Eva Brandl (ID Austria name: Anna Huber). Nothing was shown or filed. Check the address." | Ready |
+| Open **Messages** in the workspace and look at the newest message | "Request 3 was opened by someone who is not Eva Brandl (ID Austria name: Anna Huber). Nothing was shown or filed. Check the address." | Ready |
 
 Say: ordy warns before sending, and even if Dr. Hofer sends anyway, the stranger sees nothing.
 
@@ -129,9 +129,9 @@ Say: ordy warns before sending, and even if Dr. Hofer sends anyway, the stranger
 
 | Click | What you see | State |
 |---|---|---|
-| Open the **Audit log** tab in the widget and scroll: it lists every audit entry, newest first, with its request | At the top, request 3's entries for M1, with "Identity checked" and outcome `fail` and the "Misdelivery caught" entries. Further down, request 1's six event types, from "Answer filed" at the top to "Request sent" at the bottom: "Answer filed", "Answer sent", "Misdelivery caught", "Identity checked", "Link opened", and "Request sent" | Ready |
+| Open **Audit log** in the workspace navigation and scroll: it lists every audit entry, newest first, with its request | At the top, request 3's entries for M1, with "Identity checked" and outcome `fail` and the "Misdelivery caught" entries. Further down, request 1's six event types, from "Answer filed" at the top to "Request sent" at the bottom: "Answer filed", "Answer sent", "Misdelivery caught", "Identity checked", "Link opened", and "Request sent" | Ready |
 | Show the metric results from the README | FHIR validation, effort, misdeliveries, and audit coverage | Ready for three metrics, from the run by hand. Effort waits for the stopwatch test. Do not show `pnpm scenario`: it still reports its steps as blocked. |
-| Or open **Metrics** in the widget's navigation | The four metrics with their sources, the tests M1 to M3, and the last `pnpm validate` and `pnpm scenario` results | Ready. It does not run the page check or the Matrix notice check, so `pnpm scenario` stays the measurement of record. |
+| Or open **Metrics** in the workspace navigation | The four metrics with their sources, the tests M1 to M3, and the last `pnpm validate` and `pnpm scenario` results | Ready. It does not run the page check or the Matrix notice check, so `pnpm scenario` stays the measurement of record. |
 
 Say, filled in from the frozen build and the README status, in about 17 s: "Works today: …. Built but not connected: …. Not built: …."
 

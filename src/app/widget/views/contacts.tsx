@@ -45,7 +45,7 @@ function PeopleAsked() {
   if (error) {
     return (
       <p role="alert" className="text-destructive">
-        Could not load your contacts. Check your Element sign-in and the database, then reload the widget.
+        Could not load your contacts. Check your network sign-in and the database, then reload this page.
       </p>
     );
   }

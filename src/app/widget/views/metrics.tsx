@@ -114,7 +114,7 @@ export function MetricsView() {
         </div>
         {error ? (
           <p role="alert" className="text-destructive">
-            Could not load the metrics. Check your Element sign-in and the database, then reload the widget.
+            Could not load the metrics. Check your network sign-in and the database, then reload this page.
           </p>
         ) : isPending ? (
           <div className="grid grid-cols-2 gap-3 @3xl/main:grid-cols-4" aria-busy>

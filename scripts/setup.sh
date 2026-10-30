@@ -61,3 +61,4 @@ pnpm matrix:bootstrap
 
 echo
 echo "Setup done. Start ordy with: pnpm dev"
+echo "Open the ordy workspace at http://localhost:8081"

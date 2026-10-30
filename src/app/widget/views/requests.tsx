@@ -48,7 +48,7 @@ export function RequestsView({ filter }: { filter: RequestFilter }) {
         </Tabs>
         {error ? (
           <LoadError title="Could not load your requests" onRetry={() => refetch()}>
-            Check your Element sign-in and the database, then try again.
+            Check your network sign-in and the database, then try again.
           </LoadError>
         ) : isPending ? (
           <Skeleton className="h-48" />
