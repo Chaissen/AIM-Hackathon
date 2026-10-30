@@ -1,6 +1,6 @@
 "use client";
 
-import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { createTRPCClient, httpBatchLink, loggerLink } from "@trpc/client";
 import { createTRPCContext } from "@trpc/tanstack-react-query";
 import { useState } from "react";
@@ -11,18 +11,9 @@ import { makeQueryClient } from "./query-client";
 
 export const { TRPCProvider, useTRPC } = createTRPCContext<AppRouter>();
 
-let browserQueryClient: QueryClient | undefined;
-const getQueryClient = () =>
-  typeof window === "undefined" ? makeQueryClient() : (browserQueryClient ??= makeQueryClient());
-
-// Set by the Element widget once it has a Matrix OpenID token; sent as Bearer token to clinic procedures.
-let clinicToken: string | null = null;
-export const setClinicToken = (token: string | null) => {
-  clinicToken = token;
-};
-
-export function TRPCReactProvider({ children }: { children: React.ReactNode }) {
-  const queryClient = getQueryClient();
+// ClinicAccess remounts this provider when credentials change, discarding the previous identity's cache.
+export function TRPCReactProvider({ children, clinicToken }: { children: React.ReactNode; clinicToken?: string }) {
+  const [queryClient] = useState(makeQueryClient);
   const [trpcClient] = useState(() =>
     createTRPCClient<AppRouter>({
       links: [

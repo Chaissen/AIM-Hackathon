@@ -1,7 +1,9 @@
 import { healthRouter } from "@/server/api/routers/health";
+import { clinicRouter } from "@/server/api/routers/clinic";
 import { createCallerFactory, createTRPCRouter } from "@/server/api/trpc";
 
 export const appRouter = createTRPCRouter({
+  clinic: clinicRouter,
   health: healthRouter,
 });
 

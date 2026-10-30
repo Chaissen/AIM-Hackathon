@@ -125,6 +125,8 @@ The script adds the person through the Keycloak admin API and prints the usernam
 
 It reads the Keycloak address and realm from `OIDC_METADATA_URL` and the admin login from `KEYCLOAK_ADMIN_USER` and `KEYCLOAK_ADMIN_PASSWORD`. The bPK uses the same derivation as the realm's citizens.
 
+The extra test set adds two senders with double names this way, Sophie Lindner-Pichler (`sophie.lindner-pichler` / `demo-sophie`) and Karl Heinz Moser-Wallner (`karl-heinz.moser-wallner` / `demo-karl`). [`track/scenario/extra/index.md`](../track/scenario/extra/index.md) has their commands, whom they play, and the name-match cases they test. A given name with a space needs quotes: `--given "Karl Heinz"`.
+
 ## How the login connects to the request service
 
 ```
@@ -163,17 +165,44 @@ The logout matters when several people log in through the same browser, as jury 
 
 ## Identity checks
 
-The request service runs three checks after login. They make sure the right person answers. It shows the patient and the document type only if the result is pass. A fourth check, the release check, runs when the answer arrives and makes sure the person responsible for the content released it. [Who may release a document](#who-may-release-a-document) describes it.
+The request service runs four checks after login: the level, the name, the person number, and the eHVD claim. Once a request is bound to a person, a fifth one, the request person, runs too. They make sure the right person answers. It shows the patient and the document type only if the result is pass. One more check, the release check, runs when the answer arrives and makes sure the person responsible for the content released it. [Who may release a document](#who-may-release-a-document) describes it.
 
 | Check | Pass | Hold | Fail |
 |---|---|---|---|
 | Level | `urn:pvpgvat:oidc.eid_ida_level` is `urn:eidgvat:eid.status.full` | | Basic or missing |
 | Name | All requested name words are in the ID Austria name | The family names share a word but do not match fully | No shared family name word |
-| Person number | No binding yet, or the binding matches `urn:pvpgvat:oidc.bpk` | | A binding exists for this person and organisation with a different bPK |
+| Person number | No binding yet, or the binding matches `urn:pvpgvat:oidc.bpk` | | A binding exists for this person and organisation with a different bPK, or the token has no bPK |
+| eHVD claim | No `urn:eidgvat:attributes.gda`, or one that `gdaOidFromClaim` reads | | The claim is present but malformed |
+| Request person, only for a request that is `verified` or `answer_held` | `urn:pvpgvat:oidc.bpk` equals `requests.person_number` | | Another bPK. Only the person who passed, or whom Dr. Hofer accepted, may answer. Also an empty `requests.person_number`, so broken data fails closed. |
 
-Any fail blocks the person, writes `identity_checked` with `fail` and `misdelivery_caught` with `wrong_person`, and tells Dr. Hofer. A hold on the name sets the request to `identity_held`, and Dr. Hofer accepts or rejects it in the widget.
+Any fail blocks the person, writes `identity_checked` with `fail` and `misdelivery_caught` with `wrong_person`, adds one to `failed_checks`, and tells Dr. Hofer. When the name failed, she gets the wrong-person notice from [M1](#m1-wrong-address) and [M2](#m2-forwarded-request). When the name matched and another check failed, the person may be the right one with the wrong login, so the notice gives the reason, for example "Request 1 was opened by Eva Brandl, but the identity check failed. The ID Austria login has only basic function, and a request needs full function. Nothing was shown or filed."
 
-If Keycloak or the eHVD cannot be reached, the request service treats it as a hold, never as a pass.
+A hold with a logged-in person sets a `sent` request to `identity_held` and stores the person's bPK in `requests.person_number`. Three things hold: a name that matches only in part, a requested name with no words, and an unreachable eHVD. Dr. Hofer accepts or rejects the person in the widget. **Accept** moves the request to `verified` and keeps that bPK, so the accepted person passes from then on even though her name still matches only in part, and anyone else fails the request person check.
+
+A login changes the state only while the request is `sent`, as the lifecycle table says:
+
+| Request state | Pass | Hold | Fail |
+|---|---|---|---|
+| `sent` | `verified`, stores the bPK, answer page | `identity_held`, stores the bPK, held notice | unchanged, `locked` on the third fail |
+| `identity_held` | unchanged, held page | unchanged, held page, no notice, the held person stays | unchanged, counted |
+| `verified` | unchanged, answer page | none: the bound person's hold counts as a pass (answer page), anyone else fails the request person check | unchanged, counted |
+| `answer_held` | unchanged, held page | none: the bound person's hold counts as a pass (held page), anyone else fails the request person check | unchanged, counted |
+| any other | no check runs; the link does not work | | |
+
+A pass or a hold of the person `requests.person_number` names, in `verified` or `answer_held`, counts as a pass: Dr. Hofer accepted them, or they passed before. A fail still fails.
+
+If Keycloak or the eHVD cannot be reached, the request service treats it as a hold, never as a pass, except for the person the request is bound to, as above. A fail still wins over an outage.
+
+- **Keycloak unreachable.** There is no verified person, so there is nobody for Dr. Hofer to accept. The request service writes `identity_checked` with `hold` and the reason `keycloak_unreachable`, keeps the state, and asks the person to try again later. The attempt does not count toward the lock.
+- **eHVD unreachable.** The person logged in, so the request goes to `identity_held`, and Dr. Hofer gets "Request 1 is on hold. The eHVD could not be reached to confirm Eva Brandl. Accept or reject the person in the widget."
+
+The checks live in `src/server/identity/checks.ts`. Each returns `pass`, `hold`, or `fail` with a reason code, and `identity_checked` stores the list of checks as `{ check, result, reason }` in `detail`. `misdelivery_caught` stores only the failed checks. `src/server/identity/login.ts` turns the result into the transition, the audit entries, the page the person sees, and the notice. The callback calls `runIdentityChecks` from there right after it ends the Keycloak session. The request core passes in five ports (`IdentityCheckPorts`):
+
+- `findBinding` reads `bindings` for the requested name and organisation.
+- `recordAudit` writes an audit entry.
+- `incrementFailedChecks` adds one to `failed_checks` in one statement, `UPDATE … SET failed_checks = failed_checks + 1 … RETURNING failed_checks`, and returns the new count. The lock follows from that count. Reading the count and writing it back would let logins at the same time all write 1, and none would lock.
+- `transition` applies a change only while the request is still in its `from` state (`… WHERE state = 'sent'`) and stores the bPK in the same statement. It returns false when the state changed in between. Then the person sees "try again", and a lost hold sends no notice: nobody would ever decide on a hold that was not applied. The next login is checked against the new state.
+- `notify` posts the notice with `notifyRoom`. A failed notice never changes what the person sees.
 
 ### Name match
 
@@ -184,24 +213,35 @@ ID Austria returns the full official name. Dr. Hofer types what she knows. The m
 | Eva Brandl | Eva Maria Brandl | Pass. An extra given name is fine. |
 | Eva Brandl | Eva Brandl-Huber | Pass. A double family name contains Brandl. |
 | Eva Mueller | Eva Müller | Pass. Both spell out to `mueller`. |
-| Dr. Eva Brandl | Eva Brandl | Pass. Titles are ignored. |
+| Dr. Eva Brandl | Eva Brandl | Pass. Titles are ignored, also female forms such as `Dr.in` and `Mag.a`. |
 | Eva Brandl-Huber | Eva Brandl | Hold. The family names share only Brandl. |
 | Eva Brandl | Petra Brandl | Hold. Same family name, different given name. |
 | Eva Brandl | Eva Huber | Fail. A married name change also fails, and Dr. Hofer can send a new request. |
 | Eva Brandl | Thomas Wagner | Fail |
 
 ```ts
-const TITLES = new Set(["dr", "mag", "prof", "med", "univ", "di", "ing"]);
+// Dr., DDr., Dr.in, Mag.a, Univ.-Prof., Dipl.-Ing., Prim. Joined titles need a dot or hyphen between them
+// and the female ending needs its dot, so "Magdi" and "Dia" stay names.
+export const TITLE = /^(?:d?dr|mag|prof|univ|med|di|ing|dipl|prim)(?:\.(?:in|a))?(?:[.-]+(?:d?dr|mag|prof|univ|med|di|ing|dipl|prim)(?:\.(?:in|a))?)*\.?$/i;
 const SPELL_OUT: Record<string, string> = { "ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss" };
 
-export function nameWords(name: string): Set<string> {
-  const plain = name
-    .toLowerCase()
+function plainWords(text: string): string[] {
+  return text
     .replace(/[äöüß]/g, (c) => SPELL_OUT[c])
     .replace(/[-.,]/g, " ")
     .normalize("NFKD")
-    .replace(/[^\x00-\x7f]/g, "");
-  return new Set(plain.split(/\s+/).filter((w) => w && !TITLES.has(w)));
+    .replace(/[^\x00-\x7f]/g, "")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+export function nameWords(name: string): Set<string> {
+  // NFC first: a decomposed "ü" would otherwise lose its umlaut instead of becoming "ue".
+  const tokens = name.normalize("NFC").toLowerCase().split(/\s+/).filter(Boolean);
+  const untitled = tokens.filter((t) => !TITLE.test(t.replace(/,+$/, ""))); // also "Beispiel, Dr.in, Maria"
+  const words = plainWords(untitled.join(" ")).filter((w) => !TITLE.test(w)); // also "Dr.Eva" without a space
+  // A name made only of title-like words, such as the given name "Di", keeps them.
+  return new Set(words.length ? words : plainWords(tokens.join(" ")));
 }
 
 const isSubset = (a: Set<string>, b: Set<string>) => [...a].every((w) => b.has(w));
@@ -215,7 +255,9 @@ export function matchRequestedPerson(reqGiven: string, reqFamily: string, idGive
 }
 ```
 
-`isSubset(a, b)` means every word in `a` is also in `b`. The request procedure refuses requests with an empty given name or family name, because an empty set passes every subset test.
+`isSubset(a, b)` means every word in `a` is also in `b`. The request procedure refuses requests with an empty given name or family name, because an empty set passes every subset test. For the same reason `nameWords` never strips a name down to nothing: a name made only of title-like words, such as the given name "Di", keeps them. A requested name with no words at all, such as "-", still never passes: the name check holds it with the reason `requested_name_empty`.
+
+`nameWords`, `isSubset`, and `shares` live in `src/server/identity/names.ts`, and `matchRequestedPerson` in `src/server/identity/checks.ts`. `checks.test.ts` reads the table above from this file and runs every row, so keep its three columns and the "Pass", "Hold", or "Fail" at the start of the result.
 
 ### Person number binding
 
@@ -329,13 +371,14 @@ Dr. Brandl logs in and uploads `lab-result-max-beispiel.md`, a result for Max Be
 ```ts
 export function samePatient(docName: string, docBirthDate: string, patient: { family: string; given: string[]; birthDate: string }) {
   const family = nameWords(patient.family);
+  if (!family.size || !patient.birthDate) return false;
   const allNames = new Set([...family, ...nameWords(patient.given.join(" "))]);
   const docWords = nameWords(docName);
   return docBirthDate === patient.birthDate && isSubset(family, docWords) && isSubset(docWords, allNames);
 }
 ```
 
-The request service runs this check on the document and on the name and birth date typed into the form. Both must pass.
+The request service runs this check on the document and on the name and birth date typed into the form. Both must pass. The code is in `src/server/documents/patient-check.ts`, and `nameWords` is in `src/server/identity/names.ts`.
 
 ## Sources
 

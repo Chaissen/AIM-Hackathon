@@ -67,6 +67,8 @@ Outside person ──email/SMS link──▶ Next.js pages (React) ──tRPC─
 | tRPC | `src/server/api/` | `publicProcedure`, `clinicProcedure` (Matrix OpenID token or bot), `eidProcedure` (eID session cookie) |
 | Database | `src/server/db/` | Drizzle schema, migrations in `drizzle/` |
 | FHIR | `src/server/fhir/` | typed with `@types/fhir` (R4) |
+| Documents | `src/server/documents/` | Markdown parser (markdown-it) and patient check |
+| Identity | `src/server/identity/` | name words for the name match and the patient check |
 | Matrix | `src/server/matrix/client.ts` | small client-server API client, no E2EE (not required by the track) |
 | Bot | `src/bot/` | separate process for `!help` and `!status`. Requests go through the widget. |
 | Client | `src/trpc/` | `@trpc/tanstack-react-query`, superjson |
