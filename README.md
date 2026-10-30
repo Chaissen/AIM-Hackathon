@@ -2,8 +2,6 @@
 
 This is our entry for [Track 2 of the AIM hackathon](https://github.com/AIM-Austria/TRACK-2-interoperability). Dr. Lena Hofer works inside PGK, a closed document network built on Matrix. ordy is designed to let her request a document from someone outside the network, such as a lab or a rehab clinic. The outside person gets a link by email or SMS, logs in with ID Austria, and answers in the browser, with no account and nothing to install. ordy checks that the right person answered about the right patient, files the answer as FHIR R4 with a Provenance resource on the clinic's FHIR server, and tells Dr. Hofer in her Matrix room. All of this runs today except sending the SMS. [Status](#status) says what runs.
 
-Prototype on synthetic data only. Not a medical device. Not for clinical use. Read the [disclaimer](#disclaimer).
-
 [Status](#status) · [Run it](#run-it) · [Architecture](#architecture) · [Design answers](#design-answers) · [Metrics](#metrics) · [Documents](#documents) · [Disclaimer](#disclaimer)
 
 ## Status
@@ -212,5 +210,3 @@ We measure the four track metrics on the scenario. `pnpm scenario` is meant to r
 > **Important notice.** This software is a prototype built for the AIM hackathon 2026. It is not a medical device, it has not been clinically validated, and no regulatory body has approved or certified it. It uses fictional, synthetic data only. ID Austria and the eHVD are simulated.
 >
 > Do not use it to diagnose, treat, or monitor any condition, or to make any clinical decision. Do not enter real patient data or any personal data. The authors accept no liability for any use outside the hackathon demonstration.
-
-Every page of the app shows the short form in its footer: "Prototype with synthetic data. ID Austria is simulated. Not for clinical use."
