@@ -17,6 +17,8 @@ This page lists the FHIR R4 resources the request service files, how they refere
 
 We file all resources of one answer in one [transaction Bundle](https://hl7.org/fhir/R4/http.html#transaction), so an answer is filed completely or not at all.
 
+The clinicians check the filed data against the documents in [Review 19: the filed FHIR data](clinical-review/REVIEW_19_FHIR_DATA.md). The Bundles it grades are in `docs/clinical-review/19-fhir/`, written by `pnpm clinical-review:export`.
+
 `src/server/fhir/mappers.ts` builds the Observations, the DiagnosticReport, and the DocumentReference from the parsed document, each with a `urn:uuid:` fullUrl. The filing (T13) passes in the Patient, Practitioner, and Organization references and wraps the entries into the transaction Bundle.
 
 ## How the resources reference each other

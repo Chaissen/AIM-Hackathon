@@ -22,6 +22,7 @@
     "validate": "tsx --env-file-if-exists=.env scripts/validate.ts",
     "audit:check": "tsx --env-file-if-exists=.env scripts/audit-check.ts",
     "scenario": "tsx --env-file-if-exists=.env scripts/scenario.ts",
+    "clinical-review:export": "tsx scripts/clinical-review-export.ts",
     "setup": "./scripts/setup.sh",
     "reset": "./scripts/reset.sh"
   },
