@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 
 import { setupEnv } from "./setup-env";
@@ -40,4 +42,9 @@ test("setup upgrades unsafe keys while preserving other local settings", async (
   await writeFile(file, "PUBLIC_URL=http://localhost:3999\n");
   await setupEnv(file, "unused");
   assert.match(parseEnv(await readFile(file, "utf8")).ORDY_SECRET ?? "", /^[a-f0-9]{64}$/);
+});
+
+test(".env.example can be sourced by bash, as setup.sh does with the copy it makes", () => {
+  const example = fileURLToPath(new URL("../../../.env.example", import.meta.url));
+  execFileSync("bash", ["-c", 'set -euo pipefail; set -a; . "$0"; set +a', example], { stdio: "pipe" });
 });
