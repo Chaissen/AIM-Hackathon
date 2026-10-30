@@ -43,6 +43,13 @@
       "when": 1793324543866,
       "tag": "0005_add-answers",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793358388149,
+      "tag": "0006_add-sms-outbox",
+      "breakpoints": true
     }
   ]
 }

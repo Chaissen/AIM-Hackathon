@@ -18,7 +18,7 @@ import { createContext } from "@/server/api/trpc";
 import type { AnswerOutcome } from "@/server/answers/submit";
 import type { EidSession } from "@/server/auth/eid-session";
 import { db } from "@/server/db";
-import { auditLog, heldAnswers, requests } from "@/server/db/schema";
+import { auditLog, heldAnswers, requests, smsOutbox } from "@/server/db/schema";
 import { uploadHash } from "@/server/documents/patient-check";
 import type { LoginPage } from "@/server/identity/login";
 import { parseEmail, startFakeSmtp } from "@/server/mail/fake-smtp";
@@ -65,35 +65,16 @@ const KERN = { docType: "rehab-report", given: "Stefan", family: "Kern", org: "R
 type Seeded = { id: number; docType: DocumentType; story: string };
 const seeded: Seeded[] = [];
 
-const smsLine = /^Request (\d+): (\S+)$/;
 const linkPrefix = new URL("/r/", env.PUBLIC_URL).href;
-
-/**
- * ordy has no SMS gateway yet: in development the request service prints the SMS link to its console instead
- * (`sendLink` in src/server/api/routers/request.ts). The seed catches that line, so the link is never printed.
- */
-async function catchSmsLinks<T>(run: () => Promise<T>): Promise<{ result: T; links: Map<number, string> }> {
-  const links = new Map<number, string>();
-  const info = console.info;
-  console.info = (...args: unknown[]) => {
-    const match = args.length === 1 && typeof args[0] === "string" ? args[0].match(smsLine) : null;
-    if (match) links.set(Number(match[1]), match[2]);
-    else info(...args);
-  };
-  try {
-    return { result: await run(), links };
-  } finally {
-    console.info = info;
-  }
-}
+const linkTokens = (text: string) => text.split(linkPrefix).slice(1).map((rest) => /^[A-Za-z0-9_-]+/.exec(rest)?.[0] ?? "");
 
 /**
  * The seed sends no email (docs/COMPLIANCE_AND_SAFETY.md). `sendRequestEmail` still builds every request email, runs the
  * content check, and hands it to nodemailer, but nodemailer delivers it to an SMTP server in this process, which keeps
- * it. Gmail never sees it, so the run needs no app password, and the seed reads each link from the email it kept.
+ * it. Mailpit never sees it, and the seed reads each link from the email it kept.
  */
 const smtp = await startFakeSmtp();
-Object.assign(env, { SMTP_HOST: "127.0.0.1", SMTP_PORT: smtp.port, SMTP_USER: "", MAIL_TEAM_INBOXES: ["demo-seed@ordy.test"] });
+Object.assign(env, { SMTP_HOST: "127.0.0.1", SMTP_PORT: smtp.port });
 
 /** The link token in the email this run kept for this request: the one whose hash the request stores. */
 async function tokenFromEmail(id: number, address: string): Promise<string> {
@@ -101,22 +82,25 @@ async function tokenFromEmail(id: number, address: string): Promise<string> {
   const tokens = smtp.received
     .map((email) => parseEmail(email.raw))
     .filter(({ headers }) => headers.get("to")?.toLowerCase() === address.toLowerCase())
-    .flatMap(({ body }) => body.split(linkPrefix).slice(1).map((rest) => /^[A-Za-z0-9_-]+/.exec(rest)?.[0] ?? ""));
+    .flatMap(({ body }) => linkTokens(body));
   return tokens.find((t) => hashLinkToken(t) === linkHash) ?? fail(`no email for request ${id}`);
+}
+
+/** The link token in the SMS the request service stored for the SMS screen: the one whose hash the request stores. */
+async function tokenFromSms(id: number): Promise<string> {
+  const { linkHash } = (await getRequest(db, id)) ?? fail(`request ${id} does not exist`);
+  const sms = await db.select({ body: smsOutbox.body }).from(smsOutbox).where(eq(smsOutbox.requestId, id));
+  return sms.flatMap(({ body }) => linkTokens(body)).find((t) => hashLinkToken(t) === linkHash) ?? fail(`no SMS for request ${id}`);
 }
 
 type NewRequest = Omit<RequestInput, "email" | "phone"> & ({ email: string } | { phone: string });
 
 /** request.create as Dr. Hofer. Returns the request and its link token, or no token while it awaits confirmation. */
 async function send(input: NewRequest, story: string): Promise<{ id: number; token: string | null }> {
-  const { result, links } = await catchSmsLinks(() => hofer.request.create(input));
+  const result = await hofer.request.create(input);
   seeded.push({ id: result.id, docType: result.docType, story });
   if (result.state === "awaiting_confirmation") return { id: result.id, token: null };
-  if ("phone" in input) {
-    const link = links.get(result.id) ?? fail(`request ${result.id}: the SMS link was not printed. Is NODE_ENV development?`);
-    return { id: result.id, token: link.slice(linkPrefix.length) };
-  }
-  return { id: result.id, token: await tokenFromEmail(result.id, input.email) };
+  return { id: result.id, token: "phone" in input ? await tokenFromSms(result.id) : await tokenFromEmail(result.id, input.email) };
 }
 
 async function expectState(id: number, state: RequestState) {
@@ -148,7 +132,6 @@ async function preflight() {
   for (const [name, check] of Object.entries({ database: health.database, fhir: health.fhir, matrix: health.matrix })) {
     if (!check.ok) fail(`${name} is not reachable: ${check.detail}`);
   }
-  if (env.NODE_ENV !== "development") fail("NODE_ENV must be development: the seed reads the SMS links the request service prints then.");
   for (const id of ["maria-beispiel", "johann-muster", "petra-probst"]) {
     await hofer.clinic.patient({ id }).catch(() => fail(`Patient/${id} is not on HAPI. Run pnpm fhir:seed first.`));
   }

@@ -27,19 +27,10 @@ const schema = z.object({
   // Keycloak admin login for `pnpm citizen`, the values from docker-compose.yml. The app itself never needs them.
   KEYCLOAK_ADMIN_USER: z.string().default("admin"),
   KEYCLOAK_ADMIN_PASSWORD: z.string().default("keycloak-demo-2026"),
-  // Outgoing email: Gmail as ordysoftware@gmail.com. SMTP_PASSWORD is its app password and belongs only in .env.
-  SMTP_HOST: z.string().default("smtp.gmail.com"),
-  SMTP_PORT: z.coerce.number().int().default(465),
-  SMTP_USER: z.string().default("ordysoftware@gmail.com"),
-  SMTP_PASSWORD: z.string().default(""),
-  // Gmail replaces a sender address that is not the account's own.
-  MAIL_FROM: z.string().default("ordy · Klinikum Beispielstadt <ordysoftware@gmail.com>"),
-  // Every email goes to these addresses, whatever address the request names.
-  MAIL_TEAM_INBOXES: z
-    .string()
-    .default("ordysoftware@gmail.com")
-    .transform((list) => list.split(",").map((address) => address.trim()).filter(Boolean))
-    .pipe(z.array(z.email()).min(1)),
+  SMTP_HOST: z.string().default("localhost"),
+  SMTP_PORT: z.coerce.number().int().default(1025),
+  MAIL_FROM: z.string().default("ordy · Klinikum Beispielstadt <ordy@klinikum.example>"),
+  MAILPIT_API_URL: z.url().default("http://localhost:8025"),
   // eHVD web service (task T15): the mock from T23, or the real eHVD from an address BRZ has allowed.
   EHVD_URL: z.url().default("http://localhost:8095/"),
   // The entries the Contacts view lists before any search, looked up with GetGDA: the eHVD has no call that lists

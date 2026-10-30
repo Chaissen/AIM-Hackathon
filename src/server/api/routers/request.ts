@@ -11,13 +11,13 @@ import { answerDeps, readFhirPatient } from "@/server/answers/deps";
 import { logReason } from "@/server/answers/file";
 import { acceptAnswer, FilingOutcomeOpen, NoHeldAnswer, rejectAnswer } from "@/server/answers/held";
 import { auditActor, recordAudit } from "@/server/audit/record";
-import type { Db } from "@/server/db";
+import type { Db, Tx } from "@/server/db";
 import { auditLog, heldAnswers, keptAnswers } from "@/server/db/schema";
 import { checkAddress, checkRecipient } from "@/server/ehvd/address-check";
 import { FhirError } from "@/server/fhir/client";
 import { nameWords } from "@/server/identity/names";
 import { forbiddenContent, requestEmail, requestSms } from "@/server/mail/message";
-import { IncompletePatient, MessageRefused, sendRequestEmail } from "@/server/mail/send";
+import { IncompletePatient, MessageRefused, sendRequestEmail, sendRequestSms } from "@/server/mail/send";
 import { displayName } from "@/server/matrix/client";
 import { taskStatus, TransitionError } from "@/server/requests/lifecycle";
 import { LINK_TTL_MS } from "@/server/requests/link-token";
@@ -152,30 +152,33 @@ function notSentReason(error: unknown): string {
   return failure.responseCode ? `${code}, SMTP ${failure.responseCode}` : code;
 }
 
-async function sendLink(request: RequestRow, token: string) {
-  const link = `${env.PUBLIC_URL}/r/${token}`;
-  if (request.channel === "sms") {
-    if (env.NODE_ENV === "development") console.info(`Request ${request.id}: ${link}`);
-    return;
-  }
+async function sendLink(tx: Tx, request: RequestRow, token: string) {
   const patient = await linkDeps.readPatient(request.patientId).catch((error: unknown) => notSent(request, "reading the patient", error));
-  await linkDeps
-    .sendRequestEmail({ to: request.address, requester: request.requesterName, clinic: env.CLINIC_NAME, link, expiresAt: request.expiresAt, patient })
-    .catch((error: unknown) => notSent(request, "sending", error));
+  const message = {
+    to: request.address,
+    requester: request.requesterName,
+    clinic: env.CLINIC_NAME,
+    link: `${env.PUBLIC_URL}/r/${token}`,
+    expiresAt: request.expiresAt,
+    patient,
+  };
+  const sent = request.channel === "sms" ? sendRequestSms(tx, { requestId: request.id, ...message }) : linkDeps.sendRequestEmail(message);
+  await sent.catch((error: unknown) => notSent(request, "sending", error));
 }
 
 function notSent(request: RequestRow, stage: string, error: unknown): never {
-  console.error(`The email for request ${request.id} was not sent while ${stage}: ${notSentReason(error)}`);
+  const kind = request.channel === "sms" ? "SMS" : "email";
+  console.error(`The ${kind} for request ${request.id} was not sent while ${stage}: ${notSentReason(error)}`);
   if (error instanceof MessageRefused) {
-    throw new TRPCError({ code: "PRECONDITION_FAILED", message: `The email would contain ${error.categories.join(", ")}, so it was not sent. The request did not go out.` });
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: `The ${kind} would contain ${error.categories.join(", ")}, so it was not sent. The request did not go out.` });
   }
   if (error instanceof IncompletePatient) {
     throw new TRPCError({
       code: "PRECONDITION_FAILED",
-      message: "The patient's record on the FHIR server lacks a given name, a family name, or a full birth date, so ordy cannot check the email. The request did not go out.",
+      message: `The patient's record on the FHIR server lacks a given name, a family name, or a full birth date, so ordy cannot check the ${kind}. The request did not go out.`,
     });
   }
-  throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "The email could not be sent. The request did not go out; try again in a few minutes." });
+  throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `The ${kind} could not be sent. The request did not go out; try again in a few minutes.` });
 }
 
 export const requestRouter = createTRPCRouter({
