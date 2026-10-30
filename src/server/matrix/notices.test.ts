@@ -13,6 +13,15 @@ test("the documented notices for request 1", () => {
     "Request 1 was opened by someone who is not Dr. Eva Brandl (ID Austria name: Anna Huber). Nothing was shown or filed. Check the address.",
   );
   assert.equal(
+    noticeText({
+      kind: "identity-failed",
+      requestId: 1,
+      idAustriaName: "Eva Brandl",
+      reason: "The ID Austria login has only basic function, and a request needs full function.",
+    }),
+    "Request 1 was opened by Eva Brandl, but the identity check failed. The ID Austria login has only basic function, and a request needs full function. Nothing was shown or filed.",
+  );
+  assert.equal(
     noticeText({ kind: "patient-mismatch", requestId: 1, patient: "Maria Beispiel" }),
     "The answer to request 1 is about a different patient. Name and birth date do not match Maria Beispiel. Nothing was filed.",
   );
