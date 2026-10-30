@@ -26,10 +26,6 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <TRPCReactProvider>
             <div className="flex flex-1 flex-col">{children}</div>
           </TRPCReactProvider>
-          {/* Short form required by docs/COMPLIANCE_AND_SAFETY.md, "Disclaimer". */}
-          <footer className="border-t border-hairline px-4 py-4 text-center">
-            <p className="eyebrow text-xs">Prototype with synthetic data. ID Austria is simulated. Not for clinical use.</p>
-          </footer>
         </div>
       </body>
     </html>

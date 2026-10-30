@@ -26,5 +26,3 @@ npm install --before=<date 7 days ago>   # keeps the team's 7-day rule for new p
 npm run dev                              # http://localhost:5173
 npm run build                            # single file in dist/index.html, opens without a server
 ```
-
-Prototype with synthetic data. ID Austria is simulated. Not for clinical use.

@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { BarChart3, FileText, Inbox, LayoutGrid, ListChecks, Moon, Plus, RotateCcw, ScrollText, Users, UserRound, ChevronsUpDown } from "lucide-react"
+import { BarChart3, Inbox, LayoutGrid, ListChecks, Moon, Plus, RotateCcw, ScrollText, Users, UserRound, ChevronsUpDown } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader,
@@ -170,9 +170,6 @@ export function AppShell({ crumbs, actions, children }: { crumbs: React.ReactNod
           {actions}
         </header>
         <main className="mx-auto grid w-full max-w-6xl content-start gap-6 p-4 md:p-6">{children}</main>
-        <footer className="mx-auto w-full max-w-6xl px-4 pb-6 text-xs text-muted-foreground md:px-6">
-          <FileText className="mr-1 inline size-3" /> Prototype with synthetic data. ID Austria is simulated. Not for clinical use.
-        </footer>
       </SidebarInset>
 
       <ResetDialog open={resetOpen} onOpenChange={setResetOpen} />
