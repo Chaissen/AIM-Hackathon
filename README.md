@@ -2,6 +2,8 @@
 
 This is our entry for [Track 2 of the AIM hackathon](https://github.com/AIM-Austria/TRACK-2-interoperability). Dr. Lena Hofer works inside PGK, a closed document network built on Matrix. ordy is designed to let her request a document from someone outside the network, such as a lab or a rehab clinic. The outside person gets a link by email or SMS, logs in with ID Austria, and answers in the browser, with no account and nothing to install. ordy checks that the right person answered about the right patient, files the answer as FHIR R4 with a Provenance resource on the clinic's FHIR server, and tells Dr. Hofer in her Matrix room. All of this runs today except sending the SMS. [Status](#status) says what runs.
 
+**[Watch the 2-minute product video](docs/video/ordy-product-video.mp4)**
+
 [Status](#status) · [Run it](#run-it) · [Architecture](#architecture) · [Design answers](#design-answers) · [Metrics](#metrics) · [Documents](#documents) · [Disclaimer](#disclaimer)
 
 ## Status
@@ -205,6 +207,7 @@ We measure the four track metrics on the scenario. `pnpm scenario` runs it again
 | [eHVD](docs/EHVD.md) | The real eHVD SOAP interface, what is public about it, our mock, and how ordy uses it |
 | [Identity and misdelivery](docs/IDENTITY.md) | Real ID Austria and eHVD, the Keycloak simulation, the identity checks, and the three misdelivery tests |
 | [FHIR model](docs/FHIR.md) | The resources we file, how they reference each other, and how we validate them |
+| [Product video](docs/video/ordy-product-video.mp4) | The 2-minute demo: both requests, M1 to M3, what works, and what does not |
 | [Demo script](docs/DEMO.md) | Draft click path for the 2-minute video |
 | [End-to-end run](docs/E2E_RUN.md) | A recorded browser run of the whole scenario on 30 October 2026, with the metrics and findings |
 | [Timeline](docs/TIMELINE.md) | Milestones, tasks, owners, and the cut list |
