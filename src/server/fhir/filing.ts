@@ -64,8 +64,9 @@ export type Parties = {
 };
 
 /**
- * One answer: the request and the SHA-256 of the upload (`uploadHash()`). Rebuilding the Bundle for the same answer
- * gives the same conditions, so a retry matches what the first attempt filed.
+ * One answer: the request and the SHA-256 of the upload (`uploadHash()`). Rebuilding the Bundle from the same stored
+ * inputs gives the same conditions, so a retry matches what the first attempt filed. The key relies on the Postgres
+ * request id, so Postgres and HAPI must be emptied together (`pnpm reset`).
  */
 export type AnswerKey = { requestId: number; uploadSha256: string };
 

@@ -42,9 +42,11 @@ async function writeAnswerFiled(requestId: number, detail: AnswerFiled) {
  *
  * An error means the answer may or may not be on the server: HAPI may have rejected the transaction (FhirError with
  * its status), or committed it while the response was lost (timeout, network) or the audit insert failed afterwards.
- * Keep the answer and call `fileAnswer` again with a Bundle built from the same answer (same request id and upload
- * hash). Every POST is a conditional create, so the retry files nothing new, gets back the ids of what the first
- * attempt filed, and writes the audit entry.
+ * Every POST is a conditional create, so a retry files nothing new, gets back the ids of what the first attempt filed,
+ * and writes the audit entry. That holds only for the same Bundle inputs (docs/FHIR.md, "Retries"):
+ * - Store `filing` (plain JSON) and retry exactly it. Never rebuild it from a fresh eHVD lookup or a fresh parse:
+ *   a changed OID or row count leaves orphans next to the resources the first attempt filed.
+ * - Accept no new upload for the request until this answer is filed or HAPI rejected it with a FhirError.
  */
 export async function fileAnswer(
   requestId: number,
