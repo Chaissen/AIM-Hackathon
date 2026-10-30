@@ -1,6 +1,12 @@
 access_log off;
 error_log /dev/stderr crit;
 
+# host.docker.internal also resolves to an IPv6 address the container cannot reach. With the default max_fails=1, a
+# restart of the app marks every address as down, and the gateway still answers 502 after the app is back.
+upstream ordy_web {
+    server ${ORDY_WEB_UPSTREAM} max_fails=0;
+}
+
 map $http_upgrade $workspace_connection {
     default upgrade;
     '' close;
@@ -18,7 +24,7 @@ server {
     client_max_body_size 128k;
 
     location / {
-        proxy_pass http://${ORDY_WEB_UPSTREAM};
+        proxy_pass http://ordy_web;
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-Host $http_host;
