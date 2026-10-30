@@ -439,3 +439,34 @@ test("the wide date readers take the dotted and ISO formats", () => {
   assert.deepEqual(parseStayWide("2 to 23 September 2026"), { start: "2026-09-02", end: "2026-09-23" });
   assert.equal(parseStayWide("23.09.2026 - 02.09.2026"), null);
 });
+
+// #46: a key/value table row and a key with its value on the next line, in a format the parser does not know.
+
+test("a key/value table row with another patient is refused without the model, and with the same patient it is read", async () => {
+  const table = (...rows: string[]) => `\n## Details\n\n${rows[0]}\n|---|---|\n${rows.slice(1).join("\n")}\n`;
+  assert.deepEqual(await refused(`${rehab}${table("| Patient | Max Beispiel |")}`), ["several-patients"]);
+  assert.deepEqual(await refused(`${rehab}${table("| Ward | 3 |", "| **Date of birth:** | 01.01.1960 |")}`), ["several-birth-dates"]);
+  assert.deepEqual(await refused(`${rehab}${table("| Patient name | Max Beispiel, born 1 January 1960 |")}`), ["several-patients", "several-birth-dates"]);
+
+  for (const extra of [table("| Patient | Maria Beispiel |", "| Date of birth | 12.03.1961 |"), "\n## Contact\n\n| Name | Stefan Kern |\n|---|---|\n| Phone | +43 660 000 0101 |\n"]) {
+    const doc = (await record(`${rehab}${extra}`, goodRehab())) as RehabReport;
+    assert.deepEqual(doc.patient, { name: "Maria Beispiel", birthDate: "1961-03-12" }, extra);
+  }
+  // Alone, the table names the patient.
+  const only = rehab.replace("Patient name: Maria Beispiel\nDate of birth: 12.03.1961\n", "") + table("| Patient | Maria Beispiel |", "| Date of birth | 12.03.1961 |");
+  assert.deepEqual((await record(only, goodRehab())).patient, { name: "Maria Beispiel", birthDate: "1961-03-12" });
+});
+
+test("a key with its value on the next line is refused without the model when it names another patient", async () => {
+  const cases: [string, string[]][] = [
+    ["Patient:\nMax Beispiel", ["several-patients"]],
+    ["**Patient name:**\n\nMax Beispiel, born 1 January 1960", ["several-patients", "several-birth-dates"]],
+    ["Date of birth:\n01.01.1960", ["several-birth-dates"]],
+  ];
+  for (const [line, safety] of cases) assert.deepEqual(await refused(insertAfter(lab, "Reported: 22.10.2026 11:40\n", line)), safety, line);
+
+  const same = lab.replace("Patient name: Maria Beispiel\nDate of birth: 12.03.1961", "Patient name:\nMaria Beispiel\n\nDate of birth:\n\n12.03.1961");
+  const doc = (await record(same, goodLab())) as LabResult;
+  assert.deepEqual(doc.patient, { name: "Maria Beispiel", birthDate: "1961-03-12" });
+  assert.equal(checkAnswerPatient(doc.patient, { name: "Maria Beispiel", birthDate: "1961-03-12" }, maria).pass, true);
+});

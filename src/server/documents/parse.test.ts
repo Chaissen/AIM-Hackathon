@@ -244,3 +244,74 @@ test("joined titles need a separator, so a name such as Magdi stays a name", () 
   assert.equal(parsePersonLine("Magdi Hassan, lab physician")?.given, "Magdi");
   assert.deepEqual(parsePersonLine("Univ.-Prof. Dipl.-Ing. Dr.med. Eva Brandl")?.titles, ["Univ.-Prof.", "Dipl.-Ing.", "Dr.med."]);
 });
+
+// #46: a key/value table row and a key with its value on the next line are patient lines too, in every document kind.
+
+const rehabLf = () => scenario("rehab-report-maria-beispiel.md").replace(/\r\n/g, "\n");
+const labLf = () => scenario("lab-result-maria-beispiel.md").replace(/\r\n/g, "\n");
+const referral = "# Praxis Dr. Huber: referral letter\n\nPatient: Maria Beispiel, born 12 March 1961\n\nPlease see the attached findings.\n";
+const kvTable = (...rows: string[]) => `\n## Details\n\n${rows[0]}\n|---|---|\n${rows.slice(1).join("\n")}\n`;
+
+test("a key/value table row names the patient in a rehab report and a generic document", () => {
+  for (const base of [rehabLf(), referral]) {
+    const cases: [string, string[]][] = [
+      [kvTable("| Patient | Max Beispiel |"), ["several-patients"]],
+      [kvTable("| Ward | 3 |", "| **Patient name:** | Max Beispiel |"), ["several-patients"]],
+      [kvTable("| Patient | Max Beispiel, born 1 January 1960 |"), ["several-patients", "several-birth-dates"]],
+      [kvTable("| Ward | 3 |", "| Date of birth | 01.01.1960 |"), ["several-birth-dates"]],
+    ];
+    for (const [extra, safety] of cases) {
+      const result = parseDocument(`${base}${extra}`);
+      assert.ok(!result.ok, extra);
+      assert.deepEqual(result.safety, safety, extra);
+    }
+    // The same patient in the table is fine, and so are the tables the scan does not read as key/value.
+    for (const extra of [
+      kvTable("| Patient | Maria Beispiel |", "| Date of birth | 12.03.1961 |"),
+      kvTable("| Patient name | BEISPIEL Maria, DOB 12.03.1961 |"),
+      "\n## Contact\n\n| Name | Stefan Kern |\n|---|---|\n| Phone | +43 660 000 0101 |\n",
+      "\n## Findings\n\n| Test | Result | Unit |\n|---|---|---|\n| Patient | Max Beispiel | x |\n",
+      "\n## Findings\n\n| Test | Result |\n|---|---|\n| CRP | 3 |\n",
+    ]) {
+      const result = parseDocument(`${base}${extra}`);
+      assert.ok(result.ok, `${extra}: ${result.ok ? "" : result.errors.join("; ")}`);
+      assert.equal(result.document.patient.name, "Maria Beispiel");
+    }
+  }
+  // A lab report with a key/value table has a second table, which is refused already.
+  assert.deepEqual((parseDocument(`${labLf()}${kvTable("| Patient | Maria Beispiel |")}`) as { safety: string[] }).safety, ["several-tables"]);
+});
+
+test("a key with its value on the next line names the patient, in the same paragraph or the next one", () => {
+  for (const base of [labLf(), rehabLf(), referral]) {
+    const cases: [string, string[]][] = [
+      ["\nPatient:\nMax Beispiel\n", ["several-patients"]],
+      ["\n**Patient name:**\n\nMax Beispiel, born 1 January 1960\n", ["several-patients", "several-birth-dates"]],
+      ["\n## Notes\n\nDate of birth:\n01.01.1960\n", ["several-birth-dates"]],
+    ];
+    for (const [extra, safety] of cases) {
+      const result = parseDocument(`${base}${extra}`);
+      assert.ok(!result.ok, extra);
+      assert.deepEqual(result.safety, safety, extra);
+    }
+    for (const extra of [
+      "\nPatient:\nMaria Beispiel\n",
+      "\n**Patient name:**\n\nMaria Beispiel, born 12 March 1961\n",
+      "\n## Notes\n\nDate of birth:\n12.03.1961\n",
+      // A key line or a heading is never the value of the key above it.
+      "\nPatient:\nWard: 3\n",
+      "\nPatient:\n\n## Course notes\n\nMax Beispiel walked with two crutches.\n",
+    ]) {
+      const result = parseDocument(`${base}${extra}`);
+      assert.ok(result.ok, `${extra}: ${result.ok ? "" : result.errors.join("; ")}`);
+    }
+  }
+});
+
+test("image alt text alone on its line names the patient like link text, in every document kind", () => {
+  for (const base of [labLf(), rehabLf(), referral]) {
+    const result = parseDocument(`${base}\n![Patient: Max Beispiel](x.png)\n`);
+    assert.ok(!result.ok);
+    assert.deepEqual(result.safety, ["several-patients"]);
+  }
+});

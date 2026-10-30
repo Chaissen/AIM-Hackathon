@@ -4,8 +4,9 @@ import { parseDateWide } from "./dates";
 import type { IsoDate, SafetyRefusal } from "./types";
 
 // Finds every line that names the patient or gives the patient's birth date, wherever it is written: plain text,
-// a heading, bold, a list, a link, a code block, or HTML. The parser and the AI fallback both refuse a file in which
-// these lines disagree, so a second patient cannot hide in a form either of them does not read (docs/ARCHITECTURE.md).
+// a heading, bold, a list, a link, a code block, HTML, a key/value table row, or a key with its value on the next line.
+// The parser and the AI fallback both refuse a file in which these lines disagree, so a second patient cannot hide in a
+// form either of them does not read (docs/ARCHITECTURE.md).
 
 /**
  * A `key: value` line with its markup stripped. `norm` is the key in lower case, without `(2)` and a final `.`.
@@ -72,17 +73,21 @@ function keyValue(keyPart: string, valuePart: string, header: boolean): KeyLine 
   return { key, norm, value, header };
 }
 
-/**
- * `**Patient name:** Max`, `Patient’s name: Max`, `- Patient:Max`, `Patient： Max`, `[Patient: Max](#)`, or
- * `<b>Name</b>: Max` as a key line, or null. `Patient - Max` counts too, but only for keys that identify the patient.
- */
-export function toKeyLine(line: string, header = true): KeyLine | null {
-  const clean = line
+/** Link text instead of the link, no HTML tags, straight apostrophes, and ASCII colons. */
+const unmark = (text: string) =>
+  text
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/<[^>]*>/g, " ")
     .replace(/[’‘ʼ´`]/g, "'")
     .replace(/[：﹕]/g, ":")
     .trim();
+
+/**
+ * `**Patient name:** Max`, `Patient’s name: Max`, `- Patient:Max`, `Patient： Max`, `[Patient: Max](#)`, or
+ * `<b>Name</b>: Max` as a key line, or null. `Patient - Max` counts too, but only for keys that identify the patient.
+ */
+export function toKeyLine(line: string, header = true): KeyLine | null {
+  const clean = unmark(line);
   const colon = clean.indexOf(":");
   const byColon = colon > 0 ? keyValue(clean.slice(0, colon), clean.slice(colon + 1), header) : null;
   if (byColon) return byColon;
@@ -91,21 +96,59 @@ export function toKeyLine(line: string, header = true): KeyLine | null {
   return byDash && IDENTITY_KEYS.has(byDash.norm) ? byDash : null;
 }
 
-/** Every key line outside tables: paragraphs, headings, list items, code blocks, and HTML blocks. */
+/**
+ * `Patient:`, `**Date of birth:**`, or `## Patient name:` with nothing after the colon: a key that identifies the
+ * patient, with its value on the next line. Other keys are not read this way.
+ */
+export function isBareIdentityKey(line: string): boolean {
+  const clean = unmark(line).replace(/[\s*_]+$/, "");
+  const kl = clean.endsWith(":") ? keyValue(clean.slice(0, -1), "-", true) : null;
+  return kl !== null && IDENTITY_KEYS.has(kl.norm);
+}
+
+/**
+ * The rows of a key/value table as key lines, such as `| Patient | Max Beispiel |` or `| **Date of birth:** | 01.01.1960 |`.
+ * Only a table with exactly two columns is one, and only a row whose first cell is a key counts, the header row too.
+ * A lab result table has more columns, and the first column of a two-column one names tests, never the patient.
+ */
+export function keyValueRows(rows: string[][], header: boolean): KeyLine[] {
+  if (!rows.length || rows.some((cells) => cells.length !== 2)) return [];
+  return rows.flatMap(([key, value]) => keyValue(unmark(key).replace(/[\s*_]*:[\s*_]*$/, ""), unmark(value), header) ?? []);
+}
+
+/**
+ * Every key line: paragraphs, headings, list items, code blocks, HTML blocks, and the rows of key/value tables.
+ * A key that identifies the patient alone on its line takes the next line as its value, in the same block or as the
+ * first line of the next paragraph, unless that line is a key line itself. A table follows `headerBlock()`: the header
+ * block ends at it, so `| Name | Stefan Kern |` never counts, while `| Patient | … |` counts anywhere.
+ */
 export function keyLines(markdown: string): KeyLine[] {
   const lines: KeyLine[] = [];
   const header = headerBlock();
-  let tableDepth = 0;
+  let table: string[][] | null = null;
+  let row: string[] | null = null;
+  let bare: { line: string; header: boolean } | null = null;
   const tokens = md.parse(markdown.replace(/^﻿/, "").replace(/\r\n?/g, "\n"), {});
   tokens.forEach((t, i) => {
     header.see(t, tokens[i + 1]);
-    if (t.type === "table_open") tableDepth++;
-    else if (t.type === "table_close") tableDepth--;
-    else if (!tableDepth && ["inline", "fence", "code_block", "html_block"].includes(t.type)) {
-      for (const line of t.content.split("\n")) {
-        const kl = toKeyLine(line, header.open);
-        if (kl) lines.push(kl);
-      }
+    if (t.type === "table_open") table = [];
+    else if (t.type === "table_close" && table) {
+      lines.push(...keyValueRows(table, header.open));
+      table = null;
+    } else if (t.type === "tr_open") row = [];
+    else if (t.type === "tr_close" && row) {
+      table?.push(row);
+      row = null;
+    } else if (t.type === "inline" && row) row.push(t.content);
+    if (table || t.type === "hr") bare = null;
+    if (table || !["inline", "fence", "code_block", "html_block"].includes(t.type)) return;
+    // Only a paragraph gives the value of a key above it, never a heading or a block further down.
+    if (t.type !== "inline" || tokens[i - 1]?.type !== "paragraph_open") bare = null;
+    for (const line of t.content.split("\n").filter((l) => l.trim())) {
+      const isBare = isBareIdentityKey(line);
+      const kl = toKeyLine(line, header.open) ?? (bare && !isBare ? toKeyLine(`${bare.line} ${line}`, bare.header) : null);
+      if (kl) lines.push(kl);
+      bare = isBare ? { line, header: header.open } : null;
     }
   });
   return lines;
