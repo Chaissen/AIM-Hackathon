@@ -84,7 +84,7 @@ Test citizens for the ID Austria login: `eva.brandl` / `demo-eva`, `stefan.kern`
 | `pnpm build`, then `pnpm start` | Production build, then both processes without reload |
 | `pnpm typecheck` | Generates the Next.js route types, then runs `tsc` on ordy and on the eHVD mock |
 | `pnpm lint` | ESLint |
-| `pnpm test` | The `*.test.ts` files under `src/` and `services/`, with Node's test runner through tsx. The request tests use the Postgres and FHIR server at the default addresses from `src/env.ts`, because `pnpm test` does not read `.env`. They delete their rows afterwards and are skipped when the servers are not running. Request ids still move on, so run `pnpm reset` before a demo. |
+| `pnpm test` | The `*.test.ts` files under `src/` and `services/`, with Node's test runner through tsx. The request tests use the Postgres and FHIR server at the default addresses from `src/env.ts`, because `pnpm test` does not read `.env`. They delete their rows afterwards and are skipped when the servers are not running. Request ids still move on, so run `pnpm reset` before a demo. The mail tests send request 1's email to Mailpit and read it back. They are skipped when Mailpit is not running or `SMTP_USER` is set. |
 | `pnpm reset` | Empties Postgres, HAPI, and Mailpit, and reloads the patient. Matrix users and the room stay. Run it before every demo. |
 | `pnpm db:generate --name <name>` | Writes a SQL migration to `drizzle/` from the schema |
 | `pnpm db:migrate` | Applies pending migrations |
@@ -95,6 +95,7 @@ Test citizens for the ID Austria login: `eva.brandl` / `demo-eva`, `stefan.kern`
 | `pnpm validate` | Runs the HL7 validator on every resource named in an `answer_filed` entry and counts the errors. `--since <time>` takes only the entries from that time on. `pnpm validate <file or folder>` checks hand-made resources instead. Needs Java. [FHIR](FHIR.md#validation) has the details. |
 | `pnpm audit:check` | Lists the six audit event types per request, each with who, what, and when. `--request <id>` checks one request. `--effort` prints the audit timeline and the effort in seconds of the newest request 1, or of `--request <id>`, for the [timed test](clinical-review/TIMED_TEST_20.md). |
 | `pnpm scenario` | Runs request 1, M1 to M3, and request 2 against the running stack and writes the four metric results to `out/metrics/metrics.md`. `--no-validate` skips the validator. [Whitepaper](WHITEPAPER.md#how-we-measure-the-metrics) has the details. |
+| `pnpm clinical-review:export` | Writes the transaction Bundle ordy would file for each scenario and extra document to `docs/clinical-review/19-fhir/`, without any server. Run it after a change to the parser, the mappers, or the filing, and compare. [Review 19](clinical-review/REVIEW_19_FHIR_DATA.md) has the details. |
 | `./scripts/setup.sh` | Full one-time setup, see above |
 
 Before every push: `pnpm typecheck && pnpm lint && pnpm test && pnpm build`.
@@ -186,6 +187,27 @@ To add a document, write the file, add its row to the index, and run `pnpm test`
 `src/env.ts` reads configuration with zod. Service addresses and demo accounts have defaults. `ORDY_SECRET` defaults to empty, which disables outside-person session authentication; setup generates a unique private key. Existing installations can run `pnpm exec tsx scripts/init-env.ts` and restart the app to upgrade their key without restarting containers. Changing the key invalidates old outside-person cookies. To add a variable, add it to `src/env.ts` and `.env.example`. The eHVD mock's `EHVD_ALLOWLIST` and `EHVD_SCHEMA_ERRORS` are read only by its container, so they live in `docker-compose.yml` and `.env.example`, not in `src/env.ts`. [Architecture](ARCHITECTURE.md#configuration) lists all variables.
 
 To open answer links on a phone in the same network, set `PUBLIC_URL` to your computer's LAN address, for example `http://192.168.1.20:3010`, restart `pnpm dev`, and run `pnpm matrix:bootstrap` so the widget uses the new address.
+
+## Send email through Gmail
+
+Locally every email lands in Mailpit at http://localhost:8025, whatever the address. To send through Gmail instead, as ordysoftware@gmail.com:
+
+1. Get the app password of ordysoftware@gmail.com from the team. Google issues app passwords under Google Account, Security, App passwords, for accounts with 2-Step Verification. The account password does not work over SMTP.
+2. Add these lines to `.env`. Never put the app password into git, `.env.example`, or the docs.
+
+   ```bash
+   SMTP_HOST=smtp.gmail.com
+   SMTP_PORT=465
+   SMTP_USER=ordysoftware@gmail.com
+   SMTP_PASSWORD=<Gmail app password>
+   MAIL_FROM="ordy · Klinikum Beispielstadt <ordysoftware@gmail.com>"
+   MAIL_TEAM_INBOXES=first@example.com,second@example.com
+   ```
+
+   Write the app password without its spaces. `setup.sh` reads `.env` with bash, so a value with spaces or `<` needs double quotes, as `MAIL_FROM` has. Gmail replaces a sender address that is not the account's own, so `MAIL_FROM` names the account.
+3. Restart `pnpm dev`.
+
+Every email then lands in the team inboxes and in the Sent folder of the account. Its `To` header still names the request's address, for example `eva.brandl@labor-kanal.example`, and Mailpit gets nothing. Without `MAIL_TEAM_INBOXES`, every send fails with "SMTP_USER is set but MAIL_TEAM_INBOXES is empty". To go back to Mailpit, remove the lines. `pnpm test` does not read `.env`. The mail tests skip themselves when `SMTP_USER` is set in the shell, so they never send through Gmail.
 
 ## HL7 validator
 
