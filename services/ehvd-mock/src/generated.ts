@@ -1,3 +1,4 @@
+import { chamber, idKinds, stateGovernment } from "./codes.ts";
 import type { DirectoryEntry } from "./directory.ts";
 import type { GdaStatus } from "./soap.ts";
 
@@ -54,11 +55,11 @@ const siteNames = [
 ];
 
 const organisationKinds = [
-  { label: "Klinikum", slug: "klinikum", role: "300", elgaRole: "702", idKind: "1.2.40.0.34.4.10", prefix: "K" },
-  { label: "Krankenhaus", slug: "krankenhaus", role: "300", elgaRole: "702", idKind: "1.2.40.0.34.4.10", prefix: "K" },
-  { label: "Rehazentrum", slug: "rehazentrum", role: "301", elgaRole: "702", idKind: "1.2.40.0.34.4.10", prefix: "K" },
-  { label: "Labor", slug: "labor", role: "304", elgaRole: "724", idKind: "1.2.40.0.34.4.20", prefix: "A" },
-  { label: "Ambulatorium", slug: "ambulatorium", role: "304", elgaRole: "702", idKind: "1.2.40.0.34.4.20", prefix: "A" },
+  { label: "Klinikum", slug: "klinikum", role: "300", elgaRole: "702", idKind: idKinds.kaNr, prefix: "K" },
+  { label: "Krankenhaus", slug: "krankenhaus", role: "300", elgaRole: "702", idKind: idKinds.kaNr, prefix: "K" },
+  { label: "Rehazentrum", slug: "rehazentrum", role: "301", elgaRole: "702", idKind: idKinds.kaNr, prefix: "K" },
+  { label: "Labor", slug: "labor", role: "304", elgaRole: "724", idKind: idKinds.ambuNr, prefix: "A" },
+  { label: "Ambulatorium", slug: "ambulatorium", role: "304", elgaRole: "702", idKind: idKinds.ambuNr, prefix: "A" },
 ] as const;
 
 const specialties = ["1.2.40.0.34.3.1.10.20:7", "1.2.40.0.34.3.1.10.20:12", "1.2.40.0.34.3.1.10.20:19"];
@@ -116,7 +117,7 @@ export function generateEntries(): DirectoryEntry[] {
         status,
         surname: `${kind.label} ${site.name}`,
         address: [address],
-        description: ["Registrierungsstelle:Amt der Landesregierung"],
+        description: [stateGovernment],
         roles: { role: [`1.2.40.0.34.5.2:${kind.role}`], elgaRole: [`1.2.40.0.34.5.3:${kind.elgaRole}`], specialisation: [] },
         mail: `office@${kind.slug}-${site.slug}.example`,
         timestamps,
@@ -130,13 +131,13 @@ export function generateEntries(): DirectoryEntry[] {
     const memberof = organisations.length > 0 && random() < 0.3 ? [pick(organisations)] : [];
     entries.push({
       oid: `1.2.40.0.34.3.2.99.1.${1000 + n}`,
-      otherIds: [{ kind: "1.2.40.0.34.4.18", number: String(91000 + n) }],
+      otherIds: [{ kind: idKinds.arztNr, number: String(91000 + n) }],
       status,
       firstname: pick(firstnames),
       surname,
       title: pick(titles),
       address: [address],
-      description: ["Registrierungsstelle:Österreichische Ärztekammer"],
+      description: [chamber],
       roles: specialist
         ? { role: ["1.2.40.0.34.5.2:159"], elgaRole: ["1.2.40.0.34.5.3:700"], specialisation: [pick(specialties)] }
         : { role: ["1.2.40.0.34.5.2:100"], elgaRole: ["1.2.40.0.34.5.3:700"], specialisation: ["1.2.40.0.34.3.1.10:0"] },

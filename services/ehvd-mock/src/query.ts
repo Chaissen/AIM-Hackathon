@@ -81,6 +81,6 @@ function found(entry: DirectoryEntry, request: SearchRequest) {
 }
 
 export function gdaSearch(directory: readonly DirectoryEntry[], request: SearchRequest): Answer {
-  const hits = directory.filter((entry) => found(entry, request));
+  const hits = directory.filter((entry) => !entry.getGdaOnly && found(entry, request));
   return hits.length > request.maxResults ? { hits: hits.length, fault: 6005 } : answer(hits);
 }

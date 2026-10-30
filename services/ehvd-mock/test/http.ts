@@ -1,3 +1,5 @@
+import { once } from "node:events";
+
 import { parseConfig } from "../src/config.ts";
 import { createEhvdServer } from "../src/server.ts";
 import { children, descendants, parse, text } from "./xml.ts";
@@ -5,7 +7,7 @@ import { children, descendants, parse, text } from "./xml.ts";
 export async function start(env: Record<string, string> = {}, host = "127.0.0.1") {
   const logs: string[] = [];
   const server = createEhvdServer(parseConfig(env), (line) => logs.push(line));
-  await new Promise<void>((resolve) => server.listen(0, host, resolve));
+  await once(server.listen(0, host), "listening");
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("server is not listening on a port");
   return {

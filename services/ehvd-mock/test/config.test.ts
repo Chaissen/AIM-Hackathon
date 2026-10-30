@@ -13,6 +13,18 @@ test("the default allowlist admits loopback and the private networks of Docker a
   }
 });
 
+test("an empty variable gives the default, as compose passes an unset one", () => {
+  const { allowlist, schemaErrors } = parseConfig({ EHVD_ALLOWLIST: "", EHVD_SCHEMA_ERRORS: "" });
+  assert.equal(schemaErrors, "http-403");
+  assert.deepEqual(
+    ["172.18.0.1", "8.8.8.8"].map((address) => [allows(allowlist.GetGDA, address), allows(allowlist.GdaSearch, address)]),
+    [
+      [true, true],
+      [false, false],
+    ],
+  );
+});
+
 test("an allowlist entry with an operation admits that network for that operation only", () => {
   const { allowlist } = parseConfig({ EHVD_ALLOWLIST: "10.0.0.0/8,  fc00::/7   GdaSearch" });
   assert.deepEqual(

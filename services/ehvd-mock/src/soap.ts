@@ -157,10 +157,11 @@ const leafText = (element: XmlElement) =>
   element.children.every((child) => typeof child === "string") ? element.children.join("") : undefined;
 
 function trimXmlSpace(text: string) {
-  const chars = [...text];
-  while (chars.length > 0 && isXmlSpace(chars[0])) chars.shift();
-  while (chars.length > 0 && isXmlSpace(chars[chars.length - 1])) chars.pop();
-  return chars.join("");
+  let start = 0;
+  let end = text.length;
+  while (start < end && isXmlSpace(text[start])) start += 1;
+  while (end > start && isXmlSpace(text[end - 1])) end -= 1;
+  return text.slice(start, end);
 }
 
 function integerLexical(text: string): string | undefined {

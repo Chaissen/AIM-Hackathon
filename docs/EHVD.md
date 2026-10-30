@@ -72,7 +72,7 @@ The target namespace is `eHVD`, with `elementFormDefault="qualified"`.
 
 A number without its `oidIssuingAuthority` is not unique. No hit returns fault 6002.
 
-Undocumented: the MOA-ID module looks people up by their bPK for the health sector (`urn:publicid:gv.at:cdid+GH`) and uses `1.2.40.0.10.2.1.1.149` as `oidIssuingAuthority`. We read this from its compiled code, not from any document. The mock does not support it. For the mock, `1.2.40.0.10.2.1.1.149` is an unknown kind of id, so it returns 6002.
+Undocumented: the MOA-ID module looks people up by their bPK for the health sector (`urn:publicid:gv.at:cdid+GH`) and uses `1.2.40.0.10.2.1.1.149` as `oidIssuingAuthority`. We read this from its compiled code, not from any document. The mock does not support it. A real bPK such as `QqRyJqno/aFVJYjMxkWpDJWj878=` contains `/`, `+`, or `=`. The `id` rule does not allow those characters, so the mock returns 6001. An `id` without them returns 6002, because `1.2.40.0.10.2.1.1.149` names no kind of id the mock knows.
 
 ### GdaSearch: search by name and other fields
 
@@ -200,7 +200,7 @@ For a healthcare professional, this ties the login to the eHVD entry through the
 ### What it does
 
 - A TypeScript service in its own container, `ehvd` in `docker-compose.yml`, on port 8095. The code is in `services/ehvd-mock/`, see [Code](#code).
-- `GET /ehvd.wsdl` serves [`ehvd/eHVD.wsdl`](ehvd/eHVD.wsdl) byte for byte, except that the `soap12:address` location becomes `http://<Host header>/`, or `http://localhost:8095/` without a Host header. A SOAP client built from it then calls the mock.
+- `GET /ehvd.wsdl` serves [`ehvd/eHVD.wsdl`](ehvd/eHVD.wsdl) byte for byte, except that the `soap12:address` location becomes `http://<Host header>/`, or `http://localhost:8095/` when the Host header is missing or empty. A SOAP client built from it then calls the mock.
 - `POST /` takes SOAP 1.2 requests for `GetGDA` and `GdaSearch` exactly as in the WSDL. It finds the operation from the body element. An `action` parameter in the content type must name the same operation.
 - It checks lengths, allowed characters, wildcard rules, and `maxResults`, applies the status filters, and returns the faults 6001 to 6006 as in the table above.
 - An allowlist of client networks plays the BRZ firewall. Other clients get HTTP 403 with an empty body. Each allowlist entry can be limited to one operation, which triggers 6006 for the other.
@@ -209,7 +209,7 @@ For a healthcare professional, this ties the login to the eHVD entry through the
 
 ### Configuration
 
-The container reads two variables. Compose passes them from `.env`. ordy never reads them. An invalid value stops the container at startup with a message that names it. Apply a change with `docker compose up -d ehvd`.
+The container reads two variables. Compose passes them from `.env` without defaults of its own. The mock treats an empty value as unset and uses the default below. ordy never reads them. An invalid value stops the container at startup with a message that names it. Apply a change with `docker compose up -d ehvd`.
 
 | Variable | Default | Format |
 |---|---|---|
@@ -223,9 +223,9 @@ Quote the allowlist in `.env`, because `setup.sh` reads the file with bash: `EHV
 | Code | How |
 |---|---|
 | 6001 | Break a field rule, for example `id` with a trailing blank, `surname` `*B`, `rolecode` `1.2.40.0.34.5.2:159`, or `maxResults` `201` |
-| 6002 | `GetGDA` with an OID that is not in the directory, such as `1.2.40.0.34.3.2.99.9.1`, or with `oidIssuingAuthority` `1.2.40.0.10.2.1.1.149` |
+| 6002 | `GetGDA` with an OID that is not in the directory, such as `1.2.40.0.34.3.2.99.9.1`, or with a well-formed `oidIssuingAuthority` that names no kind of id, such as `1.0.2` |
 | 6003 | `GetGDA` with the reserved OID `1.2.40.0.34.3.1.99.9.6003` |
-| 6004 | `GetGDA` with `1.2.40.0.34.3.1.99.9.6004`, or `GdaSearch` with `surname` `ordy test entry without timestamps`. That entry has no `timestamps`. |
+| 6004 | `GetGDA` with `1.2.40.0.34.3.1.99.9.6004`. That entry has no `timestamps`. `GdaSearch` never returns or counts it. |
 | 6005 | `GdaSearch` with `surname` `Brandl` and `maxResults` `1`. There are two hits. |
 | 6006 | Start the container with `EHVD_ALLOWLIST="0.0.0.0/0 GetGDA, ::/0 GetGDA"` and call `GdaSearch`. Every client may then use only `GetGDA`. |
 | HTTP 403 | A client outside `EHVD_ALLOWLIST`, or a request that breaks SOAP 1.2 or the WSDL, such as `Content-Type: text/xml` or fields out of WSDL order |
@@ -246,12 +246,13 @@ Quote the allowlist in `.env`, because `setup.sh` reads the file with bash: `EHV
 | `maxResults` | An `xs:integer`, so a sign and surrounding whitespace pass the schema. Then it must have at most 3 characters and lie between 1 and 200. |
 | Search without `ehvdstatus` | Returns active and inactive entries |
 | Search without hits | Empty `GdaIndexResponseList`. Only `GetGDA` returns 6002. |
+| 6004 in a search | Never. Only `GetGDA` reaches the entry without `timestamps`, so a wildcard search such as `*Test*` still returns its hits. |
 | Order of results | Directory order |
-| `oidIssuingAuthority` that is well-formed but names no kind of id | 6002, like an id without a hit. Well-formed means at least two arcs of digits, separated by `.`, without leading zeros. A malformed one, such as `1..2`, is 6001. |
-| bPK lookup | Not supported. `1.2.40.0.10.2.1.1.149` is an unknown kind of id, so it returns 6002. |
+| `oidIssuingAuthority` that is well-formed but names no kind of id | 6002, like an id without a hit. Well-formed means at least two arcs of digits, separated by `.`, without leading zeros. As in ITU-T X.660, the first arc is 0, 1, or 2, and after 0 or 1 the second arc is below 40. A malformed one, such as `1..2`, `3.1`, or `1.45`, is 6001. |
+| bPK lookup | Not supported. A real bPK such as `QqRyJqno/aFVJYjMxkWpDJWj878=` contains `/`, `+`, or `=`, which the `id` rule rejects, so it returns 6001. With an `id` the rule allows, `1.2.40.0.10.2.1.1.149` is an unknown kind of id and returns 6002. |
 | Fault layout | `soap:Code/soap:Value` is `soap:Sender` (HTTP 400) for 6001 and 6005, `soap:Receiver` (HTTP 500) otherwise. `soap:Reason/soap:Text` with `xml:lang="en"` carries the message from the table, without the text in brackets. `soap:Detail` holds one element, `<code xmlns="eHVD">6001</code>`. There is no `soap:Subcode`, because a bare `6001` is not a valid `xs:QName` and strict SOAP stacks reject it. |
 | `otherID` format | `<id kind OID>:<number>`, for example `1.2.40.0.34.4.18:99002` |
-| A request that breaks the schema | HTTP 403 with an empty body, as the third-party Python client `ehvd` reports for the real firewall. `EHVD_SCHEMA_ERRORS=fault-6001` switches it to fault 6001. A schema error is any of these: a `Content-Type` that Node's `MIMEType` cannot parse, another media type, an `action` of the other operation, a charset other than UTF-8, XML that is not well-formed with namespaces (such as a bare `&`, an unbound prefix, or two attributes with the same namespace and local name), a DOCTYPE, a character outside XML 1.0 (also as a character reference such as `&#0;` or `&#x110000;`), a body over 64 KiB, elements that do not follow the WSDL sequence, an attribute on an eHVD element other than a namespace declaration, or a header block that must be understood. A header block must be understood when `soap:mustUnderstand` is `true` or `1` and `soap:role` is absent, `…/role/next`, or `…/role/ultimateReceiver`. The mock understands no header block, so it answers such a request as a schema error, not with a `MustUnderstand` fault. It ignores all other header blocks. It parses every request as XML 1.0, even one that declares version 1.1. It ignores content type parameters other than `charset` and `action`, and a quoted parameter may contain `;`. `MIMEType` follows the WHATWG MIME rules, so it recovers some malformed parameters, such as a quote that is never closed. Over 64 KiB, the mock stops reading, answers, and closes the connection. |
+| A request that breaks the schema | HTTP 403 with an empty body, as the third-party Python client `ehvd` reports for the real firewall. `EHVD_SCHEMA_ERRORS=fault-6001` switches it to fault 6001. A schema error is any of these: a `Content-Type` that Node's `MIMEType` cannot parse, another media type, an `action` of the other operation, a charset other than UTF-8, XML that is not well-formed with namespaces (such as a bare `&`, an unbound prefix, or two attributes with the same namespace and local name), a DOCTYPE, a character outside XML 1.0 (also as a character reference such as `&#0;` or `&#x110000;`), a body over 64 KiB, elements that do not follow the WSDL sequence, an attribute on an eHVD element other than a namespace declaration, or a header block that must be understood. A header block must be understood when `soap:mustUnderstand` is `true` or `1` and `soap:role` is absent, `…/role/next`, or `…/role/ultimateReceiver`. The mock understands no header block, so it answers such a request as a schema error, not with a `MustUnderstand` fault. It ignores all other header blocks. It parses every request as XML 1.0, even one that declares version 1.1. It ignores content type parameters other than `charset` and `action`, and a quoted parameter may contain `;`. `MIMEType` follows the WHATWG MIME rules, so it recovers some malformed parameters, such as a quote that is never closed. Over 64 KiB, the mock stops reading, answers, and closes the connection. A client that sends a body of a few MB may see a reset connection instead of that answer, because the mock closes the connection while the client is still sending. |
 | Order of checks | Firewall, then schema, then 6006, then the field rules (6001), then the lookup |
 
 ### Directory content
@@ -279,7 +280,7 @@ Test entries, all Aktiv, Aktiv:
 | `1.2.40.0.34.3.1.0.5` | Gruppenpraxis Dr. Aldemar SVC Betriebsordination Wahlarzt OG | 100 / 700 | 10:0 | | Wien and Graz | Handbook test entry. The two addresses test that address criteria match one address. |
 | `1.2.40.0.34.3.2.0.10` | XXXeHealth Test-GDA XXXTest-GDA Support-Ordination BMG | 100 / 700 | 10:0 | | Scheingasse 1/3/3/40, 1010 Wien, the handbook's sample address | Handbook test entry |
 | `1.2.40.0.34.3.2.99.0.11003` | Dr. XXXOtto XXXOttakringer | 158 and 100 / 700 | 10:0 and 10.20:49 | | none | ID Austria's test doctor, with the roles from the ID Austria example. Added and modified on 2022-09-10. |
-| `1.2.40.0.34.3.1.99.9.6004` | ordy test entry without timestamps | 304 / 702 | | | none | Has no `timestamps`, so any response that includes it is fault 6004 |
+| `1.2.40.0.34.3.1.99.9.6004` | ordy test entry without timestamps | 304 / 702 | | | none | Has no `timestamps`, so `GetGDA` on it returns fault 6004. `GdaSearch` never returns or counts it. |
 
 The handbook's sample requests work against the mock. Apart from the OIDs, the names, and `A9999`, the handbook entries are made up. `1.2.40.0.34.3.1.99.9.6003` is reserved. It is not in the directory, and `GetGDA` on it returns 6003.
 
@@ -294,7 +295,7 @@ Not in the directory: Stefan Kern and Karl Heinz Moser-Wallner (discharge manage
 | `src/soap.ts` | The wire format from the WSDL: the request sequences, the operation table, a strict XML parser on [saxes](https://github.com/lddubeau/saxes), envelope parsing, responses, and the fault registry |
 | `src/rules.ts` | The field rules: lengths, allowed characters with a table of the Latin letters in Unicode, and wildcards |
 | `src/query.ts` | `GetGDA` and `GdaSearch` over the directory, and the conversion to `GdaDescriptor` that raises 6004 |
-| `src/directory.ts`, `src/generated.ts` | The fixed entries and the generator |
+| `src/directory.ts`, `src/generated.ts`, `src/codes.ts` | The fixed entries, the generator, and the id kinds and registration bodies that both use |
 | `src/server.ts`, `src/config.ts`, `src/main.ts` | HTTP, the allowlist, the WSDL, the log, and the two variables |
 | `test/` | The tests that `pnpm test` runs |
 | `Dockerfile` | `node:24-alpine`, built from the repository root, with only the mock's production dependencies from the lockfile |
