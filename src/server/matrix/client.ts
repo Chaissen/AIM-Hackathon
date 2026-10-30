@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import { env, mxid } from "@/env";
 
 // Minimal Matrix client-server API client. No E2EE (not required by the track), no native dependencies.
@@ -38,6 +40,20 @@ export class MatrixClient {
       initial_device_display_name: "ordy",
     });
     return new MatrixClient(baseUrl, res.access_token, res.user_id);
+  }
+
+  static async loginWorkspace(user: string, password: string, baseUrl = env.MATRIX_HOMESERVER_URL) {
+    const result = z.object({
+      access_token: z.string().min(1).max(2048),
+      user_id: z.string().min(1).max(255),
+      expires_in_ms: z.number().positive().optional(),
+    }).parse(await raw<unknown>(baseUrl, "POST", "/_matrix/client/v3/login", {
+      type: "m.login.password",
+      identifier: { type: "m.id.user", user },
+      password,
+      initial_device_display_name: "ordy workspace",
+    }));
+    return { client: new MatrixClient(baseUrl, result.access_token, result.user_id), expiresInMs: result.expires_in_ms };
   }
 
   request<T>(method: string, path: string, body?: unknown, timeoutMs?: number) {

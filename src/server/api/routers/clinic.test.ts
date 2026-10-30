@@ -43,7 +43,7 @@ after(async () => {
 test("patient and audit queries reject anonymous and outside-person actors before reading data", async (t) => {
   const fetch = t.mock.method(globalThis, "fetch", async () => assert.fail("Unauthorized request reached FHIR"));
   for (const actor of [{ kind: "anonymous" }, { kind: "eid", session: outside }] satisfies Actor[]) {
-    const caller = createCaller({ actor, db: forbiddenDb });
+    const caller = createCaller({ actor, db: forbiddenDb, matrix: null });
     await assert.rejects(caller.clinic.patients(), unauthorized);
     await assert.rejects(caller.clinic.patient({ id: "maria-beispiel" }), unauthorized);
     await assert.rejects(caller.clinic.contacts(), unauthorized);
@@ -82,14 +82,14 @@ test("invalid and foreign-homeserver Matrix tokens cannot read clinic data", asy
 test("clinic.me rejects anonymous and outside-person actors before asking Synapse", async (t) => {
   const fetch = t.mock.method(globalThis, "fetch", async () => assert.fail("Unauthorized request reached Synapse"));
   for (const actor of [{ kind: "anonymous" }, { kind: "eid", session: outside }] satisfies Actor[]) {
-    await assert.rejects(createCaller({ actor, db: forbiddenDb }).clinic.me(), unauthorized);
+    await assert.rejects(createCaller({ actor, db: forbiddenDb, matrix: null }).clinic.me(), unauthorized);
   }
   assert.equal(fetch.mock.callCount(), 0);
 });
 
 test("clinic.me returns the Synapse display name, or the Matrix ID when Synapse has none", async (t) => {
   const hofer = `@lena.hofer:${env.MATRIX_SERVER_NAME}`;
-  const caller = createCaller({ actor: { kind: "clinic", mxid: hofer }, db: forbiddenDb });
+  const caller = createCaller({ actor: { kind: "clinic", mxid: hofer }, db: forbiddenDb, matrix: null });
   const profile = `${env.MATRIX_HOMESERVER_URL}/_matrix/client/v3/profile/${encodeURIComponent(hofer)}/displayname`;
   for (const [reply, displayName] of [
     [Response.json({ displayname: "Dr. Lena Hofer" }), "Dr. Lena Hofer"],

@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { requestInput } from "@/lib/request-input";
 import { REQUEST_FILTERS, type RequestFilter } from "@/lib/request-status";
+import { roomReference } from "@/lib/workspace";
 import type { AuditEventName } from "@/server/metrics/audit";
 
 // The widget's views as hash routes ("#/requests/12"). The hash leaves Element's widget query alone, so a frame reload
@@ -15,6 +16,7 @@ export type WidgetRoute =
   | { view: "patients" }
   | { view: "patient"; id: string }
   | { view: "contacts" }
+  | { view: "messages"; room: string | null }
   | { view: "audit"; event: AuditEventName | "all" }
   | { view: "metrics" };
 
@@ -47,6 +49,10 @@ function decode(segment: string): string | null {
 
 /** The route for `location.hash`. Anything unknown, such as a bad id or filter, is the overview. */
 export function parseWidgetRoute(hash: string): WidgetRoute {
+  if (hash.startsWith("#/room/")) {
+    const parsed = roomReference.safeParse(decode(hash.slice(7).split("/")[0]?.split("?")[0] ?? ""));
+    return parsed.success ? { view: "messages", room: parsed.data } : OVERVIEW;
+  }
   let url: URL;
   try {
     url = new URL(hash.slice(1) || "/", "http://widget");
@@ -71,6 +77,11 @@ export function parseWidgetRoute(hash: string): WidgetRoute {
       if (id === undefined) return { view: "patients" };
       const parsed = patientId.safeParse(decode(id));
       return parsed.success ? { view: "patient", id: parsed.data } : OVERVIEW;
+    }
+    case "messages": {
+      if (id === undefined) return { view: "messages", room: null };
+      const parsed = roomReference.safeParse(decode(id));
+      return parsed.success ? { view: "messages", room: parsed.data } : OVERVIEW;
     }
     case "audit": {
       if (id !== undefined) return OVERVIEW;
@@ -102,6 +113,8 @@ export function widgetHref(route: WidgetRoute): string {
       return `#/patients/${encodeURIComponent(route.id)}`;
     case "contacts":
       return "#/contacts";
+    case "messages":
+      return route.room === null ? "#/messages" : `#/messages/${encodeURIComponent(route.room)}`;
     case "audit":
       return route.event === "all" ? "#/audit" : `#/audit?event=${route.event}`;
     case "metrics":

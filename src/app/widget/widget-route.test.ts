@@ -13,6 +13,9 @@ test("one route of every view round-trips through its hash", () => {
     [{ view: "patients" }, "#/patients"],
     [{ view: "patient", id: "maria-beispiel" }, "#/patients/maria-beispiel"],
     [{ view: "contacts" }, "#/contacts"],
+    [{ view: "messages", room: null }, "#/messages"],
+    [{ view: "messages", room: "#outside-documents:klinikum.example" }, "#/messages/%23outside-documents%3Aklinikum.example"],
+    [{ view: "messages", room: "!opaque-room-id" }, "#/messages/!opaque-room-id"],
     [{ view: "audit", event: "all" }, "#/audit"],
     [{ view: "audit", event: "misdelivery_caught" }, "#/audit?event=misdelivery_caught"],
     [{ view: "metrics" }, "#/metrics"],
@@ -58,8 +61,20 @@ test("unknown hashes, bad ids, and unknown filters give the overview", () => {
     "#/patients/%E0",
     "#/patients/maria%2Fbeispiel",
     "#/metrics/1",
+    "#/messages/not-a-room",
+    "#/messages/%E0",
+    "#/room/#missing-server",
   ]) {
     assert.deepEqual(parseWidgetRoute(hash), overview, hash);
   }
   assert.deepEqual(parseWidgetRoute("#/requests/2147483647"), { view: "request", id: 2_147_483_647 });
+});
+
+test("the existing Element room link opens Messages with its room", () => {
+  assert.deepEqual(parseWidgetRoute("#/room/#outside-documents:klinikum.example"), {
+    view: "messages",
+    room: "#outside-documents:klinikum.example",
+  });
+  assert.deepEqual(parseWidgetRoute("#/room/%21opaque-room-id"), { view: "messages", room: "!opaque-room-id" });
+  assert.deepEqual(parseWidgetRoute("#/room/#outside-documents:klinikum.example/$event"), { view: "messages", room: "#outside-documents:klinikum.example" });
 });

@@ -60,13 +60,13 @@ UC10 (audit) is included by UC3, UC4, UC5, UC6, UC8 and UC11. The diagram leaves
 
 | Use case | Actor | Covers |
 |---|---|---|
-| UC1 Request document | Dr. Hofer | Request form in the widget in her Matrix room: patient, document type, named recipient, contact |
+| UC1 Request document | Dr. Hofer | Request form in the ordy workspace: patient, document type, named recipient, contact |
 | UC3 Send access link | – | One-time link. No patient name, birth date or document type in the email or SMS |
 | UC5 Verify identity | Sender, ID Austria | eID name must equal the named recipient → catches **M1, M2** |
 | UC7 Check patient match | – | Patient in the document and form must equal the request's patient → catches **M3** |
 | UC8 File as FHIR | FHIR server | Transaction Bundle: DiagnosticReport + Observations or DocumentReference, plus Provenance |
 | UC11 Handle misdelivery | – | Nothing filed, audit entry, warning in Matrix |
-| UC2 Look up recipient in register | Dr. Hofer, eHVD | Built on the eHVD as the directory search in the widget's Contacts view and the recipient check while she types a new request |
+| UC2 Look up recipient in register | Dr. Hofer, eHVD | Built on the eHVD as the directory search in the workspace's Contacts view and the recipient check while she types a new request |
 | UC12 Warn about lookalike address | Dr. Hofer, eHVD | Built as the address check before sending (T15). A domain that differs from the organisation's `mail` domain in the eHVD, such as `labor-kanaI`, waits for **Send anyway** → helps catch **M1** |
 | UC13 Manage register entries | Dr. Hofer | *Proposed*, see section 4 |
 
@@ -192,9 +192,12 @@ classDiagram
 ```mermaid
 flowchart LR
     subgraph Clinic["Runs at the clinic"]
-        element["Element Web"] <--> synapse["Synapse<br/>(Matrix)"]
-        element <--> widget["Request widget<br/>(iframe in Element)"]
-        widget <--> core["Core service<br/>(Next.js + tRPC)"]
+        gateway["Workspace gateway<br/>(8081)"] <--> workspace["ordy workspace<br/>(Next.js)"]
+        workspace <--> core["Core service<br/>(tRPC)"]
+        core <--> synapse["Synapse<br/>(Matrix)"]
+        element["Optional Element<br/>(8082)"] <--> synapse
+        element <--> widget["Optional request widget<br/>(iframe in Element)"]
+        widget <--> core
         synapse <--> bot["Matrix bot<br/>(notices, !status)"]
         bot <--> core
         core <--> fhirsrv[("HAPI FHIR")]

@@ -1,6 +1,6 @@
 # Development
 
-How to set up, start, reset, and extend ordy. [Architecture](ARCHITECTURE.md) explains how the parts fit together.
+How to set up, start, reset, and extend ordy. [Architecture](ARCHITECTURE.md) explains how the parts fit together. [Deployment](DEPLOYMENT.md) covers the public workspace hostname and migration from Element.
 
 ## Rules
 
@@ -19,7 +19,7 @@ How to set up, start, reset, and extend ordy. [Architecture](ARCHITECTURE.md) ex
 | pnpm | 10 (pinned in `package.json`) | `corepack enable`, then `pnpm -v` |
 | Java | 17 or newer, only for the HL7 validator | `java -version` |
 
-These ports must be free: 3010 (ordy), 5433 (Postgres), 8008 (Synapse), 8081 (Element), 8090 (HAPI), 8025 and 1025 (Mailpit), 8080 (Keycloak), 8095 (eHVD mock).
+Port 8082 is needed only for optional Element compatibility. These ports must be free: 3010 (ordy), 5433 (Postgres), 8008 (Synapse), 8081 (workspace gateway), 8090 (HAPI), 8025 and 1025 (Mailpit), 8080 (Keycloak), 8095 (eHVD mock).
 
 ## First-time setup
 
@@ -39,7 +39,7 @@ cd AIM-Hackathon
 6. loads Maria Beispiel from `track/scenario/patient.json` into HAPI (`pnpm fhir:seed`)
 7. creates the room `#outside-documents:klinikum.example`, joins Dr. Hofer and the bot, sets her display name to "Dr. Lena Hofer", and pins the widget (`pnpm matrix:bootstrap`). Its URL includes the widget ID and its registration sets `waitForIframeLoad: false`, so Element waits for the widget API to be ready before negotiating capabilities
 
-When upgrading an existing installation, run `pnpm matrix:bootstrap` and reload Element to update the pinned widget's authentication handshake.
+For an existing installation that serves Element on 8081, follow [the workspace migration](DEPLOYMENT.md#migrate-an-existing-element-entry) before starting the new gateway. The optional legacy widget still uses `pnpm matrix:bootstrap` to update its authentication handshake.
 
 ## Start
 
@@ -56,17 +56,18 @@ Both reload when you save a file. Stop them with Ctrl+C. The containers keep run
 
 Check that everything works:
 
-1. http://localhost:3010 shows three green dots for database, FHIR server, and Matrix.
-2. Open Element at http://localhost:8081, log in as `lena.hofer` / `hofer-demo-2026`, and open "Dr. Hofer · Outside documents".
-3. Send `!status`. The bot answers with the same three checks.
-4. Open the ordy widget and approve Element's identity request. Every view needs this Matrix sign-in: Overview, Requests, New request, Patients, Contacts, Audit log, and Metrics. From 1024px of width the navigation is a sidebar, and below that it sits behind the menu button. Each view has a hash route, such as `#/requests`, which [Architecture](ARCHITECTURE.md#views-and-hash-routes) lists. Opening `/widget` or `/audit` directly shows sign-in guidance without patient or audit data.
+1. Open http://localhost:8081 and sign in to the ordy workspace as `lena.hofer` / `hofer-demo-2026`. The same workspace is available directly at http://localhost:3010.
+2. Open **Messages** and select "Dr. Hofer · Outside documents". Send `!status` to check the database, FHIR server, and Matrix through the bot.
+3. Use the workspace navigation for Overview, Requests, New request, Patients, Contacts, Audit log, and Metrics. These views use the same authenticated procedures and ownership rules as the optional widget. Every view has a hash route, such as `#/requests` or `#/messages`, which [Architecture](ARCHITECTURE.md#views-and-hash-routes) lists.
+4. http://localhost:3010/api/healthz returns the database, FHIR, and Matrix health checks.
 5. Open http://localhost:8080/realms/idaustria-sim/.well-known/openid-configuration. It shows the issuer `http://localhost:8080/realms/idaustria-sim`. This is the simulated ID Austria. Its test logins, such as `eva.brandl` / `demo-eva`, work from a request link. Keycloak's account page does not work in this realm, on purpose.
 6. Open http://localhost:8095/healthz. It shows `{"status":"ok","entries":313}`. This is the eHVD mock, and [eHVD](EHVD.md#trigger-each-fault) shows how to call it.
 
 | Service | URL | Login |
 |---|---|---|
-| ordy | http://localhost:3010 | |
-| Element | http://localhost:8081 | `lena.hofer` / `hofer-demo-2026` |
+| ordy workspace through its gateway | http://localhost:8081 | `lena.hofer` / `hofer-demo-2026` |
+| ordy Next.js app, including workspace and outside portal | http://localhost:3010 | the same network account for the workspace |
+| Optional Element compatibility client | http://localhost:8082 | the same Matrix account; enable the `legacy-element` profile |
 | Mailpit | http://localhost:8025 | |
 | Recipient's inbox: the emails in Mailpit and the SMS screen, with each portal link | http://localhost:3010/inbox | none. Demo only. A production build answers 404. |
 | HAPI FHIR | http://localhost:8090/fhir | |
@@ -74,6 +75,10 @@ Check that everything works:
 | Postgres | `postgres://ordy:ordy@localhost:5433/ordy` | `ordy` / `ordy` |
 | Keycloak (simulated ID Austria) | http://localhost:8080 | `admin` / `keycloak-demo-2026` for the admin console |
 | eHVD mock | http://localhost:8095/ehvd.wsdl | none. Loopback and private networks get through, see [eHVD](EHVD.md#configuration). |
+
+`WORKSPACE_URL` defaults to `http://localhost:8081`; `PUBLIC_URL` remains the outside-link base at `http://localhost:3010`. The session endpoint permits their exact origins. Change both deliberately when using another host or port. The gateway's `ORDY_WEB_UPSTREAM` defaults to `host.docker.internal:3010` and can name a web service in a production Docker network. [Deployment](DEPLOYMENT.md) gives the hostname and HTTPS settings.
+
+For the optional Element client, run `docker compose --profile legacy-element up -d element` and open http://localhost:8082. The legacy `/widget` still needs Element's identity approval. It is not the primary app.
 
 Test citizens for the ID Austria login: `eva.brandl` / `demo-eva`, `stefan.kern` / `demo-stefan`, `thomas.wagner` / `demo-thomas`, `anna.huber` / `demo-anna`, and `eva.brandl2` / `demo-eva2`. [Identity and misdelivery](IDENTITY.md#test-citizens) says whom each one plays. There is no sign-up page. `pnpm citizen` adds more people, such as the two senders of the [extra test documents](#extra-test-documents).
 
@@ -116,7 +121,8 @@ Put it in a router under `src/server/api/routers/` and register the router in `s
 | Procedure | Caller | How the caller is recognised |
 |---|---|---|
 | `publicProcedure` | anyone | nothing |
-| `clinicProcedure` | Dr. Hofer and other network members | Matrix OpenID token from the widget (`Authorization: Bearer`), or the bot via `createCaller` |
+| `clinicProcedure` | Dr. Hofer and other network members | verified encrypted workspace session with `x-ordy-workspace: 1`, a legacy widget Matrix OpenID token, or the bot via `createCaller` |
+| `workspaceProcedure` | signed-in workspace members, for chat | as `clinicProcedure`, plus the user's server-only Matrix client from a workspace session |
 | `eidProcedure` | the outside person after the ID Austria login | session cookie `ordy_eid_session`, bound to one request |
 | `ownRequestProcedure` (`src/server/api/own-request.ts`) | the network member who sent the request, for data about one request | as `clinicProcedure`, and the input `{ id }` must name a request they sent. Any other id answers `NOT_FOUND`. The handler gets the row as `ctx.request`. |
 
@@ -166,7 +172,7 @@ Tailwind's class scan is scoped to `src/` with [`source()`](https://tailwindcss.
 
 ## Add a bot command
 
-Add an entry to `src/bot/commands.ts`. The command gets a caller that acts as the sender and the text after the command name. Keep the logic in a tRPC procedure. Requests and the decisions about them belong in the widget, not in bot commands. `!help` lists every command automatically.
+Add an entry to `src/bot/commands.ts`. The command gets a caller that acts as the sender and the text after the command name. Keep the logic in a tRPC procedure. Requests and the decisions about them belong in the workspace, not in bot commands. `!help` lists every command automatically.
 
 ## Extra test documents
 
@@ -180,7 +186,7 @@ The jury tests with new outside people and new documents in the scenario's Markd
 | Kind | `Lab result`, `Rehab report`, or `Other` (any other heading kind, which the parser returns as a generic document) |
 | Patient | Name and birth date exactly as the document writes them |
 | Sender | The outside person who uploads it |
-| Expected | Starts with `Filed`, `Held`, or `Blocked`, then why. `Held` means the answer waits for Dr. Hofer in the widget after a release-check hold. A document kind the parser cannot map is a generic document, and the answer flow refuses it, because a request asks only for a lab result or a discharge report. |
+| Expected | Starts with `Filed`, `Held`, or `Blocked`, then why. `Held` means the answer waits for Dr. Hofer in the workspace after a release-check hold. A document kind the parser cannot map is a generic document, and the answer flow refuses it, because a request asks only for a lab result or a discharge report. |
 | Trap | What it tests, for example a double family name, a decimal comma, a unit like `10^12/L`, or a range written as `< 5` |
 
 The set holds at least 3 lab results for Maria with other tests, 2 rehab reports whose stay spans two months, and 3 documents for other patients, one with Maria's family name and a different birth date. The index also lists the 2 extra outside people with double names and the `pnpm citizen` commands that add them. Keycloak keeps them only until the container is recreated, so run the commands again after `./scripts/setup.sh`.
@@ -239,7 +245,7 @@ rm -rf docker/synapse/*
 ./scripts/setup.sh
 ```
 
-This deletes all local data. Matrix logins in open Element tabs stop working.
+This deletes all local data. Workspace and optional Element sessions stop working.
 
 ## Troubleshooting
 
@@ -247,8 +253,11 @@ This deletes all local data. Matrix logins in open Element tabs stop working.
 |---|---|
 | A port is already in use | Stop the other program, or change the host port in `docker-compose.yml` and the matching URL in `.env` |
 | `[bot] ordy bot could not start` | Synapse is not up or the bot user is missing. Run `./scripts/setup.sh`, then `pnpm dev`. |
-| The status page shows the FHIR server red | HAPI is still starting. Wait a minute after `docker compose up`. |
-| `UNAUTHORIZED` from a clinic procedure | The request has no valid Matrix OpenID token. The widget must get one from Element first. |
+| The health check reports FHIR unavailable | HAPI is still starting. Wait a minute after `docker compose up`. |
+| `UNAUTHORIZED` from a clinic procedure | Sign in to the workspace again. A legacy widget must obtain a valid Matrix OpenID token from Element. |
+| The workspace gateway returns 502 | Start the Next.js web process on the gateway's configured upstream, normally host port 3010. |
+| Workspace sign-in returns 403 for the origin | Set `WORKSPACE_URL` to the exact browser origin, including its port, and restart Next.js. |
+| Port 8081 is still held by Element after an upgrade | Stop the old Element service as described in [Deployment](DEPLOYMENT.md#migrate-an-existing-element-entry), then start `workspace`. |
 | No widget in the room | Run `pnpm matrix:bootstrap`, reload Element, and allow the widget when Element asks |
 | Element shows an old room or no room | Log out and in again. The room alias is `#outside-documents:klinikum.example`. |
 | Keycloak ignores a change to the realm file | It imports the realm only when it does not exist yet. Run `docker compose up -d --force-recreate keycloak`. This also removes people added with `pnpm citizen`. |

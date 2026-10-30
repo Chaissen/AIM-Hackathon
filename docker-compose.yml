@@ -1,4 +1,4 @@
-# ordy infrastructure: Matrix (Synapse + Element), HAPI FHIR, Mailpit, Postgres, Keycloak (simulated ID Austria),
+# ordy infrastructure: Matrix, the workspace gateway, HAPI FHIR, Mailpit, Postgres, Keycloak (simulated ID Austria),
 # and the eHVD mock.
 # The ordy app itself (Next.js + Matrix bot) runs on the host with `pnpm dev`.
 services:
@@ -13,12 +13,25 @@ services:
       interval: 5s
       retries: 30
 
+  workspace:
+    image: nginx:stable-alpine
+    environment:
+      ORDY_WEB_UPSTREAM: ${ORDY_WEB_UPSTREAM:-host.docker.internal:3010}
+      NGINX_ENVSUBST_FILTER: ORDY_WEB_UPSTREAM
+    volumes:
+      - ./docker/workspace/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8081:80"
+
   element:
     image: vectorim/element-web:latest
+    profiles: [legacy-element]
     volumes:
       - ./docker/element/config.json:/app/config.json:ro
     ports:
-      - "8081:80"
+      - "8082:80"
 
   hapi:
     image: hapiproject/hapi:latest

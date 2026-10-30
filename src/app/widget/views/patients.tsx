@@ -44,7 +44,7 @@ export function PatientsView() {
         </div>
         {patients.error ? (
           <LoadError title="Could not load the patients" onRetry={() => patients.refetch()}>
-            Check your Element sign-in and the FHIR server, then try again.
+            Check your network sign-in and the FHIR server, then try again.
           </LoadError>
         ) : patients.isPending ? (
           <Skeleton className="h-48" />
