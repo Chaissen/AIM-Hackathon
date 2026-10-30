@@ -93,7 +93,7 @@ Test citizens for the ID Austria login: `eva.brandl` / `demo-eva`, `stefan.kern`
 | `pnpm matrix:bootstrap` | Creates the room if needed, joins Dr. Hofer and the bot, sets her display name, and pins the widget |
 | `pnpm citizen --given Peter --family Muster --birthdate 1970-01-01` | Adds a test citizen to the simulated ID Austria and prints the username, password, bPK, and eHVD OID. [Identity and misdelivery](IDENTITY.md#add-a-test-citizen) lists the options. |
 | `pnpm validate` | Runs the HL7 validator on every resource named in an `answer_filed` entry and counts the errors. `--since <time>` takes only the entries from that time on. `pnpm validate <file or folder>` checks hand-made resources instead. Needs Java. [FHIR](FHIR.md#validation) has the details. |
-| `pnpm audit:check` | Lists the six audit event types per request, each with who, what, and when. `--request <id>` checks one request. |
+| `pnpm audit:check` | Lists the six audit event types per request, each with who, what, and when. `--request <id>` checks one request. `--effort` prints the audit timeline and the effort in seconds of the newest request 1, or of `--request <id>`, for the [timed test](clinical-review/TIMED_TEST_20.md). |
 | `pnpm scenario` | Runs request 1, M1 to M3, and request 2 against the running stack and writes the four metric results to `out/metrics/metrics.md`. `--no-validate` skips the validator. [Whitepaper](WHITEPAPER.md#how-we-measure-the-metrics) has the details. |
 | `./scripts/setup.sh` | Full one-time setup, see above |
 

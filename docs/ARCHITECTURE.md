@@ -328,6 +328,7 @@ docker/element/config.json    Element config
 docker/synapse/               generated homeserver.yaml (git ignores it)
 docker/keycloak/idaustria-sim-realm.json   simulated ID Austria: client, mappers, test citizens
 docs/ehvd/eHVD.wsdl           the real eHVD WSDL, version 2 from BRZ
+docs/clinical-review/         protocols and hand-filled results of tests with people, one file per issue
 services/ehvd-mock/           eHVD mock service and its synthetic directory (T23)
   src/                        SOAP wire format, field rules, queries, directory, HTTP server
   test/                       tests over real HTTP, run by pnpm test
@@ -378,7 +379,7 @@ scripts/
   seed-fhir.ts                Maria Beispiel into HAPI
   citizen.ts                  add a test citizen to the simulated ID Austria
   validate.ts                 HL7 validator on every filed resource or on given files (T18)
-  audit-check.ts              six event types per request, each with who, what, and when (T17)
+  audit-check.ts              six event types per request, each with who, what, and when (T17); --effort for the timed test (T19)
   scenario.ts                 request 1, M1 to M3, request 2, and the four metrics in one run (T17, T18)
 track/                        track brief, scenario, patient.json, test documents, and our extra set in scenario/extra/
 ```
