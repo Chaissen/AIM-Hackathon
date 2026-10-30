@@ -1,3 +1,4 @@
+import { DOCUMENT_TYPES } from "@/lib/document-types";
 import type { LabResult, PersonLine, RehabReport } from "@/server/documents/types";
 import { isSubset, nameWords, TITLE } from "@/server/identity/names";
 
@@ -121,7 +122,7 @@ function sentence(reason: ReleaseHoldReason, input: ReleaseInput, person: Person
   const { document } = input;
   switch (reason) {
     case "no_responsible_person":
-      return `The document names nobody under ${document.type === "lab-result" ? "Validated by" : "Written by"}.`;
+      return `The document names nobody under ${DOCUMENT_TYPES[document.type].responsibleKey}.`;
     case "incomplete_name":
       return `The document does not give the full name of ${name}.`;
     case "organisation_differs":
