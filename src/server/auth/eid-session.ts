@@ -18,10 +18,16 @@ export const eidSession = z.object({
   level: z.enum(["urn:eidgvat:eid.status.full", "urn:eidgvat:eid.status.basic"]).nullable(),
   // The eHVD OID from `urn:eidgvat:attributes.gda`, read with gdaOidFromClaim. Null when the token has no such claim.
   gdaOid: z.string().nullable(),
-  // The ID token exactly as received, kept for the Provenance signature.
-  idToken: z.string(),
 });
 export type EidSession = z.infer<typeof eidSession>;
+
+export const loginTransaction = z.object({
+  token: z.string(),
+  state: z.string(),
+  nonce: z.string(),
+  codeVerifier: z.string(),
+});
+export type LoginTransaction = z.infer<typeof loginTransaction>;
 
 // `urn:eidgvat:attributes.gda` is the person's eHVD entry as base64 of UTF-8 JSON. Only the OID in `gda.id.id` matters here.
 const gdaClaim = z
@@ -45,15 +51,26 @@ export function gdaOidFromClaim(value: unknown): string | null | Error {
   return parsed.success ? parsed.data.gda.id.id : new Error(`urn:eidgvat:attributes.gda is malformed: ${z.prettifyError(parsed.error)}`);
 }
 
-export const signEidSession = (session: EidSession) =>
-  new SignJWT(session).setProtectedHeader({ alg: "HS256" }).setIssuedAt().setExpirationTime("30m").sign(sessionKey(env.ORDY_SECRET));
+const secure = new URL(env.PUBLIC_URL).protocol === "https:";
 
-export async function readEidSession(cookie: string | undefined): Promise<EidSession | null> {
+export const eidSessionCookie = { name: EID_SESSION_COOKIE, path: "/", maxAge: 30 * 60, httpOnly: true, sameSite: "lax", secure } as const;
+export const loginTransactionCookie = { name: "ordy_eid_login", path: "/auth/callback", maxAge: 10 * 60, httpOnly: true, sameSite: "lax", secure } as const;
+
+const sign = (payload: EidSession | LoginTransaction, maxAge: number) =>
+  new SignJWT(payload).setProtectedHeader({ alg: "HS256" }).setIssuedAt().setExpirationTime(`${maxAge}s`).sign(sessionKey(env.ORDY_SECRET));
+
+async function read<Schema extends z.ZodType>(cookie: string | undefined, schema: Schema): Promise<z.infer<Schema> | null> {
   if (!cookie) return null;
   try {
     const { payload } = await jwtVerify(cookie, sessionKey(env.ORDY_SECRET), { algorithms: ["HS256"], requiredClaims: ["exp", "iat"] });
-    return eidSession.parse(payload);
+    return schema.parse(payload);
   } catch {
     return null;
   }
 }
+
+export const signEidSession = (session: EidSession) => sign(session, eidSessionCookie.maxAge);
+export const readEidSession = (cookie: string | undefined) => read(cookie, eidSession);
+
+export const signLoginTransaction = (transaction: LoginTransaction) => sign(transaction, loginTransactionCookie.maxAge);
+export const readLoginTransaction = (cookie: string | undefined) => read(cookie, loginTransaction);
