@@ -134,7 +134,7 @@ Say: ordy warns before sending, and even if Dr. Hofer sends anyway, the stranger
 
 Say, filled in from the frozen build and the README status, in about 17 s: "Works today: …. Built but not connected: …. Not built: …."
 
-Today that would be: "Works today: both requests and all three misdeliveries, with the request email, the SMS on a demo SMS screen, FHIR filing, Provenance, and the audit log. Built but not connected: the AI fallback. Not built: a real SMS gateway."
+Today that would be: "Works today: both requests and all three misdeliveries, with the request email, the SMS on a demo SMS screen, FHIR filing, Provenance, and the audit log. Built, and off without an API key: the AI fallback. Not built: a real SMS gateway."
 
 ## Scene 10: disclaimer (8 s)
 

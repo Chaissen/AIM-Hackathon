@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 
 import { recordAudit } from "@/server/audit/record";
 import { heldAnswers, keptAnswers } from "@/server/db/schema";
+import { HELD_REASON, readAgain } from "@/server/documents/fallback";
 import { parseDocument } from "@/server/documents/parse";
 import { TransitionError } from "@/server/requests/lifecycle";
 import { applyEvent, getRequest, type RequestRow } from "@/server/requests/service";
@@ -15,6 +16,20 @@ export class NoHeldAnswer extends Error {
   constructor(readonly requestId: number) {
     super(`Request ${requestId} has no held answer`);
   }
+}
+
+/** The Provenance sentence for an answer the AI fallback read (docs/FHIR.md, "Provenance"). It names the model, never a value. */
+export const modelFinding = (model: string) =>
+  `The parser could not read the document's format, so the AI fallback read it: code read every value, and the language model ${model} read it on its own and agreed.`;
+
+/**
+ * The Provenance sentences of a held answer: the hold reason, or for an answer the AI fallback read, the model sentence
+ * in place of the notice's opening (`HELD_REASON`), then the release check's sentence that followed it.
+ */
+function heldFindings(reason: string, readByModel: string | null): string[] {
+  if (readByModel === null) return [reason];
+  const release = reason.startsWith(HELD_REASON) ? reason.slice(HELD_REASON.length).trim() : reason;
+  return [modelFinding(readByModel), ...(release ? [release] : [])];
 }
 
 /** An Accept's filing outcome is unknown: the FHIR server may have the answer, so only Accept again may end it. */
@@ -41,8 +56,9 @@ export async function acceptAnswer(deps: AnswerDeps, requestId: number, accepted
   if (request?.state !== "answer_held" || request.requester !== acceptedBy) return null;
   const [held] = await deps.db.select().from(heldAnswers).where(eq(heldAnswers.requestId, requestId));
   if (!held) throw new NoHeldAnswer(requestId);
-  const parsed = parseDocument(held.markdown);
-  // The parser is deterministic and read this text before, so this only fails after a parser change.
+  // The parser and the fallback's code reader are deterministic and read this text before, so this gives the record
+  // that was held, and only fails after a code change. The model is not asked again: it agreed before the hold.
+  const parsed = held.readByModel === null ? parseDocument(held.markdown) : readAgain(held.markdown);
   if (!parsed.ok || parsed.document.type === "other") throw new Error(`The held answer to request ${requestId} cannot be read any more`);
   const doc = parsed.document;
   // Before filing, so a FHIR read error cannot turn a filed answer into a failed Accept.
@@ -75,7 +91,7 @@ export async function acceptAnswer(deps: AnswerDeps, requestId: number, accepted
         sentAt: held.sentAt,
         uploadSha256: held.sha256,
         acceptedByRequester: true,
-        findings: [held.reason],
+        findings: heldFindings(held.reason, held.readByModel),
       }),
       acceptedBy,
     );

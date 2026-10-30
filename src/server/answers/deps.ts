@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { anthropicReader } from "@/server/documents/anthropic-reader";
+import type { DocumentReader } from "@/server/documents/fallback";
 import type { ExpectedPatient } from "@/server/documents/patient-check";
 import type { Db } from "@/server/db";
 import { db } from "@/server/db";
@@ -28,6 +30,11 @@ export type AnswerDeps = {
   fileAnswer: FileAnswer;
   /** Posts a notice in Dr. Hofer's room. Must not throw. */
   notify: (request: RequestRow, notice: Notice) => Promise<void>;
+  /**
+   * The AI fallback's model (docs/ARCHITECTURE.md, "AI fallback"). Absent or null turns the fallback off, and an upload
+   * the parser cannot read is refused as before. Tests pass a stand-in and never call the network.
+   */
+  documentReader?: DocumentReader | null;
 };
 
 /** Reads the patient by id. The official name if the resource has one, otherwise the first. */
@@ -46,4 +53,6 @@ export const answerDeps: AnswerDeps = {
   releaseCheck: (input) => checkRelease(input),
   fileAnswer: fhirFiling({ mapClinical }),
   notify: notifyRequest,
+  // Null without ANTHROPIC_API_KEY.
+  documentReader: anthropicReader(),
 };

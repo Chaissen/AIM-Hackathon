@@ -1,0 +1,1 @@
+ALTER TABLE "held_answers" ADD COLUMN "read_by_model" text;

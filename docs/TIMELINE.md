@@ -54,7 +54,7 @@ The task ids go into branch names and commit messages.
 | T19 | Timed test with someone new | Doc 2 | T09 | 5 |
 | T20 | README: run instructions, architecture, design answers, metric results | Doc 2, Dev 1 | T17, T18, T19 | 5 |
 | T21 | Demo script and video | Doc 2 | Milestone 5 | 6 |
-| T22 | AI fallback parser (optional) | Dev 3 | T10 | none |
+| T22 | AI fallback parser (optional), connected to the answer flow and off without `ANTHROPIC_API_KEY` ([AI fallback](ARCHITECTURE.md#ai-fallback-optional-cut-first)). Done. | Dev 3 | T10 | none |
 | T23 | eHVD mock service: own container, real WSDL, synthetic directory ([eHVD](EHVD.md#our-mock-t23)). Done. | Dev 3 | T01 | 3 |
 
 The critical path runs T01, T02, T07, T08, T09, T13, T18, T21. When two tasks compete for one person, the task on the critical path wins.

@@ -50,6 +50,13 @@
       "when": 1793358209210,
       "tag": "0006_add-sms-outbox",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793358425414,
+      "tag": "0007_add-held-answer-read-by-model",
+      "breakpoints": true
     }
   ]
 }
