@@ -234,7 +234,18 @@ In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `
 | `answer_filed` | The request service | `filed` | FHIR resource ids and the Provenance id |
 | `misdelivery_caught` | Whoever triggered it | `address_mismatch`, `wrong_person`, or `patient_mismatch` | The two domains, the failed checks, or the upload's SHA-256 and which part of the patient did not match |
 
-Every entry has a UTC timestamp in `at`. The widget and `GET /audit` show the entries.
+Every entry has a UTC timestamp in `at`. The `outcome` column holds the short result: `pass`, `hold`, or `fail` for `identity_checked`, and the kind for `misdelivery_caught`. The What sits in `detail`, with these fields, which `pnpm audit:check` requires:
+
+| Event | `detail` fields |
+|---|---|
+| `request_sent` | `docType`, `channel`, `address` |
+| `link_opened` | `state` |
+| `identity_checked` | `checks`, one entry per check with its result and reason |
+| `answer_sent` | `sha256`, `size` |
+| `answer_filed` | `resources` (every filed resource as `Type/id`, which `pnpm validate` reads), `provenance` |
+| `misdelivery_caught` | `address_mismatch`: `domain`, `expectedDomain`. `wrong_person`: `checks`. `patient_mismatch`: `sha256`, `size`, `nameMatches`, `birthDateMatches`. |
+
+The widget and `GET /audit` show the entries.
 
 `recordAudit()` in `src/server/audit/record.ts` writes every entry. Its types fix the outcome and the detail fields for each event and each misdelivery reason, and they hold ids, hashes, and check results only, never document text or the data of a wrong patient. An entry that belongs to a state change goes into the same transaction.
 
@@ -311,8 +322,11 @@ src/
     identity/login.ts         what a check result does: state, audit entries, page, notice, and runIdentityChecks for the callback (T08)
     ehvd/oid.ts               OID check shared by the login and pnpm citizen
     ehvd/                     eHVD SOAP client, planned (T15)
+    fhir/filing.ts            one answer as a transaction Bundle with Provenance and Task; fhir/file-answer.ts posts it (T13)
+    requests/lifecycle.ts     request states and the Task status they map to (T04 adds the transitions)
     matrix/client.ts          Matrix client-server API
     matrix/notices.ts         notice texts and notifyRoom for Dr. Hofer's room
+    metrics/                  metrics from audit rows, validator runner, metrics table (T17, T18)
     auth/eid-session.ts       outside person's session cookie
     portal/data.ts            data loaders for the portal and SMS pages, the SMS log is a stub until T06
   bot/                        Matrix bot process and commands
@@ -322,8 +336,9 @@ scripts/
   bootstrap-matrix.ts         room, invites, widget
   seed-fhir.ts                Maria Beispiel into HAPI
   citizen.ts                  add a test citizen to the simulated ID Austria
-  validate.ts                 planned, T18: HL7 validator on every filed resource
-  audit-check.ts              planned, T17: six event types per request
+  validate.ts                 HL7 validator on every filed resource or on given files (T18)
+  audit-check.ts              six event types per request, each with who, what, and when (T17)
+  scenario.ts                 request 1, M1 to M3, request 2, and the four metrics in one run (T17, T18)
 track/                        track brief, scenario, patient.json, test documents, and our extra set in scenario/extra/
 ```
 
