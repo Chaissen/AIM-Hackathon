@@ -2,7 +2,8 @@ import MarkdownIt from "markdown-it";
 
 import { TITLE } from "@/server/identity/names";
 import { parseDate, parseStay, parseViennaDateTime } from "./dates";
-import type { LabRow, ParseResult, ParsedDocument, PersonLine } from "./types";
+import { keyLines, patientIdentity } from "./patient-lines";
+import type { LabRow, ParseResult, ParsedDocument, PersonLine, SafetyRefusal } from "./types";
 
 // Reads the scenario Markdown format into typed records (docs/ARCHITECTURE.md, "Document parsing").
 
@@ -43,7 +44,11 @@ function collect(markdown: string): Raw {
       const text = tokens[i + 1]?.content.trim() ?? "";
       if (t.tag === "h1" && raw.title === null) raw.title = text;
       else if (t.tag === "h2") raw.sections.push((section = { heading: text, lines: [] }));
+      // A `###` heading or a second `#` heading stays text, so a comment under it reaches the conclusion.
+      else if (text) addText(text);
       i += 2;
+    } else if (t.type === "fence" || t.type === "code_block") {
+      for (const line of t.content.split("\n").map((l) => l.trim()).filter(Boolean)) addText(line);
     } else if (t.type === "table_open") {
       const { table, end } = readTable(tokens, i);
       raw.tables.push(table);
@@ -90,6 +95,12 @@ function readTable(tokens: Token[], start: number): { table: Table; end: number 
   return { table: { header, rows }, end: i };
 }
 
+/** The conclusion of a lab report: every free line, then each `##` section as `Heading: text`. Null when there is none. */
+export function freeText(free: string[], sections: { heading: string; lines: string[] }[]): string | null {
+  const parts = [...free, ...sections.map((s) => (s.lines.length ? `${s.heading}: ${s.lines.join(" ")}` : s.heading))];
+  return parts.join(" ") || null;
+}
+
 /** `Dr. Eva Brandl, lab physician` into titles, given, family, and details. */
 export function parsePersonLine(raw: string): PersonLine | null {
   const [namePart, ...details] = raw.split(",").map((s) => s.trim());
@@ -102,14 +113,14 @@ export function parsePersonLine(raw: string): PersonLine | null {
 }
 
 /** `3.1`, `3,1`, or `0,125`. Null for `1,245`, which may mean 1245 with a thousands separator or 1.245. */
-function toNumber(text: string): number | null {
+export function toNumber(text: string): number | null {
   const t = text.trim();
   if (/^-?[1-9]\d{0,2}(?:,\d{3})+$/.test(t) || !/^-?\d+(?:[.,]\d+)?$/.test(t)) return null;
   return Number(t.replace(",", "."));
 }
 
 /** A LOINC code such as `6301-6`, with the mod-10 check digit after the dash (Luhn over the digits before it). */
-function isLoinc(code: string): boolean {
+export function isLoinc(code: string): boolean {
   const m = /^(\d{1,7})-(\d)$/.exec(code);
   if (!m) return false;
   const sum = [...m[1]].reverse().reduce((acc, c, i) => {
@@ -169,6 +180,7 @@ export function parseDocument(markdown: string): ParseResult {
   // A byte order mark (Windows editors) would hide the `#` of the heading from markdown-it.
   const raw = collect(markdown.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n"));
   const errors: string[] = [];
+  const safety = new Set<SafetyRefusal>();
 
   const colon = raw.title?.indexOf(":") ?? -1;
   if (!raw.title || colon <= 0) errors.push('The file has no heading such as "# Labor Kanalstraße: lab report".');
@@ -180,7 +192,15 @@ export function parseDocument(markdown: string): ParseResult {
   const birthDate = born ? parseDate(born) : null;
   if (!patientLine) errors.push('The file has no line such as "Patient: Maria Beispiel, born 12 March 1961".');
   else if (!patientName?.trim() || !birthDate) errors.push(`The patient line "${patientLine}" needs a name and a birth date such as "born 12 March 1961".`);
-  for (const key of raw.duplicates) errors.push(`The file has more than one "${key}:" line.`);
+  for (const key of raw.duplicates) {
+    errors.push(`The file has more than one "${key}:" line.`);
+    safety.add("repeated-key");
+  }
+  // Lines this parser does not read as fields, such as `**Patient:** Max` or `Name: Max`, must not name another patient.
+  for (const refusal of patientIdentity(keyLines(markdown)).refusals) {
+    errors.push(refusal.error);
+    safety.add(refusal.safety);
+  }
 
   const base = {
     title: raw.title ?? "",
@@ -205,7 +225,10 @@ export function parseDocument(markdown: string): ParseResult {
     // A second table would be values the mappers never file, so the results must be in exactly one.
     const table = raw.tables.length === 1 ? raw.tables[0] : null;
     if (!raw.tables.length) errors.push("The lab report has no result table.");
-    else if (!table) errors.push("The lab report has more than one table. Put all results in one table.");
+    else if (!table) {
+      errors.push("The lab report has more than one table. Put all results in one table.");
+      safety.add("several-tables");
+    }
     const rows = table ? labRows(table, errors) : [];
     if (table && !table.rows.length) errors.push("The result table has no rows.");
     document = {
@@ -214,7 +237,7 @@ export function parseDocument(markdown: string): ParseResult {
       sampleTaken,
       reported,
       rows,
-      conclusion: raw.free.join(" ") || null,
+      conclusion: freeText(raw.free, raw.sections),
       validatedBy: person("Validated by"),
     };
   } else if (kind === "discharge report") {
@@ -234,5 +257,5 @@ export function parseDocument(markdown: string): ParseResult {
     document = { ...base, type: "other" };
   }
 
-  return errors.length ? { ok: false, errors } : { ok: true, document };
+  return errors.length ? { ok: false, errors, safety: [...safety] } : { ok: true, document };
 }
