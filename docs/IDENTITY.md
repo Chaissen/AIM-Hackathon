@@ -125,6 +125,8 @@ The script adds the person through the Keycloak admin API and prints the usernam
 
 It reads the Keycloak address and realm from `OIDC_METADATA_URL` and the admin login from `KEYCLOAK_ADMIN_USER` and `KEYCLOAK_ADMIN_PASSWORD`. The bPK uses the same derivation as the realm's citizens.
 
+The extra test set adds two senders with double names this way, Sophie Lindner-Pichler (`sophie.lindner-pichler` / `demo-sophie`) and Karl Heinz Moser-Wallner (`karl-heinz.moser-wallner` / `demo-karl`). [`track/scenario/extra/index.md`](../track/scenario/extra/index.md) has their commands, whom they play, and the name-match cases they test. A given name with a space needs quotes: `--given "Karl Heinz"`.
+
 ## How the login connects to the request service
 
 ```
