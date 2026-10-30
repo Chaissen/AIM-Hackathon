@@ -334,7 +334,7 @@ docker/element/config.json    Element config
 docker/synapse/               generated homeserver.yaml (git ignores it)
 docker/keycloak/idaustria-sim-realm.json   simulated ID Austria: client, mappers, test citizens
 docs/ehvd/eHVD.wsdl           the real eHVD WSDL, version 2 from BRZ
-docs/clinical-review/         review files for the clinical staff, one per issue, signed by hand
+docs/clinical-review/         review files for the clinical staff: sign-offs, review sheets, and test protocols, filled in by hand
 services/ehvd-mock/           eHVD mock service and its synthetic directory (T23)
   src/                        SOAP wire format, field rules, queries, directory, HTTP server
   test/                       tests over real HTTP, run by pnpm test
