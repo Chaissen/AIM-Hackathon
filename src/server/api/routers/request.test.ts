@@ -128,18 +128,17 @@ test("a request created through createCaller is stored and logged as request_sen
   assert.deepEqual(audit[0].detail, { docType: "lab-result", channel: "email", address: "eva.brandl@labor-kanal.example", sentAnyway: false });
 });
 
-test("an SMS request stores the phone number", { skip: noDb }, async () => {
-  const request = await clinic.request.create({
-    docType: "rehab-report",
-    patient: "maria-beispiel",
-    given: "Stefan",
-    family: "Kern",
-    org: "Reha Waldblick",
-    phone: "+43 660 000 0101",
-  });
+test("an SMS request stores the phone number and is sent without the address check", { skip: noDb }, async () => {
+  const sms = { docType: "rehab-report", patient: "maria-beispiel", given: "Stefan", family: "Kern", phone: "+43 660 000 0101" } as const;
+  const request = await clinic.request.create({ ...sms, org: "Reha Waldblick" });
   created.push(request.id);
   assert.equal(request.channel, "sms");
   assert.equal(request.address, "+43 660 000 0101");
+  assert.deepEqual([request.state, request.addressWarning], ["sent", null]);
+  // Even for an organisation the eHVD does not list, which would hold an email address.
+  const unlisted = await clinic.request.create({ ...sms, org: "Labor Nirgendwo" });
+  created.push(unlisted.id);
+  assert.deepEqual([unlisted.state, unlisted.addressWarning], ["sent", null]);
 });
 
 test("create refuses a request without a contact or with both", { skip: noDb }, async () => {

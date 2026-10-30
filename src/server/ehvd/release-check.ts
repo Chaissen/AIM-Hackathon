@@ -179,11 +179,16 @@ type PeopleSearch = { ok: true; people: GdaDescriptor[] } | { ok: false; reason:
  * Only when that is more than 200 entries does it add the first given name that is not a title, again as a substring,
  * and when that is still too many it holds instead of narrowing further. Every hit must carry the document's name.
  * `spelling` is the name as the search writes it: the document's, or the claim entry's, which is the eHVD's own.
+ * Only parts the document's name carries count, so the entry "Eva Brandl-Huber" is searched as `*Huber*` for a
+ * document that names "Eva Huber", and every namesake comes back too.
  * Spellings the eHVD does not fold, such as "Mueller" for "Müller", are not found, so they are not counted either.
  */
 async function searchPeople(client: EhvdClient, spelling: { given: string; family: string }, name: NameWords): Promise<PeopleSearch> {
-  const family = nameParts(spelling.family).reduce((a, b) => (b.length > a.length ? b : a), "");
-  const given = nameParts(spelling.given).find((part) => !TITLE.test(part)) ?? "";
+  const carried = (words: Set<string>) => (part: string) => isSubset(nameWords(part), words);
+  const family = nameParts(spelling.family)
+    .filter(carried(name.family))
+    .reduce((a, b) => (b.length > a.length ? b : a), "");
+  const given = nameParts(spelling.given).find((part) => !TITLE.test(part) && carried(name.given)(part)) ?? "";
   const search = (query: Partial<GdaSearchQuery>) =>
     client.gdaSearch({ surname: `*${family}*`, maxResults: PERSON_RESULTS, ehvdstatus: "Inaktiv", ...query });
   const tooMany = (r: Awaited<ReturnType<typeof search>>) => !r.ok && r.failure.kind === "fault" && r.failure.code === 6005;

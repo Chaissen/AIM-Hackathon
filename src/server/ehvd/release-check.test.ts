@@ -264,6 +264,38 @@ test("via the claim, the namesake search must find the sender's own entry, or th
   assert.deepEqual(check.verdict === "hold" && [check.reason, check.practitioner?.id.id], ["ehvd_error", EVA_OID]);
 });
 
+test("via the claim, the namesake search asks for the parts of the entry's name that the document carries", async () => {
+  const entry = await client.getGda({ id: EVA_OID });
+  assert.ok(entry.ok && entry.value);
+  const active = entry.value;
+  // A directory with the given people, searched as the eHVD does: a substring per field. `crowded` answers 6005 without a given name.
+  const directory = (people: GdaDescriptor[], crowded = false): EhvdClient => ({
+    getGda: async (query) => ({ ok: true, value: people.find((gda) => gda.id.id === query.id) ?? null }),
+    gdaSearch: async (query) => {
+      if (!isPersonSearch(query)) return client.gdaSearch(query);
+      if (crowded && !query.firstname) return TOO_MANY;
+      const has = (value: string | null | undefined, pattern?: string) => !pattern || (value ?? "").toLowerCase().includes(pattern.replaceAll("*", "").toLowerCase());
+      return { ok: true, value: people.filter((gda) => has(gda.surname, query.surname) && has(gda.firstname, query.firstname)) };
+    },
+  });
+  const namesake = (firstname: string, surname: string) => ({ ...active, id: { ...active.id, id: "1.2.40.0.34.3.2.99.7.1" }, firstname, surname });
+  const signedBy = (name: string) => lab((m) => m.replace("Dr. Eva Brandl, lab physician", `Dr. ${name}, lab physician`));
+
+  // Her entry is "Eva Brandl-Huber" and the document names "Eva Huber": the search is *Huber*, not *Brandl*.
+  const doubleName = { ...active, surname: "Brandl-Huber" };
+  const sender = { givenName: "Eva", familyName: "Brandl-Huber", gdaOid: EVA_OID };
+  const alone = await checkRelease({ document: signedBy("Eva Huber"), org: "Labor Kanalstraße", sender }, directory([doubleName]));
+  assert.deepEqual(alone.verdict === "pass" && [alone.via, alone.practitioner.id.id], ["claim", EVA_OID]);
+  const two = await checkRelease({ document: signedBy("Eva Huber"), org: "Labor Kanalstraße", sender }, directory([doubleName, namesake("Eva", "Huber")]));
+  assert.equal(two.verdict === "hold" && two.reason, "several_matches");
+
+  // Her entry is "Anna Eva Brandl" and the document names "Eva Brandl": after 6005 the search adds *Eva*, not *Anna*.
+  const secondName = { ...active, firstname: "Anna Eva" };
+  const crowded = directory([secondName, namesake("Eva", "Brandl")], true);
+  const narrowed = await checkRelease({ document: lab(), org: "Labor Kanalstraße", sender: { ...eva, givenName: "Anna Eva" } }, crowded);
+  assert.equal(narrowed.verdict === "hold" && narrowed.reason, "several_matches");
+});
+
 test("a sender with the claim who may not release it is checked like any other sender", async () => {
   // Eva Brandl-Huber is inactive, but her name contains "Eva Brandl", so her login passes for a request to Eva Brandl.
   const brandlHuber = { givenName: "Eva", familyName: "Brandl-Huber", gdaOid: "1.2.40.0.34.3.2.99.1.5" };

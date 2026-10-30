@@ -104,7 +104,7 @@ The link token and the 7 days start when the request goes out. **Send anyway** (
 - A mismatch waits in `awaiting_confirmation`, and `misdelivery_caught` records `address_mismatch` with both domains.
 - An address the eHVD could not confirm waits too, but with no audit entry: nothing was caught, and nothing went out. If Dr. Hofer sends it anyway, `request_sent` with `sentAnyway` and no `misdelivery_caught` before it shows that.
 
-`create` returns `addressWarning`, the text next to **Send anyway**, or null. `get` and `list` return it while the request waits. A mismatch is rebuilt from its audit entry; for an unconfirmed address they say only that the eHVD could not confirm it. `request.sendAnyway` sends a waiting request, and answers `CONFLICT` for any other state.
+`create` returns `addressWarning`, the warning that belongs next to **Send anyway**, or null. `get` and `list` return it while the request waits. A mismatch is rebuilt from its audit entry; for an unconfirmed address they say only that the eHVD could not confirm it. `request.sendAnyway` sends a waiting request, and answers `CONFLICT` for any other state.
 
 ## Link rules
 
@@ -139,7 +139,7 @@ The request form has the document type, the patient, the given name, the family 
 | Organisation | Labor Kanalstraße | Reha Waldblick |
 | Contact | `eva.brandl@labor-kanal.example` | `+43 660 000 0101` |
 
-If the address check fails, the widget shows the warning next to **Send anyway** and **Cancel**: "The address domain `labor-kanaI.example` does not match Labor Kanalstraße (`labor-kanal.example`)." If the eHVD cannot confirm the address, for example because it cannot be reached, the widget asks the same way: "The eHVD could not be reached, so the address could not be checked." [eHVD](EHVD.md#the-address-check) has every case.
+If the address check fails, the widget shows the warning next to **Send anyway** and **Cancel**: "The address domain `labor-kanaI.example` does not match Labor Kanalstraße (`labor-kanal.example`)." If the eHVD cannot confirm the address, for example because it cannot be reached, the request waits the same way, and the widget says "The address did not pass the address check." The reason is in `addressWarning` from `request.create`, such as "The eHVD could not be reached, so the address could not be checked.", but the widget does not show it yet. [eHVD](EHVD.md#the-address-check) has every case.
 
 ## Matrix bot
 
