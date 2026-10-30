@@ -90,7 +90,15 @@ export type GenericDocument = DocumentBase & { type: "other" };
 export type ParsedDocument = LabResult | RehabReport | GenericDocument;
 
 /**
- * The parser never throws on content. `errors` names every reason the document could not be read,
- * in words the uploader can act on.
+ * A refusal that exists to stop a misdelivery, not because the format is unknown: a known key on more than one line
+ * with different values (a second `Patient:` line), a lab report with more than one table, or lines that name more
+ * than one patient or birth date in any form (`patient-lines.ts`). The AI fallback never sends such a document to
+ * the model (docs/ARCHITECTURE.md, "AI fallback").
  */
-export type ParseResult = { ok: true; document: ParsedDocument } | { ok: false; errors: string[] };
+export type SafetyRefusal = "repeated-key" | "several-tables" | "several-patients" | "several-birth-dates";
+
+/**
+ * The parser never throws on content. `errors` names every reason the document could not be read,
+ * in words the uploader can act on. `safety` lists the refusals among them that stop a misdelivery.
+ */
+export type ParseResult = { ok: true; document: ParsedDocument } | { ok: false; errors: string[]; safety: SafetyRefusal[] };

@@ -4,6 +4,8 @@ import { z } from "zod";
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PUBLIC_URL: z.url().default("http://localhost:3010"),
+  // The clinic that runs ordy, named in the portal and in every email and SMS.
+  CLINIC_NAME: z.string().min(1).default("Klinikum Beispielstadt"),
   // Empty disables outside-person sessions until setup generates a private key.
   ORDY_SECRET: z.string().default(""),
   DATABASE_URL: z.url().default("postgres://ordy:ordy@localhost:5433/ordy"),
@@ -29,7 +31,9 @@ const schema = z.object({
   MAILPIT_API_URL: z.url().default("http://localhost:8025"),
   // eHVD web service (task T15): the mock from T23, or the real eHVD from an address BRZ has allowed.
   EHVD_URL: z.url().default("http://localhost:8095/"),
-  ANTHROPIC_API_KEY: z.string().optional(),
+  // AI fallback parser (task T22). Unset ANTHROPIC_API_KEY turns it off.
+  ANTHROPIC_API_KEY: z.preprocess((value) => (value === "" ? undefined : value), z.string().optional()),
+  AI_FALLBACK_MODEL: z.string().default("claude-opus-5-5"),
 });
 
 export const env = schema.parse(process.env);
