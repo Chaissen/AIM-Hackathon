@@ -40,9 +40,9 @@ The check compares whole words. A substring check would block every message, bec
 
 | Data | Where | Why | How long |
 |---|---|---|---|
-| Requests | Postgres `requests`: patient id, requested person, address, requester, state, link hash, and the person number (bPK) of the person who passed or was held | Lifecycle and link checks. The bPK makes sure only that person can answer. | Until the demo reset |
+| Requests | Postgres `requests`: document type, patient id, requested person, address, requester and their Matrix display name, state, link hash, the person number (bPK) of the person who passed or was held, and the ID token of that person's last login | Lifecycle and link checks. The bPK makes sure only that person can answer. The ID token goes into the Provenance at filing. | Until the demo reset |
 | Person number bindings | Postgres `bindings` | Only the person who answered before can answer as that person again | Until the demo reset |
-| Audit log | Postgres `audit_log` | Who did what and when. No document text. | Until the demo reset |
+| Audit log | Postgres `audit_log`, including the document type, channel, and recipient address of each sent request | Who did what and when. No document text. | Until the demo reset |
 | Filed answers | HAPI FHIR | The clinical record | Until the demo reset |
 | ID token of the sender | Provenance `signature.data` | Proof of the identity check that anyone can verify later | With the record |
 | Uploads for the wrong patient | Nowhere. Only the SHA-256 hash and the reason stay in the audit log. | Max Beispiel's data must not end up in Maria's record or anywhere else | Discarded after the check |

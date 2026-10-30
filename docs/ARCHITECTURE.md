@@ -260,7 +260,7 @@ In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `
 
 `bindings` remembers which ID Austria person number answered as a given person at a given organisation. Its key is `given`, `family`, and `org`, so each person at an organisation has one person number. The audit log never holds document text.
 
-`src/server/requests/service.ts` is the only code that writes `requests`: `createRequest`, `sendAnyway`, `applyEvent`, `incrementFailedChecks`, `applyLoginTransition`, and `expireDueRequests`. The tRPC router `request` (`create`, `get`, `list`, `cancel`, all `clinicProcedure`) and the portal pages use it. A network member sees and changes only the requests they sent; for anyone else, `get` and `cancel` answer "not found", and `list` leaves the request out. `get` returns the request's audit entries, which name the outside person and their person number. The widget's **Audit log** tab (`clinic.audit`) still shows the whole log to every network member, for the demo.
+`src/server/requests/service.ts` is the only code that writes `requests`: `createRequest`, `sendAnyway`, `applyEvent`, `incrementFailedChecks`, `applyLoginTransition`, `expireDueRequests`, and `saveIdToken`, which the login callback calls for the bound person. The tRPC router `request` (`create`, `get`, `list`, `cancel`, all `clinicProcedure`) and the portal pages use it. A network member sees and changes only the requests they sent; for anyone else, `get` and `cancel` answer "not found", and `list` leaves the request out. `get` returns the request's audit entries, which name the outside person and their person number. The widget's **Audit log** tab (`clinic.audit`) still shows the whole log to every network member, for the demo.
 
 ## Audit log
 
@@ -268,7 +268,7 @@ In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `
 |---|---|---|---|
 | `request_sent` | Dr. Hofer's Matrix ID | `sent` | Document type, channel, recipient address |
 | `link_opened` | An anonymous browser, named by a keyed hash of its IP address from `X-Forwarded-For` | `shown`, or `refused` when the link no longer works | Request id and its state |
-| `identity_checked` | The ID Austria name and person number | `pass`, `hold`, or `fail` | The reason for each check |
+| `identity_checked` | The ID Austria name and person number, or `ID Austria login` when Keycloak could not be reached | `pass`, `hold`, or `fail` | The reason for each check |
 | `answer_sent` | The verified person | `received` | SHA-256 and size of the upload |
 | `answer_filed` | The request service | `filed` | FHIR resource ids and the Provenance id |
 | `misdelivery_caught` | Whoever triggered it | `address_mismatch`, `wrong_person`, or `patient_mismatch` | The two domains, the failed checks, or the upload's SHA-256 and which part of the patient did not match |
@@ -286,7 +286,7 @@ Every entry has a UTC timestamp in `at`. The `outcome` column holds the short re
 
 The widget and `GET /audit` show the entries.
 
-`recordAudit()` in `src/server/audit/record.ts` writes the entries. Its types fix the outcome and the detail fields for each event and each misdelivery reason, and they hold ids, hashes, and check results only, never document text or the data of a wrong patient. An entry that belongs to a state change goes into the same transaction. `answer_filed` also names `output`, `targets`, `task`, `sender`, `author`, and `organization` (`AnswerFiled` in `src/server/fhir/file-answer.ts`). `fileAnswer` (T13) still inserts it directly until it switches to `recordAudit()`.
+`recordAudit()` in `src/server/audit/record.ts` writes the entries. Its types fix the outcome and the detail fields for each event and each misdelivery reason, and they hold ids, hashes, and check results only, never document text or the data of a wrong patient. An entry that belongs to a state change goes into the same transaction. A login is the exception: `runIdentityChecks` writes its entries through the port before it applies the state change, so `identity_checked` can record a pass whose change was refused, for example by the forced lock. `answer_filed` also names `output`, `targets`, `task`, `sender`, `author`, and `organization` (`AnswerFiled` in `src/server/fhir/file-answer.ts`). `fileAnswer` (T13) still inserts it directly until it switches to `recordAudit()`.
 
 The IP hash is an HMAC-SHA256 with a key derived from `ORDY_SECRET`, cut to 16 hex characters, because a plain hash of an IPv4 address can be reversed by trying all of them. Without a private `ORDY_SECRET`, the entry says `ip unknown` instead. Next.js fills `X-Forwarded-For` from the connection only when the client sent none. Without a proxy in front, the client can set it, so the hash is a hint, not proof.
 
@@ -341,7 +341,7 @@ src/
     api/healthz/route.ts      health check for scripts and containers
     widget/                   request form inside Element. Sending is planned, T05
     r/[token]/                outside portal: landing page and answer form. Answer planned, T09
-    auth/                     ID Austria login and callback route handlers, expired-login page. Identity checks planned, T08
+    auth/                     ID Austria login and callback route handlers, expired-login page. The callback runs the identity checks (T08)
     sms/page.tsx              SMS screen. Reading the SMS log planned, T06
     audit/page.tsx            audit UI; authenticated data via clinic.audit
   components/ui/              shadcn/ui components, added with `pnpm dlx shadcn@4.22.1 add <name>`
