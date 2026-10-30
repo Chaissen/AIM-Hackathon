@@ -1,6 +1,6 @@
 # Demo script (draft)
 
-A draft click path for the 2-minute video and the live demo, written for the pitch team. Doc 2 owns the final script and the video (T21). The track asks the video to say what works and what does not, so scene 9 does that.
+A draft click path for the 2-minute video and the live demo, written for the pitch team. The pitch team owns the final script and the video. The track asks the video to say what works and what does not, so scene 9 does that.
 
 The steps follow the documented target behaviour in [Architecture](ARCHITECTURE.md) and [Identity and misdelivery](IDENTITY.md). The screen texts are the ones in the code where they exist. Each step has a state:
 
@@ -11,11 +11,11 @@ The steps follow the documented target behaviour in [Architecture](ARCHITECTURE.
 
 States as of 30 October 2026, 03:20, on `main` at commit `06abdc9`, checked in one run by hand through request 1, M1 to M3, and the rehab request. Check them again on the frozen build before recording. Cut every step that is still not built, or replace it with one spoken sentence. If you show a screen from `prototype/ordy-app`, label it on screen as a design mock-up, not the running app.
 
-ordy does not send the email or the SMS yet. The email text is built (T06), but nothing calls it, and no task builds the SMS. Until then `pnpm dev` prints each new request's link in its log as `Request <id>: http://localhost:3010/r/<token>`. Every portal step works with that link.
+ordy does not send the email or the SMS yet. The email text is built, but nothing calls it, and no task builds the SMS. Until then `pnpm dev` prints each new request's link in its log as `Request <id>: http://localhost:3010/r/<token>`. Every portal step works with that link.
 
-Nothing posts the "Request … sent" notice yet, and no task builds it. So a request has no thread in the room, and every later notice about it is the newest message in the room.
+Nothing posts the "Request … sent" notice yet: T05 did not build it, and no open task does. So a request has no thread in the room, and every later notice about it is the newest message in the room.
 
-The notices write the outside person as typed in the form when someone else logs in ("not Eva Brandl"), and with the title from the eHVD once the answer is filed ("from Dr. Eva Brandl"). The texts below are the ones the run by hand produced.
+The notices name the outside person as typed in the form when someone else logs in ("not Eva Brandl"). Once the answer is filed, they take the title from the document's `Validated by` line ("from Dr. Eva Brandl"). The texts below are the ones the run by hand produced, with the request numbers of the scene order.
 
 ## Order of the story
 
@@ -38,9 +38,9 @@ The notices number the requests in the order they are created after `pnpm reset`
 
 ## Before recording
 
-1. Record on the frozen build. Run `pnpm reset`, then `pnpm dev`. Do not run `pnpm test` after the reset: its request tests move the request ids on. Keep the `pnpm dev` terminal off camera: until the email and SMS exist, the links come from its log. If a login returns to the landing page with `?login=failed`, `.env` still has the old demo `ORDY_SECRET`: run `pnpm exec tsx scripts/init-env.ts` and restart `pnpm dev`.
+1. Record on the frozen build. Run `pnpm reset`, then `pnpm dev`. Do not run `pnpm test` after the reset: its request tests move the request ids on. Keep the `pnpm dev` terminal off camera: until the email and SMS exist, the links come from its log. If a login returns to the landing page with `?login=failed`, read the `pnpm dev` log. If it says "A private ORDY_SECRET … is required", run `pnpm exec tsx scripts/init-env.ts` and restart `pnpm dev`.
 2. `pnpm reset` keeps the Matrix room and the notices from rehearsals. For a clean room, set a new `MATRIX_ROOM_ALIAS` in `.env`, run `pnpm matrix:bootstrap`, restart `pnpm dev`, and leave the old room in Element.
-3. Open these tabs: Element at http://localhost:8081 logged in as `lena.hofer` / `hofer-demo-2026` with the room "Dr. Hofer · Outside documents" and the ordy widget open, Mailpit at http://localhost:8025, the SMS screen at http://localhost:3010/sms, and HAPI FHIR's web UI at http://localhost:8090. The base URL http://localhost:8090/fhir alone shows only an error, so use the search links in scenes 6 and 7.
+3. Open these tabs: Element at http://localhost:8081 logged in as `lena.hofer` / `hofer-demo-2026` with the room "Dr. Hofer · Outside documents" and the ordy widget open, and HAPI FHIR's web UI at http://localhost:8090. The base URL http://localhost:8090/fhir alone shows only an error, so use the search links in scenes 6 and 7.
 4. Every notice is a new message in the room until the "request sent" notice exists. Tests and rehearsals post into the same room, so use a clean room (step 2).
 5. Private windows of one browser share their cookies. Close every private window before you switch to the next outside person, or use a separate browser profile for each person.
 6. Keep the files ready: `track/scenario/documents/lab-result-maria-beispiel.md`, `lab-result-max-beispiel.md`, and `rehab-report-maria-beispiel.md`.
@@ -60,15 +60,15 @@ Say: Outside labs still answer by fax. ordy lets Dr. Hofer ask from her Matrix r
 | Click | What you see | State |
 |---|---|---|
 | In the widget, pick **Lab result**, patient Maria Beispiel, Eva Brandl, Labor Kanalstraße, `eva.brandl@labor-kanal.example`, then **Send request** | The form, then the notice "Request 1 sent to Dr. Eva Brandl (Labor Kanalstraße) by email." in the room | Partly: the widget sends the request and shows request 1 below the form with the state "Sent". The room notice is not built. |
-| Open the email in Mailpit | "Secure request from Klinikum Beispielstadt", the link, the expiry date. No patient name, no birth date, no document type. | Not built: the email text exists, but nothing sends it. Cut this step and say that the email is simulated. |
+| Open the email in Mailpit | "Secure request from Klinikum Beispielstadt", the link, the expiry date. No patient name, no birth date, no document type. | Not built: the email text exists, but nothing sends it. Cut this step; the voice-over says that the email is not sent yet. |
 
-Say: The email names only Dr. Hofer and the clinic. Nobody who intercepts it learns about the patient.
+Say: The email ordy will send names only Dr. Hofer and the clinic, never the patient. It is not sent yet, so we open its link directly.
 
 ## Scene 3: M2, forwarded link (10 s)
 
 | Click | What you see | State |
 |---|---|---|
-| In a private window, open the link from the email | "Dr. Lena Hofer at Klinikum Beispielstadt sent you a request" and **Log in with ID Austria**. Nothing about the patient. | Ready with the log link |
+| In a private window, open the link from the `pnpm dev` log | "Dr. Lena Hofer at Klinikum Beispielstadt sent you a request" and **Log in with ID Austria**. Nothing about the patient. | Ready with the log link |
 | Log in as `thomas.wagner` / `demo-thomas`, Dr. Brandl's colleague | "This request is for someone else. Nothing was shared with you." | Ready with the log link |
 | Switch to Element and look at the newest message in the room | "Request 1 was opened by someone who is not Eva Brandl (ID Austria name: Thomas Wagner). Nothing was shown or filed. Check the address." | Ready, as a new message, not in a thread. The widget's **Requests** view shows the same catch on request 1: "Identity checked" with `fail` and "Misdelivery caught" with `wrong_person`. |
 
@@ -118,8 +118,8 @@ Say: Stefan Kern only sends the report. The Provenance names Dr. Leitner, who wr
 
 | Click | What you see | State |
 |---|---|---|
-| In the widget, send the lab request again to `eva.brandl@labor-kanaI.example`, with a capital I | The warning "The address domain `labor-kanaI.example` does not match Labor Kanalstraße (`labor-kanal.example`)." next to **Send anyway** and **Cancel** | Ready: `request.create` returns this warning and holds the request. Check how the widget shows it before recording. |
-| Click **Send anyway**. Off camera, open the new email in Mailpit and its link in a fresh private window. | Only the requesting doctor and clinic | Ready with the log link: **Send anyway** sends the request, and `pnpm dev` prints its new link |
+| In the widget, send the lab request again to `eva.brandl@labor-kanaI.example`, with a capital I | The warning "The address domain `labor-kanaI.example` does not match Labor Kanalstraße (`labor-kanal.example`)." next to **Send anyway** and **Cancel** | Ready |
+| Click **Send anyway**. Off camera, copy the new link from the `pnpm dev` log and open it in a fresh private window. | Only the requesting doctor and clinic | Ready with the log link: **Send anyway** sends the request, and `pnpm dev` prints its new link |
 | Log in as `anna.huber` / `demo-anna`, who owns the mistyped address | "This request is for someone else. Nothing was shared with you." | Ready with the log link |
 | Switch to Element and look at the newest message | "Request 3 was opened by someone who is not Eva Brandl (ID Austria name: Anna Huber). Nothing was shown or filed. Check the address." | Ready |
 
@@ -140,7 +140,7 @@ As of 03:20 that would be: "Works today: both requests and all three misdeliveri
 
 Show the disclaimer from [Compliance and safety](COMPLIANCE_AND_SAFETY.md#disclaimer) as a closing card, with the repository link. The video must show it.
 
-Say: ID Austria, the eHVD, email, and SMS are simulated. Real ID Austria also asks for a confirmation in the phone app.
+Say: ID Austria and the eHVD are simulated. ordy does not send the email or the SMS yet. Real ID Austria also asks for a confirmation in the phone app.
 
 ## If the time runs short
 
@@ -154,4 +154,4 @@ Never cut the HAPI view in scene 6. It is the only place the video shows the FHI
 
 ## If the email and SMS are still not sent at the freeze
 
-Record the scenes above with the log link, and say it once in scene 2: "The email is simulated; here we open its link directly." Cut the Mailpit step in scene 2 and the SMS screen in scene 7, and use the freed seconds for the HAPI view in scene 6. Name the missing email and SMS again in the spoken part of scene 9.
+Record the scenes above with the log link. The scene 2 voice-over already says that the email is not sent yet. Cut the Mailpit step in scene 2 and the SMS screen in scene 7, and use the freed seconds for the HAPI view in scene 6. Name the missing email and SMS again in the spoken part of scene 9.

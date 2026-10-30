@@ -8,7 +8,7 @@ Prototype on synthetic data only. Not a medical device. Not for clinical use. Re
 
 ## Status
 
-Status on `main` at commit `06abdc9`, 30 October 2026, 03:20. Request 1 with M1 to M3, and the rehab request, run end to end by hand, with one gap: ordy does not send the email or the SMS yet. In development, `pnpm dev` prints each request's link in its log, and that link stands in for the message. The metric results in [Metrics](#metrics) come from that run.
+Status on `main` at commit `06abdc9`, 30 October 2026, 03:20 CET. Request 1 with M1 to M3, and the rehab request, run end to end by hand, with one gap in the flow: ordy does not send the email or the SMS yet. In development, `pnpm dev` prints each request's link in its log, and that link stands in for the message. The metric results in [Metrics](#metrics) come from that run.
 
 | Part | State |
 |---|---|
@@ -23,7 +23,7 @@ Status on `main` at commit `06abdc9`, 30 October 2026, 03:20. Request 1 with M1 
 | Request email | **Built, not connected.** The email text and the check that it names no patient, birth date, or document type are built and tested. Nothing sends the email yet; the link comes from the `pnpm dev` log. |
 | SMS, and the SMS screen's message list | **Not built.** The SMS screen stays empty. |
 | AI fallback parser (optional) | **Built, not connected.** Tested with a stand-in for the model. The answer flow uses the rule-based parser only. |
-| Metric runner | `pnpm validate` and `pnpm audit:check` work on the filed data. `pnpm scenario` checks each step but has no code yet that drives the flow, so it reports every flow step as blocked. |
+| Metric runner | **Partly.** `pnpm validate` and `pnpm audit:check` work on the filed data. `pnpm scenario` checks that the stack is up, but its flow steps have no code yet that drives them, so it reports them as blocked. |
 
 [Timeline](docs/TIMELINE.md) has the tasks and owners.
 
@@ -44,8 +44,8 @@ pnpm dev             # Next.js on http://localhost:3010 and the Matrix bot
 |---|---|---|
 | ordy status page | http://localhost:3010 | |
 | Element (Dr. Hofer) | http://localhost:8081 | `lena.hofer` / `hofer-demo-2026` |
-| Mailpit (outside emails) | http://localhost:8025 | |
-| SMS screen | http://localhost:3010/sms | |
+| Mailpit (outside emails) | http://localhost:8025 | Empty for now: ordy sends no email yet |
+| SMS screen | http://localhost:3010/sms | Empty for now: ordy sends no SMS yet |
 | HAPI FHIR | http://localhost:8090 (web UI), API base http://localhost:8090/fhir | |
 | Simulated ID Austria (Keycloak) | http://localhost:8080/admin | `admin` / `keycloak-demo-2026` for the admin console. Test citizens such as `eva.brandl` / `demo-eva` log in through the link of a request, see [Identity](docs/IDENTITY.md#test-citizens). |
 | Postgres | `postgres://ordy:ordy@localhost:5433/ordy` | `ordy` / `ordy` |
@@ -70,7 +70,7 @@ Check that it works:
 | `pnpm db:generate --name <name>` · `pnpm db:migrate` | Create a migration from `src/server/db/schema.ts`, apply it |
 | `pnpm db:studio` | Browse the database |
 | `pnpm fhir:seed` · `pnpm matrix:bootstrap` | Load the scenario patient; create the room and pin the widget |
-| `pnpm scenario` · `pnpm validate` · `pnpm audit:check` | All four metrics in one run; the HL7 validator on the filed resources; the six audit events per request |
+| `pnpm scenario` · `pnpm validate` · `pnpm audit:check` | All four metrics in one run, once its flow steps have code that drives them (today they report blocked); the HL7 validator on the filed resources; the six audit events per request |
 
 ## Architecture
 
@@ -105,7 +105,7 @@ Dr. Hofer fills in the request form in the ordy widget inside her Matrix room. T
 
 The main flow uses no AI model. Parsing, the identity checks, and the patient check are deterministic. Only when the parser cannot read a document does the optional AI fallback step in: a more lenient code reader reads every value, a model (Anthropic, `claude-opus-5-5`, off without `ANTHROPIC_API_KEY`) reads the document independently, and the two readings must agree. The model can only stop a record, never choose a value. Every answer it read waits for Dr. Hofer ([AI rules](docs/COMPLIANCE_AND_SAFETY.md#ai-rules)). The fallback is built and tested, but the answer flow does not call it yet.
 
-Simulated in the demo: ID Austria (Keycloak, without the phone-app confirmation), the eHVD (our mock), email (Mailpit), and SMS (the SMS screen). Each can be replaced by the real service, and every other part we did not build, such as HAPI FHIR or Synapse, by another product of its kind. [Whitepaper](docs/WHITEPAPER.md#what-is-real-and-what-is-simulated) says what each part becomes in production, and [Architecture](docs/ARCHITECTURE.md) has the details.
+Simulated in the demo: ID Austria (Keycloak, without the phone-app confirmation) and the eHVD (our mock). Email goes to Mailpit and SMS to the SMS screen once ordy sends them; today it sends neither. Each can be replaced by the real service, and every other part we did not build, such as HAPI FHIR or Synapse, by another product of its kind. [Whitepaper](docs/WHITEPAPER.md#what-is-real-and-what-is-simulated) says what each part becomes in production, and [Architecture](docs/ARCHITECTURE.md) has the details.
 
 | Part | Where | Notes |
 |---|---|---|
@@ -174,14 +174,14 @@ At the clinic, next to the Matrix server and the FHIR server it already runs. Pa
 
 ## Metrics
 
-We measure the four track metrics on the scenario. `pnpm scenario` is meant to run it against the running stack, but its steps have no code yet that drives the flow, so it reports them as blocked. The results below come from one run by hand on `main` at commit `06abdc9`, on 30 October 2026: `pnpm reset`, the requests created through `request.create` as Dr. Hofer, the links from the `pnpm dev` log, the logins and uploads in a browser, then `pnpm validate` and `pnpm audit:check`. We repeat them on the frozen build. [Whitepaper](docs/WHITEPAPER.md#how-we-measure-the-metrics) has the method in full.
+We measure the four track metrics on the scenario. `pnpm scenario` is meant to run it against the running stack, but its steps have no code yet that drives the flow, so it reports them as blocked. The results below come from one run by hand on `main` at commit `06abdc9`, on 30 October 2026: `pnpm reset`, the requests created as Dr. Hofer by a script that makes the same `request.create` call as the widget's form, the links from the `pnpm dev` log, the logins and uploads in a browser, then `pnpm validate` and `pnpm audit:check`. [Whitepaper](docs/WHITEPAPER.md#how-we-measure-the-metrics) has the method in full.
 
 | Metric | Target | How we measure | Result |
 |---|---|---|---|
-| FHIR validation | 0 errors | Run the HL7 validator (`-version 4.0`) on every resource filed during a scenario run and count issues with severity `error` or `fatal`. `pnpm validate` runs the same check on its own. | **0 errors** in the 18 resources filed for the lab result and the rehab report (HL7 validator 7.0.3). 16 warnings, all `dom-6`: a resource should have a narrative, a best-practice recommendation. |
-| Effort for the outside person | 0 installs, 0 accounts, under 2 minutes | Someone new answers request 1 with a stopwatch running from opening the email in Mailpit to pressing send. The audit timestamps from `link_opened` to `answer_sent` confirm the time. ID Austria counts as an existing state ID, not as an account with us. | Not measured yet: ordy does not send the email yet, and the stopwatch test with someone new ([protocol](docs/clinical-review/TIMED_TEST_20.md)) is not done. The run by hand needed no install and no account with us. |
-| Misdeliveries caught | 3 of 3 | Run M1, M2, and M3 from [`misdelivery.md`](track/scenario/misdelivery.md) with request 1. M2 and M3 run on request 1 itself. M1 sends request 1 to the mistyped address, which makes it a request of its own. Each must show the outcome the test names and a `misdelivery_caught` audit entry. | **3 of 3.** M1: the address warning held the request; after **Send anyway**, `anna.huber` was refused at login. M2: `thomas.wagner` was refused at login. M3: Max Beispiel's result was not filed, and Dr. Hofer got a notice in the room. Each wrote `misdelivery_caught`. |
-| Audit coverage | 6 of 6 on request 1 | Check that request 1 has all six event types, each with who, what, and when: `request_sent`, `link_opened`, `identity_checked`, `answer_sent`, `answer_filed`, `misdelivery_caught`. `pnpm audit:check` lists them per request. | **6 of 6** on request 1 (`pnpm audit:check`). |
+| FHIR validation | 0 errors | Run the HL7 validator (`-version 4.0`) on every resource filed during a scenario run and count issues with severity `error` or `fatal`. `pnpm validate` runs the same check on its own. | **0 errors** in the 18 resources of the two filing Bundles, for the lab result and the rehab report (HL7 validator 7.0.3). 16 warnings, all `dom-6`: a resource should have a narrative, a best-practice recommendation. |
+| Effort for the outside person | 0 installs, 0 accounts, under 2 minutes | Someone new answers request 1 with a stopwatch running from opening the email to pressing send. The audit timestamps from `link_opened` to `answer_sent` confirm the time. ID Austria counts as an existing state ID, not as an account with us. | Not measured yet: ordy does not send the email yet, and the stopwatch test with someone new ([protocol](docs/clinical-review/TIMED_TEST_20.md)) is not done. The team's run by hand needed no install and no account with us. |
+| Misdeliveries caught | 3 of 3 | Run M1, M2, and M3 from [`misdelivery.md`](track/scenario/misdelivery.md) with request 1. M2 and M3 run on request 1 itself. M1 sends request 1 to the mistyped address, which makes it a request of its own. Each must show the outcome the test names and a `misdelivery_caught` audit entry. | **3 of 3.** M1: the address warning held the request; after **Send anyway**, `anna.huber` saw only Dr. Hofer and the clinic, was refused at login, and could not answer, and `identity_checked` with `fail` is in the log. M2: `thomas.wagner` was refused at login. M3: Max Beispiel's result was not filed, and Dr. Hofer got a notice in the room. Each wrote `misdelivery_caught`. |
+| Audit coverage | 6 of 6 on request 1 | Check that request 1 has all six event types, each with who, what, and when: `request_sent`, `link_opened`, `identity_checked`, `answer_sent`, `answer_filed`, `misdelivery_caught`. `pnpm audit:check` lists them per request. | **6 of 6** on request 1 (`pnpm audit:check`). `request_sent` is written when ordy creates the request and its link; the email itself is not sent yet. |
 
 ## Documents
 
