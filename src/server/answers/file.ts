@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, DrizzleQueryError, eq } from "drizzle-orm";
 import { decodeJwt } from "jose";
 
 import { SERVICE_ACTOR, recordAudit } from "@/server/audit/record";
@@ -14,6 +14,15 @@ import type { AnswerDeps } from "./deps";
 import { type AnswerToFile, type FileableDocument, type KeptAnswer, NotFiled, type Sender } from "./ports";
 
 // Shared by a new answer (submit.ts) and an accepted held answer (held.ts): who is who, and the filing itself.
+
+/**
+ * An error as the log and the caller may see it. A database error's message lists the query's parameters, here the
+ * document text and the raw ID token, so only its Postgres code is kept.
+ */
+export function logReason(error: unknown): string {
+  if (error instanceof DrizzleQueryError) return `a database query failed (${error.cause && "code" in error.cause ? String(error.cause.code) : "no code"})`;
+  return error instanceof Error ? `${error.name}: ${error.message}` : "unknown error";
+}
 
 /** The person responsible for the content: `Validated by` for a lab result, `Written by` for a rehab report. */
 export const responsiblePerson = (doc: FileableDocument): PersonLine | null => (doc.type === "lab-result" ? doc.validatedBy : doc.writtenBy);
@@ -43,8 +52,10 @@ export function filedNotice({ answer }: Filed, patient: string): Notice {
   const doc = answer.document;
   const sender = displayName(answer.sender);
   if (doc.type === "rehab-report") return { kind: "filed", docType: "rehab-report", patient, sender };
-  const outside = doc.rows.filter((row) => row.interpretation === "H" || row.interpretation === "L").length;
-  return { kind: "filed", docType: "lab-result", patient, sender, values: { within: doc.rows.length - outside, outside } };
+  // Only a value the parser placed in its range counts as within. One without a range is flagged with the outside ones,
+  // so the notice never says "all within" for a value nobody checked.
+  const within = doc.rows.filter((row) => row.interpretation === "N").length;
+  return { kind: "filed", docType: "lab-result", patient, sender, values: { within, outside: doc.rows.length - within } };
 }
 
 /** `Practitioner/12` becomes `12`. */
@@ -73,10 +84,10 @@ const toKept = ({ document, requester, sender, author, organisation, idToken, se
  * waits and then finds the request filed. `build` gets the locked request and the Practitioner id the `bindings` table
  * remembers for the bound person.
  *
- * docs/FHIR.md, "Retries": for `answer_confirmed`, a kept answer goes first and is filed exactly as it was kept; `build`
- * is then not called. When the filing fails with an unknown outcome, the answer is kept while the row is still locked,
- * so no other upload gets in between. When the FHIR server certainly has nothing (NotFiled), the kept answer is dropped,
- * and the next upload is a new answer. A held answer that Accept files is kept in `held_answers` anyway.
+ * docs/FHIR.md, "Retries": a kept answer goes first and is filed exactly as it was kept; `build` is then not called.
+ * When the filing fails with an unknown outcome, the answer is kept while the row is still locked, so no other upload
+ * or Accept gets in between. When the FHIR server certainly has nothing (NotFiled), the kept answer is dropped, and the
+ * next upload or Accept builds the answer anew.
  *
  * Returns null when the request no longer accepts `event`, for example because Dr. Hofer cancelled it in between.
  * Throws when the filing fails; the request then stays as it was.
@@ -91,7 +102,7 @@ export async function fileAndRecord(
   const result = await deps.db.transaction(async (outer): Promise<{ filed: Filed | null } | { error: unknown }> => {
     // Locked outside the event's savepoint, so the lock outlasts a failed filing until the answer is kept.
     await outer.select({ id: requests.id }).from(requests).where(eq(requests.id, requestId)).for("update");
-    const [kept] = event === "answer_confirmed" ? await outer.select().from(keptAnswers).where(eq(keptAnswers.requestId, requestId)) : [];
+    const [kept] = await outer.select().from(keptAnswers).where(eq(keptAnswers.requestId, requestId));
     let answer: AnswerToFile | undefined;
     try {
       const request = await applyEvent(outer, requestId, event, async (tx, locked) => {
@@ -107,7 +118,8 @@ export async function fileAndRecord(
           requestId,
           actor: SERVICE_ACTOR,
           outcome: "filed",
-          detail: { ...filed, ...(acceptedBy && { acceptedBy }) },
+          // The upload's hash says which upload was filed, also when a kept answer was filed on a later send.
+          detail: { ...filed, sha256: answer.uploadSha256, ...(acceptedBy && { acceptedBy }) },
         });
         // docs/IDENTITY.md, "Person number binding": the first filed answer binds the person number to the requested name.
         // The Practitioner id is kept only for people the eHVD does not list; the others are found by their eHVD OID.
@@ -127,7 +139,7 @@ export async function fileAndRecord(
       return { filed: request && answer ? { request, answer } : null };
     } catch (error) {
       if (error instanceof TransitionError) return { filed: null };
-      if (event === "answer_confirmed" && answer) {
+      if (answer) {
         if (error instanceof NotFiled) await outer.delete(keptAnswers).where(eq(keptAnswers.requestId, requestId));
         else {
           const value = toKept(answer);

@@ -6,13 +6,15 @@ import { type AnswerContext, findAnswerContext } from "./data";
 /**
  * What GET /r/{token}/answer shows. Only `answer` carries the patient and the document type.
  * - `login`: no session for this link yet, so back to the landing page and its login button.
- * - `held`: the request waits for Dr. Hofer. `filed`: the answer is filed, thank you.
+ * - `held`: the answer waits for Dr. Hofer. `identity_held`: the login waits for her, so the held page.
+ * - `filed`: the answer is filed, thank you.
  * - `closed`: "This link does not work", also for a session of someone the request is not bound to.
  */
 export type AnswerPage =
   | { page: "login" }
   | { page: "answer"; context: AnswerContext }
   | { page: "held" }
+  | { page: "identity_held" }
   | { page: "filed" }
   | { page: "closed" };
 
@@ -29,6 +31,7 @@ export async function loadAnswerPage(token: string, session: EidSession | null):
       return context ? { page: "answer", context } : { page: "closed" };
     }
     case "identity_held":
+      return { page: "identity_held" };
     case "answer_held":
       return { page: "held" };
     case "filed":

@@ -388,8 +388,8 @@ Dr. Brandl logs in and uploads `lab-result-max-beispiel.md`, a result for Max Be
 
 1. The parser reads "Max Beispiel" and 1960-01-01 from the document.
 2. The patient check fails. Neither the birth date nor the given name matches Maria Beispiel.
-3. Nothing is filed. Dr. Brandl sees "This document is about a different patient. Check the file and upload again." The request stays `verified`, so she can upload the right file. If only the name or birth date she typed is wrong, she sees "The name or birth date you entered does not match the patient of this request. Check them and send again." instead, and the same entry and message go to the audit log and to Dr. Hofer.
-4. The audit log has `answer_sent` with the upload's hash, then `misdelivery_caught` with `patient_mismatch`, the same hash, and `nameMatches` and `birthDateMatches`. Dr. Hofer gets a Matrix message that names Maria and does not name Max.
+3. Nothing is filed. Dr. Brandl sees "This document is about a different patient. Check the file and upload again." The request stays `verified`, so she can upload the right file. If the document is right and only the name or birth date she typed is wrong, she sees "The name or birth date you entered does not match the patient of this request. Check them and send again." instead. Nothing was misdelivered then, so neither the audit log beyond `answer_sent` nor Dr. Hofer hears of it.
+4. The audit log has `answer_sent` with the upload's hash, then `misdelivery_caught` with `patient_mismatch`, the same hash, and `nameMatches` and `birthDateMatches` for the document. Dr. Hofer gets a Matrix message that names Maria and does not name Max.
 5. The request service discards the upload and keeps only its SHA-256 hash.
 
 ```ts

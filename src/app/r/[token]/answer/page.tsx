@@ -38,6 +38,8 @@ async function Answer({ params }: { params: PageProps<"/r/[token]/answer">["para
           <LinkClosed />
         </PortalFrame>
       );
+    case "identity_held":
+      redirect(`${landing}/held`);
     case "held":
       return (
         <PortalFrame>

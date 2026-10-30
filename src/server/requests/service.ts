@@ -5,7 +5,7 @@ import { type AuditActor, type AuditEntry, recordAudit } from "@/server/audit/re
 import type { Db, Tx } from "@/server/db";
 import { bindings, heldAnswers, keptAnswers, requests } from "@/server/db/schema";
 import type { LoginTransition } from "@/server/identity/login";
-import { initialState, MAX_FAILED_CHECKS, OPEN_STATES, type RequestEvent, transition, TransitionError } from "./lifecycle";
+import { initialState, isOpen, MAX_FAILED_CHECKS, OPEN_STATES, type RequestEvent, transition, TransitionError } from "./lifecycle";
 import { hashLinkToken, isLinkToken, LINK_TTL_MS, newLinkToken } from "./link-token";
 
 // Reads and state changes of requests. Every caller goes through here: the tRPC router, the portal pages, and later the login and filing.
@@ -88,7 +88,8 @@ export async function sendAnyway(db: Db, id: number, actor: AuditActor) {
 export async function expireDueRequests(db: Db | Tx, id?: number): Promise<number[]> {
   const expired = await db
     .update(requests)
-    .set({ state: "expired" })
+    // The ID token has done its work once the request is closed: a filed answer carries it in the Provenance.
+    .set({ state: "expired", idToken: null })
     .where(and(inArray(requests.state, OPEN_STATES), lte(requests.expiresAt, new Date()), id === undefined ? undefined : eq(requests.id, id)))
     .returning({ id: requests.id });
   const ids = expired.map((r) => r.id);
@@ -156,9 +157,14 @@ export async function applyEvent(
     const [updated] = await tx.update(requests).set({ state }).where(eq(requests.id, id)).returning();
     const result = (await then?.(tx, updated)) ?? updated;
     // A held answer lives only while the request is `answer_held`: Accept files it, Reject, Cancel, and expiry drop it.
-    // A kept answer lives only while it is `verified`: filing it ends that, and so do Cancel and expiry.
+    // A kept answer lives while an upload or an Accept may still file it: filing ends that, and so do Cancel and expiry.
     if (state !== "answer_held") await tx.delete(heldAnswers).where(eq(heldAnswers.requestId, id));
-    if (state !== "verified") await tx.delete(keptAnswers).where(eq(keptAnswers.requestId, id));
+    if (state !== "verified" && state !== "answer_held") await tx.delete(keptAnswers).where(eq(keptAnswers.requestId, id));
+    // A closed request needs no ID token any more; a filed answer carries it in the Provenance.
+    if (!isOpen(state)) {
+      await tx.update(requests).set({ idToken: null }).where(eq(requests.id, id));
+      return { ...result, idToken: null };
+    }
     return result;
   });
 }

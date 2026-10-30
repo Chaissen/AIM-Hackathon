@@ -5,6 +5,8 @@ CREATE TABLE "held_answers" (
 	"sender" jsonb NOT NULL,
 	"id_token" text NOT NULL,
 	"reason" text NOT NULL,
+	"organisation_oid" text,
+	"practitioner_oid" text,
 	"sent_at" timestamp with time zone NOT NULL
 );
 --> statement-breakpoint

@@ -31,10 +31,17 @@ type EhvdEntry = { id: { id: string } };
  * eHVD does not confirm, an unreachable eHVD included, is a hold, and the answer waits for Dr. Hofer.
  */
 export type ReleaseCheckResult =
-  /** `practitioner` is the responsible person's entry, `organisation` the organisation's. */
-  | { verdict: "pass"; via: "claim" | "search"; practitioner: EhvdEntry; organisation: EhvdEntry }
-  /** `sentence` goes into the held notice, for example "The eHVD does not list Dr. Eva Brandl as a member of Labor Kanalstraße." */
-  | { verdict: "hold"; reason: string; sentence: string };
+  /**
+   * `practitioner` is the responsible person's entry, `organisation` the organisation's. `senderIsResponsible`: the
+   * login carries the responsible person's name, always so through the claim.
+   */
+  | { verdict: "pass"; via: "claim" | "search"; practitioner: EhvdEntry; organisation: EhvdEntry; senderIsResponsible: boolean }
+  /**
+   * `sentence` goes into the held notice, for example "The eHVD does not list Dr. Eva Brandl as a member of Labor
+   * Kanalstraße." `organisation` and `practitioner` are what the check found before it held, or null; the
+   * practitioner always carries the responsible person's name. Accept files with their OIDs.
+   */
+  | { verdict: "hold"; reason: string; sentence: string; organisation: EhvdEntry | null; practitioner: EhvdEntry | null };
 
 export type ReleaseCheck = (input: ReleaseCheckInput) => Promise<ReleaseCheckResult>;
 
@@ -43,6 +50,8 @@ export const releaseCheckNotConnected: ReleaseCheck = async () => ({
   verdict: "hold",
   reason: "ehvd_unreachable",
   sentence: "The eHVD release check is not connected yet, so ordy could not confirm who released the document.",
+  organisation: null,
+  practitioner: null,
 });
 
 export type AnswerToFile = {
@@ -86,7 +95,7 @@ export class NotFiled extends Error {}
 export type FileAnswer = (answer: AnswerToFile) => Promise<AnswerFiled>;
 
 /** The references the clinical resources point at: `MapContext` in the FHIR mappers (#10). */
-export type ClinicalContext = { patient: Reference; organization: Reference; practitioner: Reference | null };
+export type ClinicalContext = { patient: Reference; organization: Reference; practitioner: Reference };
 
 /**
  * The clinical resources of one answer: `mapLabResult` (T12) or `mapRehabReport` (T14) from `src/server/fhir/mappers.ts`

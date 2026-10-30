@@ -1,5 +1,5 @@
 {
-  "id": "612c2d00-e048-4474-b7f0-02a14e0182ce",
+  "id": "f92b9a01-4448-4ec1-89e1-3e6f0223c85f",
   "prevId": "5526b018-f58e-4def-9f7d-453e0bc51950",
   "version": "7",
   "dialect": "postgresql",
@@ -167,6 +167,18 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "organisation_oid": {
+          "name": "organisation_oid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "practitioner_oid": {
+          "name": "practitioner_oid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "sent_at": {
           "name": "sent_at",

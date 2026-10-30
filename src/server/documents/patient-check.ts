@@ -23,26 +23,22 @@ export function samePatient(docName: string, docBirthDate: string, patient: Expe
 }
 
 /**
- * Which part of the patient did not match, in the document or in the form, for `misdelivery_caught`.
- * Only booleans: the audit log never holds the other patient's name or birth date.
+ * Which part of the document's patient did not match, for `misdelivery_caught`. Only booleans: the audit log never
+ * holds the other patient's name or birth date.
  */
-export function patientMismatch(
-  document: { name: string; birthDate: string },
-  form: { name: string; birthDate: string },
-  patient: ExpectedPatient,
-): { nameMatches: boolean; birthDateMatches: boolean } {
-  const birthDate = (date: string) => Boolean(patient.birthDate) && date === patient.birthDate;
+export function patientMismatch(document: { name: string; birthDate: string }, patient: ExpectedPatient): { nameMatches: boolean; birthDateMatches: boolean } {
   return {
-    nameMatches: samePatientName(document.name, patient) && samePatientName(form.name, patient),
-    birthDateMatches: birthDate(document.birthDate) && birthDate(form.birthDate),
+    nameMatches: samePatientName(document.name, patient),
+    birthDateMatches: Boolean(patient.birthDate) && document.birthDate === patient.birthDate,
   };
 }
 
 export type PatientCheck = { pass: boolean; document: boolean; form: boolean };
 
 /**
- * Both checks together. On `pass: false` the request service files nothing, discards the upload,
- * keeps only `uploadHash()` in the audit log (`misdelivery_caught`, `patient_mismatch`), and tells Dr. Hofer.
+ * Both checks together. The request service files only on `pass`. When the document fails, it discards the upload,
+ * keeps only `uploadHash()` in the audit log (`misdelivery_caught`, `patient_mismatch`), and tells Dr. Hofer. When only
+ * the form fails, the sender corrects it.
  */
 export function checkAnswerPatient(
   document: { name: string; birthDate: string },

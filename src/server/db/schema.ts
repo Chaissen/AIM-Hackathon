@@ -80,6 +80,10 @@ export const heldAnswers = pgTable("held_answers", {
   idToken: text("id_token").notNull(),
   // The sentence Dr. Hofer got with the held notice.
   reason: text("reason").notNull(),
+  // What the release check found before it held: the organisation's and the responsible person's eHVD OIDs, or null.
+  // Accept files with them, so the Organization and the Practitioner are the ones the eHVD lists.
+  organisationOid: text("organisation_oid"),
+  practitionerOid: text("practitioner_oid"),
   // When the sender pressed send.
   sentAt: timestamp("sent_at", { withTimezone: true }).notNull(),
 });

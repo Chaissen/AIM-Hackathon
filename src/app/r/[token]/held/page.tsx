@@ -6,8 +6,8 @@ export default function HeldPage() {
   return (
     <PortalFrame>
       <PortalMessage title="This request needs a check">
-        The person who sent it checks your login first and contacts you. Nothing was shared with you yet. You can close this
-        page.
+        The person who sent it checks it first and contacts you if needed. You do not need to do anything else. You can
+        close this page.
       </PortalMessage>
     </PortalFrame>
   );

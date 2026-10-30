@@ -11,11 +11,11 @@ import type { PersonLine } from "@/server/documents/types";
 import { TransitionError } from "@/server/requests/lifecycle";
 import { applyEvent, findRequestByToken, type RequestRow } from "@/server/requests/service";
 import type { AnswerDeps, RequestedPatient } from "./deps";
-import { type Filed, fileAndRecord, filedNotice, idTokenPersonNumber, isSender, requesterPerson, responsiblePerson } from "./file";
+import { type Filed, fileAndRecord, filedNotice, idTokenPersonNumber, logReason, requesterPerson, responsiblePerson } from "./file";
 import { type AnswerToFile, type FileableDocument, NotFiled, type ReleaseCheckResult, type Sender } from "./ports";
 
-// POST /r/{token}/answer (docs/ARCHITECTURE.md, "Outside portal"): `answer_sent`, parse, patient check, release check,
-// then file and `answer_filed`, or hold for Dr. Hofer. The uploader learns only what they can act on.
+// `portal.answer`, the answer page's upload (docs/ARCHITECTURE.md, "The answer"): `answer_sent`, parse, patient check,
+// release check, then file and `answer_filed`, or hold for Dr. Hofer. The uploader learns only what they can act on.
 
 /** The scenario documents are about 2 KB. A larger upload is not a document from a lab or a rehab clinic. */
 export const MAX_UPLOAD_BYTES = 512 * 1024;
@@ -33,6 +33,8 @@ export type AnswerUpload = {
  * What the sender sees.
  * - `filed`: on the FHIR server. `held`: Dr. Hofer decides first. Both end the answer.
  * - `patient_mismatch`: the document (`part: "document"`) or the typed name and birth date are about someone else.
+ * - `earlier_answer`: an earlier upload's filing outcome was open, so that one was filed again (`filed`) or is still
+ *   open; this upload was not read.
  * - `unreadable`: reasons the sender can fix, then upload again.
  * - `not_filed`: not filed yet. The FHIR server refused it, or its outcome is unknown and the answer is kept, so the
  *   next send files that answer again (docs/FHIR.md, "Retries").
@@ -43,6 +45,7 @@ export type AnswerOutcome =
   | { outcome: "filed" }
   | { outcome: "held" }
   | { outcome: "patient_mismatch"; part: "document" | "form" }
+  | { outcome: "earlier_answer"; filed: boolean }
   | { outcome: "unreadable"; errors: string[] }
   | { outcome: "not_filed" }
   | { outcome: "login_again" }
@@ -55,10 +58,14 @@ const unreadable = (...errors: string[]): AnswerOutcome => ({ outcome: "unreadab
 export const answersFor = (request: RequestRow | null, session: EidSession): request is RequestRow =>
   request?.id === session.requestId && request.state === "verified" && !!request.personNumber && request.personNumber === session.personNumber;
 
-/** Only UTF-8 text. The parser would read a binary file as nonsense. */
+/**
+ * Only UTF-8 text without control characters other than tab and line breaks. The parser would read a binary file as
+ * nonsense, and Postgres refuses a NUL character in text.
+ */
 function decodeText(bytes: Uint8Array): string | null {
   try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(text) ? null : text;
   } catch {
     return null;
   }
@@ -69,16 +76,23 @@ async function releaseCheck(deps: AnswerDeps, document: FileableDocument, sender
   try {
     return await deps.releaseCheck({ document, org: request.org, sender });
   } catch (error) {
-    console.error(`release check for request ${request.id} failed:`, error instanceof Error ? error.message : error);
-    return { verdict: "hold", reason: "ehvd_unreachable", sentence: "The eHVD could not be reached to confirm who released the document." };
+    console.error(`release check for request ${request.id} failed: ${logReason(error)}`);
+    return {
+      verdict: "hold",
+      reason: "ehvd_unreachable",
+      sentence: "The eHVD could not be reached to confirm who released the document.",
+      organisation: null,
+      practitioner: null,
+    };
   }
 }
 
 /** An earlier answer is kept because its filing outcome is unknown, so it goes first (docs/FHIR.md, "Retries"). */
 class KeptFirst extends Error {}
 
-const hasKeptAnswer = async (db: Db | Tx, requestId: number) =>
-  (await db.select({ requestId: keptAnswers.requestId }).from(keptAnswers).where(eq(keptAnswers.requestId, requestId))).length > 0;
+/** The upload hash of the kept answer, if there is one. */
+const keptUpload = async (db: Db | Tx, requestId: number) =>
+  (await db.select({ answer: keptAnswers.answer }).from(keptAnswers).where(eq(keptAnswers.requestId, requestId)))[0]?.answer.uploadSha256 ?? null;
 
 /**
  * Files with `answer_confirmed`, or files the kept answer again when there is one. `build` is null when the kept
@@ -89,7 +103,7 @@ async function fileConfirmed(
   request: RequestRow,
   patient: RequestedPatient,
   build: ((locked: RequestRow, knownPractitioner: string | null) => Omit<AnswerToFile, "request">) | null,
-): Promise<AnswerOutcome> {
+): Promise<Extract<AnswerOutcome, { outcome: "filed" | "not_filed" | "closed" }>> {
   const noAnswer = () => {
     throw new NotFiled("The kept answer was filed or dropped in between");
   };
@@ -97,11 +111,10 @@ async function fileConfirmed(
   try {
     filed = await fileAndRecord(deps, request.id, "answer_confirmed", build ?? noAnswer);
   } catch (error) {
-    // The message only: a FHIR error body could echo the document.
-    console.error(`filing the answer to request ${request.id} failed:`, error instanceof Error ? error.message : error);
+    console.error(`filing the answer to request ${request.id} failed: ${logReason(error)}`);
     return { outcome: "not_filed" };
   }
-  if (!filed) return CLOSED;
+  if (!filed) return { outcome: "closed" };
   await deps.notify(filed.request, filedNotice(filed, patient.display));
   return { outcome: "filed" };
 }
@@ -128,7 +141,13 @@ export async function submitAnswer(deps: AnswerDeps, upload: AnswerUpload): Prom
   await recordAudit(db, { event: "answer_sent", requestId: request.id, actor, outcome: "received", detail: { sha256, size } });
 
   // While an earlier answer may be on the FHIR server, this upload is not read, and the earlier answer is filed again.
-  if (await hasKeptAnswer(db, request.id)) return fileConfirmed(deps, request, await deps.readPatient(request.patientId), null);
+  const kept = await keptUpload(db, request.id);
+  if (kept) {
+    const result = await fileConfirmed(deps, request, await deps.readPatient(request.patientId), null);
+    // The same file again is a plain retry. Another file is not read, and the sender learns that.
+    if (kept === sha256 || result.outcome === "closed") return result;
+    return { outcome: "earlier_answer", filed: result.outcome === "filed" };
+  }
 
   if (size > MAX_UPLOAD_BYTES) return unreadable(`The file is larger than ${MAX_UPLOAD_BYTES / 1024} KB. Upload the document as Markdown or text.`);
   const markdown = decodeText(upload.file);
@@ -139,7 +158,10 @@ export async function submitAnswer(deps: AnswerDeps, upload: AnswerUpload): Prom
 
   const patient = await deps.readPatient(request.patientId);
   const check = checkAnswerPatient(doc.patient, upload.form, patient);
-  if (!check.pass) {
+  // The document is about the patient, only the typed name or birth date is not: nothing was misdelivered, so the
+  // sender corrects the form, and neither the audit log nor Dr. Hofer hears of it beyond `answer_sent`.
+  if (check.document && !check.form) return { outcome: "patient_mismatch", part: "form" };
+  if (!check.document) {
     // docs/IDENTITY.md, M3: nothing is filed, the upload is discarded, only its hash and which part did not match stay.
     try {
       await applyEvent(db, request.id, "patient_mismatch", (tx) =>
@@ -148,7 +170,7 @@ export async function submitAnswer(deps: AnswerDeps, upload: AnswerUpload): Prom
           requestId: request.id,
           actor,
           outcome: "patient_mismatch",
-          detail: { sha256, size, ...patientMismatch(doc.patient, upload.form, patient) },
+          detail: { sha256, size, ...patientMismatch(doc.patient, patient) },
         }).then(() => undefined),
       );
     } catch (error) {
@@ -156,7 +178,7 @@ export async function submitAnswer(deps: AnswerDeps, upload: AnswerUpload): Prom
       throw error;
     }
     await deps.notify(request, { kind: "patient-mismatch", requestId: request.id, patient: patient.display });
-    return { outcome: "patient_mismatch", part: check.document ? "form" : "document" };
+    return { outcome: "patient_mismatch", part: "document" };
   }
 
   if (doc.type !== request.docType) {
@@ -170,12 +192,13 @@ export async function submitAnswer(deps: AnswerDeps, upload: AnswerUpload): Prom
 
   if (release.verdict === "hold" || !responsible) {
     const reason = release.verdict === "hold" ? release.sentence : "The document names nobody responsible for its content.";
+    const found = { organisationOid: release.organisation?.id.id ?? null, practitionerOid: release.verdict === "hold" ? (release.practitioner?.id.id ?? null) : null };
     // docs/IDENTITY.md, "Block or hold": the right person answered, so keep the answer and let Dr. Hofer decide.
     try {
       await applyEvent(db, request.id, "answer_unconfirmed", async (tx) => {
         // An upload at the same time may have been kept in between; it goes first.
-        if (await hasKeptAnswer(tx, request.id)) throw new KeptFirst();
-        const held = { markdown, sha256, sender, idToken, reason, sentAt };
+        if (await keptUpload(tx, request.id)) throw new KeptFirst();
+        const held = { markdown, sha256, sender, idToken, reason, sentAt, ...found };
         await tx
           .insert(heldAnswers)
           .values({ requestId: request.id, ...held })
@@ -192,7 +215,7 @@ export async function submitAnswer(deps: AnswerDeps, upload: AnswerUpload): Prom
 
   // A pass found the responsible person in the eHVD. Through the login's OID that is the sender; by name, it is the
   // sender only if the names match, as for Dr. Brandl, and otherwise someone else, as Dr. Leitner for Stefan Kern.
-  const authorIsSender = release.via === "claim" || isSender(responsible, sender);
+  const authorIsSender = release.senderIsResponsible;
   const responsibleOid = release.practitioner.id.id;
   return fileConfirmed(deps, request, patient, (locked, knownPractitioner) => ({
     document: doc,

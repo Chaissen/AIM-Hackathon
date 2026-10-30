@@ -20,7 +20,7 @@ import { type AnswerToFile, type MapClinical, mapClinicalNotConnected, NotFiled,
 import { submitAnswer } from "./submit";
 
 // Requests 1 and 2 from the upload to the HAPI server from FHIR_BASE_URL, through the filing (T13). The eHVD and the
-// mappers (#30) are stand-ins until they land. Deletes its rows and what it filed afterwards. Skipped when Postgres or
+// mappers (#30) are stand-ins until they land. The patient is the demo's Maria Beispiel; everything else is this run's. Deletes its rows and what it filed afterwards. Skipped when Postgres or
 // HAPI is not running.
 const unreachable = await Promise.all([db.execute(sql`select 1`), capabilities(AbortSignal.timeout(3000))]).then(
   () => false,
@@ -31,8 +31,15 @@ const doc = (file: string) => new Uint8Array(readFileSync(new URL(`../../../trac
 const maria = { name: "Maria Beispiel", birthDate: "1961-03-12" };
 const run = randomBytes(4).toString("hex");
 
-// The synthetic eHVD entries from docs/EHVD.md.
-const OID = { brandl: "1.2.40.0.34.3.2.99.1.2", leitner: "1.2.40.0.34.3.2.99.1.3", lab: "1.2.40.0.34.3.1.99.1.2", rehab: "1.2.40.0.34.3.1.99.1.3" };
+// Below the synthetic eHVD entries from docs/EHVD.md, with an arc of this run, so the Practitioners and Organizations
+// this test files and deletes are never the demo's.
+const arc = `.${randomBytes(4).readUInt32BE()}`;
+const OID = {
+  brandl: `1.2.40.0.34.3.2.99.1.2${arc}`,
+  leitner: `1.2.40.0.34.3.2.99.1.3${arc}`,
+  lab: `1.2.40.0.34.3.1.99.1.2${arc}`,
+  rehab: `1.2.40.0.34.3.1.99.1.3${arc}`,
+};
 const EVA = { givenName: "Eva", familyName: "Brandl", personNumber: `GH:test-eva-${run}`, gdaOid: OID.brandl };
 const STEFAN = { givenName: "Stefan", familyName: "Kern", personNumber: `GH:test-stefan-${run}`, gdaOid: null };
 
@@ -66,7 +73,7 @@ async function verifiedRequest(person: typeof EVA | typeof STEFAN, docType: NewR
       patientId: "maria-beispiel",
       given: person.givenName,
       family: person.familyName,
-      org,
+      org: `${org} test ${run}`,
       channel: "email",
       address: "someone@example.org",
       requester: "@lena.hofer:klinikum.example",
@@ -87,6 +94,7 @@ const confirmed = async ({ sender, document }: ReleaseCheckInput): Promise<Relea
   via: sender.gdaOid ? "claim" : "search",
   practitioner: { id: { id: document.type === "lab-result" ? OID.brandl : OID.leitner } },
   organisation: { id: { id: document.type === "lab-result" ? OID.lab : OID.rehab } },
+  senderIsResponsible: sender.gdaOid !== null,
 });
 
 /** Stand-in for the mappers (#30): the output alone, with the references the filing hands them. */

@@ -5,7 +5,7 @@ import { isTRPCClientError } from "@trpc/client";
 import { FileUp, Loader2, Lock } from "lucide-react";
 import { useRef, useState } from "react";
 
-import { AnswerFiled, AnswerHeld, LinkClosed } from "@/components/portal/answer-messages";
+import { AnswerFiled, AnswerHeld, EarlierAnswerFiled, LinkClosed } from "@/components/portal/answer-messages";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,9 +34,10 @@ export function AnswerForm({ token, requester, clinic }: { token: string; reques
   const [birthDate, setBirthDate] = useState("");
   const [drag, setDrag] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
-  const [done, setDone] = useState<"filed" | "held" | "closed" | null>(null);
+  const [done, setDone] = useState<"filed" | "earlier_filed" | "held" | "closed" | null>(null);
 
   if (done === "filed") return <AnswerFiled clinic={clinic} />;
+  if (done === "earlier_filed") return <EarlierAnswerFiled clinic={clinic} />;
   if (done === "held") return <AnswerHeld requester={requester} />;
   if (done === "closed") return <LinkClosed />;
 
@@ -61,6 +62,10 @@ export function AnswerForm({ token, requester, clinic }: { token: string; reques
           return setDone(result.outcome);
         case "patient_mismatch":
           return setProblem({ title: PATIENT_MISMATCH[result.part] });
+        case "earlier_answer":
+          // An earlier upload's filing outcome was open. Only that document can be filed, never a second one.
+          if (result.filed) return setDone("earlier_filed");
+          return setProblem({ title: "Your earlier document is still being filed. Send it again in a few minutes. The file you just chose was not read." });
         case "unreadable":
           return setProblem({ title: "We could not read this document.", details: result.errors });
         case "not_filed":
