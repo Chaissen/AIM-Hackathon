@@ -50,4 +50,3 @@ Run on 30 October 2026 against `parseDocument` from `main`, after PR #40, which 
 | Gap | Documents | Parser today | Expected |
 |---|---|---|---|
 | One-sided reference ranges | blood count (`< 5`), metabolic (`< 116`, `> 45`) | `low` and `high` null, no interpretation. CRP 14 and LDL 128 are not flagged. | `< x` gives only `high`, `> x` only `low`. `text` keeps the range as written. |
-| Units that are not UCUM | kidney (`µmol/L`), metabolic (`mIU/L`), Maria Anna Beispiel (`µg/dL`) | Passed through unchanged, so the validator reports an error | `umol/L`, `m[IU]/L`, `ug/dL`. `unitText` keeps the unit as written. |
