@@ -30,9 +30,9 @@ const markdownAttachment = (doc: ParsedDocument) => ({
 const emptyCells: LabRow = { ...aptt, test: "", ucum: null, unitText: "", low: null, high: null, rangeText: "", interpretation: null };
 const withRow = (row: LabRow) => mapLabResult({ ...labResultMaria, rows: [row] }, context).observations[0].resource;
 
-/** Paths of every null, empty string, empty array, or empty object, which FHIR JSON does not allow (`ele-1`). */
+/** Paths of every null, blank string, empty array, or empty object, which FHIR JSON does not allow (`ele-1`). */
 function emptyValues(value: unknown, path = "$"): string[] {
-  if (value === null || value === "") return [path];
+  if (value === null || (typeof value === "string" && !value.trim())) return [path];
   if (Array.isArray(value)) return value.length ? value.flatMap((v, i) => emptyValues(v, `${path}[${i}]`)) : [path];
   if (typeof value === "object") {
     const entries = Object.entries(value);
@@ -154,6 +154,8 @@ test("no mapper output carries an empty value", () => {
     mapLabResult(labResultMaria, context),
     mapLabResult(labResultMax, context),
     mapLabResult({ ...labResultMaria, conclusion: null, rows: [emptyCells] }, context),
+    // Two empty `##` headings give a conclusion of one space.
+    mapLabResult({ ...labResultMaria, conclusion: " " }, context),
     mapLabResult({ ...labResultMaria, rows: [{ ...emptyCells, unitText: "G/L", rangeText: "below 37" }] }, context),
     mapRehabReport(rehabReportMaria, context, filedAt),
     mapRehabReport({ ...rehabReportMaria, reason: null }, context, filedAt),

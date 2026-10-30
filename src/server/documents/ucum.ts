@@ -88,6 +88,8 @@ export function toUcum(unit: string): string | null {
     // Powers of ten: `10⁹` and `10^9` are `10*9`, and a leading `x` or `×` goes. The `x` step needs the `*` already there.
     .replace(POWER_OF_TEN, (_, power: string) => `10*${plain(power)}`)
     .replace(SUPERSCRIPTS, plain)
+    // Other powers are plain digits after the unit: `kg/m^2` is `kg/m2`, as `kg/m²` is.
+    .replace(/(?<=[A-Za-z])\^(?=\d)/g, "")
     .replace(/\^/g, "*")
     .replace(/^[xX×]\s*(?=10\*)/, "")
     // Atoms: micro is `u`, mercury and international units go in brackets, osmole is lower case.

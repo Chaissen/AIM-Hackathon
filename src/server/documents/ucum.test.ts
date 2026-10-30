@@ -32,6 +32,7 @@ test("toUcum codes the usual lab spellings in UCUM", () => {
     ["1/min", "/min"],
     ["µg/dL", "ug/dL"],
     ["kg/m²", "kg/m2"],
+    ["kg/m^2", "kg/m2"],
     [" s ", "s"],
     ["g/L", "g/L"],
   ];

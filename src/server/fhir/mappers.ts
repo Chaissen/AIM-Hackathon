@@ -51,13 +51,13 @@ const own = (reference: Reference): Reference => structuredClone(reference);
 type Draft<T> = { [K in keyof T]: undefined extends T[K] ? T[K] | null : T[K] };
 
 /**
- * Leaves out the elements that are null, undefined, or an empty string, because FHIR JSON allows no empty values
+ * Leaves out the elements that are null, undefined, or a string of only spaces, because FHIR JSON allows no empty values
  * (`ele-1`) and a jury document may leave a cell empty. Typed by the element, so a misspelled key fails the typecheck.
  * It works on one level and keeps empty arrays. Values that skip it, such as the title in `DiagnosticReport.code`,
  * the stay dates, and `result` (the parser refuses a table without rows), rely on the parser never leaving them empty.
  */
 const compact = <T extends object>(element: Draft<T>): T =>
-  Object.fromEntries(Object.entries(element).filter(([, value]) => value !== null && value !== undefined && value !== "")) as T;
+  Object.fromEntries(Object.entries(element).filter(([, value]) => value !== null && value !== undefined && !(typeof value === "string" && !value.trim()))) as T;
 
 const markdownAttachment = (doc: ParsedDocument, title?: string): Attachment =>
   compact<Attachment>({

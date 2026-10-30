@@ -210,7 +210,7 @@ If the parser cannot read a document, the AI fallback may read it. It follows on
 - The type comes from the kind in the heading: `lab report` and similar kinds give a lab result, `discharge report` and similar kinds give a rehab report. A table under any other kind gives no record.
 - Each key field comes only from its own keys, for example `Sample taken`, `Collected`, or `Collection date` for `sampleTaken`. A field found on two lines with different values gives no record.
 - Each lab field comes from the one column whose header names it, for example `Result` or `Value`, never `Previous`. A field with no such column, or with two, gives no record. Every body row becomes a lab row.
-- Ranges such as `0.8 to 1.2`, `0.8 - 1.2`, `25 – 37`, `25 — 37`, or `25 − 37` are read. A written range that cannot be read, such as `< 37` or `25 bis 37`, gives no record, so a value outside it never passes as normal. A result that is not a number, a LOINC code with a wrong check digit, or a vital sign row the parser refuses, gives no record either. Units get UCUM codes as in the parser (`rowUnit()` in `parse.ts`).
+- Ranges such as `0.8 to 1.2`, `0.8 - 1.2`, `25 – 37`, `25 — 37`, or `25 − 37` are read. A written range that cannot be read, such as `< 37` or `25 bis 37`, gives no record, so a value outside it never passes as normal. A result that is not a number, a LOINC code with a wrong check digit, or a vital sign row the parser refuses gives no record either. Units get UCUM codes as in the parser (`rowUnit()` in `parse.ts`).
 - The conclusion is all the free text, built the same way as in the parser, and the sections are the `##` sections.
 - Dates may also be written `12.03.1961`, `1961-03-12`, or `22.10.2026 08:10`.
 
