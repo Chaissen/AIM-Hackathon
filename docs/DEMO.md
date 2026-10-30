@@ -183,12 +183,12 @@ The script prints only request ids, states, and document types. At the end it ch
 
 ## The recorded video
 
-The finished video is [`docs/video/ordy-product-video.mp4`](video/ordy-product-video.mp4): 1 min 59.7 s, 1920x1080, 60 fps, with text overlays and no voice. A scripted browser recorded the running app on `main` at commit `5e75122` on 30 October 2026. It is a real run: the requests, logins, checks, and filing all happened as shown.
+The finished video is [`docs/video/ordy-product-video.mp4`](video/ordy-product-video.mp4): 1 min 59.6 s, with text overlays and no voice. A scripted browser recorded the running app on `main` at commit `f0abc21` on 30 October 2026. It is a real run: the requests, logins, checks, and filing all happened as shown.
 
 What differs from a plain run:
 
 - **Addresses.** For the recording, the eHVD mock and the form examples used `.at` addresses instead of the reserved `.example` domains, and the browser displayed `klinikum-beispielstadt.at` in place of `klinikum.example` and `localhost`. All these domains are fictional here. The code on `main` keeps `.example`.
-- **Added in the edit.** The browser frame and its address line, the cursor, the captions, the zooms, and the check animations. The music and sounds are synthetic.
-- **Order.** M2 ran on request 1 before the filing, as [Order of the story](#order-of-the-story) requires. The video shows M3 in the flow, and M1 and M2 after request 2, so the notices on screen already name Thomas Wagner before his scene.
+- **Added in the edit.** The browser frame and its address line, the cursor, the captions, the step indicator, the zooms, and the check panels. The panels restate the identity, patient, and release checks in plain words instead of showing the raw claims. The music and sounds are synthetic.
+- **Order.** The video shows the clean flow first, so it does not follow [Order of the story](#order-of-the-story). M2 and M3 ran on a separate lab request after request 1 was filed. M1 shows only the warning on screen; the run continued with "Send anyway" and a refused login, and that notice appears in the oversight shot.
 
-The numbers on its closing card, measured on the data of this recording: `pnpm validate` found 0 errors in 18 resources, `pnpm audit:check` found 6 of 6 event types on request 1. The closing card shows the status at 13:40 CET on that day, including "AI fallback parser: built, not connected" and "Stopwatch test with a new user: still open". If either changes, the card is out of date.
+Measured on the data of this recording: `pnpm validate` found 0 errors in 18 resources. `pnpm audit:check` found 5 of 6 event types on request 1, because of the order above. The 6 of 6 in the [README](../README.md) comes from a run with M2 and M3 on request 1, see [E2E_RUN.md](E2E_RUN.md). The closing card shows the status at 14:20 CET on that day, including "AI fallback not connected" and "Not tested with a new user yet". If either changes, the card is out of date.
