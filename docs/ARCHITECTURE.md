@@ -243,12 +243,12 @@ Every entry has a UTC timestamp in `at`. The `outcome` column holds the short re
 | `link_opened` | `state` |
 | `identity_checked` | `checks`, one entry per check with its result and reason |
 | `answer_sent` | `sha256`, `size` |
-| `answer_filed` | `output`, `targets`, `provenance`, `task`, `sender`, `author`, `organization`, and `resources` (every resource in the transaction as `Type/id`, which `pnpm validate` reads); `AnswerFiled` in `src/server/fhir/file-answer.ts` |
+| `answer_filed` | `resources` (every filed resource as `Type/id`, which `pnpm validate` reads), `provenance` |
 | `misdelivery_caught` | `address_mismatch`: `domain`, `expectedDomain`. `wrong_person`: `checks`. `patient_mismatch`: `sha256`, `size`, `nameMatches`, `birthDateMatches`. |
 
 The widget and `GET /audit` show the entries.
 
-`recordAudit()` in `src/server/audit/record.ts` writes the entries. Its types fix the outcome and the detail fields for each event and each misdelivery reason, and they hold ids, hashes, and check results only, never document text or the data of a wrong patient. An entry that belongs to a state change goes into the same transaction. `fileAnswer` in `src/server/fhir/file-answer.ts` (T13) still inserts `answer_filed` directly, with the same fields, until it switches to `recordAudit()`.
+`recordAudit()` in `src/server/audit/record.ts` writes the entries. Its types fix the outcome and the detail fields for each event and each misdelivery reason, and they hold ids, hashes, and check results only, never document text or the data of a wrong patient. An entry that belongs to a state change goes into the same transaction. `answer_filed` also names `output`, `targets`, `task`, `sender`, `author`, and `organization` (`AnswerFiled` in `src/server/fhir/file-answer.ts`). `fileAnswer` (T13) still inserts it directly until it switches to `recordAudit()`.
 
 The IP hash is an HMAC-SHA256 with a key derived from `ORDY_SECRET`, cut to 16 hex characters, because a plain hash of an IPv4 address can be reversed by trying all of them. Without a private `ORDY_SECRET`, the entry says `ip unknown` instead. Next.js fills `X-Forwarded-For` from the connection only when the client sent none. Without a proxy in front, the client can set it, so the hash is a hint, not proof.
 

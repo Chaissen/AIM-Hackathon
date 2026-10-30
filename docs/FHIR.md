@@ -221,7 +221,7 @@ The ID token is the proof of the identity check. Anyone can verify its signature
 | `restriction.period.end` | The link expiry |
 | `output` | The DiagnosticReport or the DocumentReference, once filed, with `type.text` "Lab result" or "Rehab discharge report" |
 
-The Task id is `ordy-request-<request id>`, and every write is a `PUT`, so the same Task follows the request from sent to filed. The filing Bundle PUTs it with status `completed` and the output. Its status comes from `taskStatus()` in `src/server/requests/lifecycle.ts`, the table in [Architecture](ARCHITECTURE.md#request-lifecycle). For the other state changes, `syncTask()` in `src/server/fhir/file-answer.ts` PUTs it; until the outside person has a Practitioner, `owner` is a reference with only `display`. Wiring `syncTask()` into the state changes belongs to the request core (T04).
+The Task id is `ordy-request-<request id>`, and every write is a `PUT`, so the same Task follows the request from sent to filed. The filing Bundle PUTs it with status `completed` and the output. Its status comes from `taskStatus()` in `src/server/requests/lifecycle.ts`, the table in [Architecture](ARCHITECTURE.md#request-lifecycle). For the other state changes, `syncTask()` in `src/server/fhir/file-answer.ts` PUTs it; until the outside person has a Practitioner, `owner` is a reference with only `display`. Wiring `syncTask()` into the request service's state changes is left for T09 (#13).
 
 The Task stays on the clinic's FHIR server. It is the only place outside the request service database where the request appears with its document type.
 
