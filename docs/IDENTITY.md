@@ -304,17 +304,19 @@ We do not need the person's birth date, their ID Austria number, or an account i
 
 Only the people who are professionally responsible for a document's content may release it. The sender can be someone else, for example discharge management. So the request service checks two people: the sender, with the identity checks above, and the person responsible for the content, with the release check below.
 
-This is our reading of Austrian law for a hackathon prototype, not legal advice. Doc 1 checks it.
+This is our reading of Austrian law for a hackathon prototype, not legal advice. Doc 1 checks it. The open questions and the recommended answers are in the [clinical review for issue #18](clinical-review/SIGNOFF_18_IDENTITY_AND_RELEASE.md). Until a clinician signs that file, the rules in this section are **pending clinical sign-off**.
 
 ### Legal basis
 
+We checked every row against the consolidated text in RIS on 30 October 2026. The corrections from that check are marked "pending clinical sign-off" below.
+
 | Rule | Source | What follows for ordy |
 |---|---|---|
-| Examining people for illnesses and assessing the results with medical diagnostic aids is reserved for physicians. | § 2 Abs 2 Z 1 and 2 ÄrzteG 1998 | A medical lab report and a discharge letter are physicians' documents. |
-| Specialists must limit their work to their specialty. | § 31 Abs 3 ÄrzteG 1998 | The releasing physician's specialty must cover the content. For lab reports, the specialty "Medizinische und Chemische Labordiagnostik" has the broadest authority. Other specialties may release only tests that belong to their training, for example microbiology. |
-| Biomedical scientists (BMA) may produce a "biomedical-analytical finding" on their own, after a medical order: plausibility checks, comparison with earlier values. Diagnoses and treatment recommendations stay with physicians. | §§ 4 Abs 2 Z 1 lit d, 5 Abs 1 MTD-Gesetz 2024; Stöger et al., RdM 2025/38 | A value released only by a BMA is a biomedically validated result, not a medical lab report. A comment such as "INR and aPTT are raised, as expected under anticoagulation" needs a physician. |
-| A lab that is an outpatient clinic must be run by a qualified physician. A lab in a hospital must be run by a specialist of the relevant specialty. That physician answers for the quality of all lab work. | §§ 7, 8 KAKuG and the state laws | The lab's medical lead is responsible even when someone else does the analysis. |
-| At discharge, a hospital writes a discharge letter with what further care needs. Rehab centres are special hospitals, so this applies to them too. | § 24 Abs 2 KAKuG | The discharge letter is the rehab clinic's medical document. The physician who signs it is responsible for it. Others may send it. |
+| Medical practice includes examining people for illnesses and assessing the results with medical diagnostic aids. Anyone other than a physician is forbidden to practise medicine. | § 2 Abs 2 Z 1 and 2 with § 3 Abs 4 ÄrzteG 1998 (pending clinical sign-off: § 3 Abs 4 added, because § 2 only describes the work and § 3 Abs 4 reserves it) | A medical lab report and a discharge letter are physicians' documents. |
+| Specialists must limit their work to their specialty. The exceptions (occupational medicine, emergency care, pandemics, vaccinations, and a few more) do not cover lab reports. What a specialty covers follows from its training content in the ÄAO 2015. | § 31 Abs 3 ÄrzteG 1998; ÄAO 2015, Anlage 19 and Anlage 12.5 | The releasing physician's specialty must cover the content. The lab specialty "Medizinische und Chemische Labordiagnostik" names medical validation ("ärztliche Vidierung") of lab reports and coagulation testing in its training content, so it covers a clotting panel without doubt. Internal medicine with haematology ("Innere Medizin und Hämatologie und internistische Onkologie") names the diagnosis of clotting disorders, so it may cover it too. Other specialties may release tests that belong to their training, for example microbiology. |
+| Biomedical scientists (BMA) may produce a "biomedical-analytical finding" on their own, after a medical order. Stöger et al. read that as plausibility checks and comparison with earlier values. Diagnoses and treatment recommendations stay with physicians. | §§ 4 Abs 2 Z 1 lit d, 5 Abs 1 MTD-Gesetz 2024; Stöger et al., RdM 2025/38 | A value released only by a BMA is a biomedically validated result, not a medical lab report. A comment such as "INR and aPTT are raised, as expected under anticoagulation" needs a physician. |
+| Every hospital, and so every independent outpatient clinic, has a suitable physician as the responsible medical lead. Labs inside a hospital may be led only by a specialist of the relevant specialty. A lab run as a doctor's practice or group practice falls under the ÄrzteG, not the KAKuG. | §§ 2 Abs 1 Z 5, 7 Abs 1 and 4 KAKuG, as carried out by the state hospital laws (pending clinical sign-off: § 8 removed, because it is about physicians being present, not about labs) | The lab's medical lead is responsible even when someone else does the analysis. |
+| At discharge, a hospital writes a discharge letter with what further care needs. Rehab centres are special hospitals, so this applies to them too. | § 24 Abs 2 and § 2 Abs 1 Z 2 KAKuG | The discharge letter is the rehab clinic's medical document. The physician who signs it is responsible for it. Others may send it. |
 | In ELGA, a lab report is the specialist-signed, commented or interpreted report. Its legal signer is typically the medical validator or the physician responsible for the lab. A medical discharge letter is signed by the responsible physician. | ELGA CDA guides "Laborbefund" v2.06.3 (3.3.4, 3.3.5) and "Entlassungsbrief (Ärztlich)" v2.06.5 | We treat the person named under `Validated by` or `Written by` as the legal signer and check them. |
 
 ### The release check
@@ -323,7 +325,7 @@ The release check runs when the answer arrives, after the patient check.
 
 | Document | Responsible for the content | Named in the document as | The eHVD must show |
 |---|---|---|---|
-| Lab result | A physician whose specialty covers the tests. For clotting, haematology, and clinical chemistry: a specialist in medical and chemical laboratory diagnostics. | `Validated by` | An active entry with `specialisation` `1.2.40.0.34.3.1.10.20:19`, member of the lab that sent the report |
+| Lab result | A physician whose specialty covers the tests. The release check confirms only a specialist in medical and chemical laboratory diagnostics, whose specialty covers every test in the scenario. Another specialty, such as a haematologist for a clotting panel, is held for Dr. Hofer, not blocked (pending clinical sign-off). | `Validated by` | An active entry with `specialisation` `1.2.40.0.34.3.1.10.20:19`, member of the lab that sent the report |
 | Rehab discharge report | The physician who wrote and signed it for the rehab clinic | `Written by` | An active physician (`elgaRole` `1.2.40.0.34.5.3:700`), member of the rehab clinic, and the rehab clinic itself active as a hospital (`role` 300 or 301) |
 
 How the request service finds the responsible person in the eHVD:
@@ -341,6 +343,8 @@ The two kinds of checks fail differently:
 - **Hold**, when the release check does not pass. The right person answered, but the eHVD does not confirm that the responsible person may release this document. Reasons: not listed, not active, another specialty, not a member of the organisation, or several people with that name. The request service keeps the answer but files nothing. Dr. Hofer gets a Matrix message with the reason and accepts or rejects the answer in the widget.
 
 We hold instead of blocking because the eHVD can be out of date, and a physician of another specialty can be responsible for some tests. Dr. Hofer, a physician, makes that call. If she accepts, the audit log records who accepted and when, and the Provenance carries the policy `urn:aim-t2:identity-policy:accepted-by-requester:v1`.
+
+Two more facts back the hold (pending clinical sign-off). By the time the release check runs, the identity checks have passed, so the answer comes from the person Dr. Hofer asked, and holding it shares nothing new. And Dr. Hofer must judge every result she uses by medical science and experience anyway (§ 49 Abs 1 ÄrzteG 1998), so a held result asks of her what her duty of care already does. A block would leave her without the result and push the lab back to fax or phone. One case is weaker than the rest: the eHVD takes physicians from the medical chamber's list of physicians (§ 9 Abs 3 GTelG 2012), so "not active" is rarely just out of date. The [clinical review](clinical-review/SIGNOFF_18_IDENTITY_AND_RELEASE.md) asks whether that case needs a stronger warning or a block.
 
 ## The eHVD
 
@@ -430,9 +434,13 @@ The request service runs this check on the document and on the name and birth da
 - [eHVD web service handbook v2.4](https://www.gesundheit.gv.at/dam/gesundheitgvat/professional/it-services/ehvd/eHVD-ServicehandbuchV2.4.pdf), sections 2, 3.2, 3.3.2, and 5.2
 - [ID Austria: attribute "Gesundheitsdiensteanbieter"](https://www.id-austria.gv.at/de/developer/registrieren/personenmerkmale/Gesundheitsdiensteanbieter)
 - [eHVD](EHVD.md) lists all sources on the eHVD interface
-- [Ärztegesetz 1998, § 2 and § 31](https://www.ris.bka.gv.at/GeltendeFassung.wxe?Abfrage=Bundesnormen&Gesetzesnummer=10011138)
+- [Ärztegesetz 1998, §§ 2, 3, 31, and 49](https://www.ris.bka.gv.at/GeltendeFassung.wxe?Abfrage=Bundesnormen&Gesetzesnummer=10011138)
 - [MTD-Gesetz 2024, §§ 4 and 5](https://www.ris.bka.gv.at/GeltendeFassung.wxe?Abfrage=Bundesnormen&Gesetzesnummer=20012653)
-- [Krankenanstalten- und Kuranstaltengesetz, § 24](https://www.ris.bka.gv.at/eli/bgbl/1957/1/P24/NOR40211928)
+- [Krankenanstalten- und Kuranstaltengesetz, § 24](https://www.ris.bka.gv.at/eli/bgbl/1957/1/P24/NOR40211928), [§ 7](https://www.ris.bka.gv.at/NormDokument.wxe?Abfrage=Bundesnormen&Gesetzesnummer=10010285&Paragraf=7), and [§ 2](https://www.ris.bka.gv.at/NormDokument.wxe?Abfrage=Bundesnormen&Gesetzesnummer=10010285&Paragraf=2)
+- [Gesundheitstelematikgesetz 2012, § 9](https://www.ris.bka.gv.at/NormDokument.wxe?Abfrage=Bundesnormen&Gesetzesnummer=20008120&Paragraf=9)
+- [ÄAO 2015, Anlage 19, Medizinische und Chemische Labordiagnostik](https://www.ris.bka.gv.at/Dokumente/Bundesnormen/NOR40170889/NOR40170889.html), and the medical chamber's [training content for it](https://www.aerztekammer.at/documents/261766/98597/Anl_19_LAB_2016-06-17.pdf/4bc0935e-9ff8-cfe0-1961-06a6bc37384c)
+- The medical chamber's [training content for Innere Medizin und Hämatologie und internistische Onkologie (ÄAO 2015, Anlage 12.5)](https://www.aerztekammer.at/documents/261766/417311/Anl_12_IM.05_IM_H%C3%84MA_u._ONKO_2020-01-01.pdf/dde3f2c6-72f2-4b0e-28e1-d2d6584c6bf6)
+- [Terminology server: OEAEK_Fachrichtung](https://termgit.elga.gv.at/CodeSystem-oeaek-fachrichtung.html), the specialty codes in the eHVD
 - [Stöger, Wagner, Griesmacher, Hörmann: Biomedizinisch-analytische und ärztliche Befundung, RdM 2025/38](https://biomed-austria.at/sites/default/files/uploads/St%C3%B6ger%20et%20al%20Befundung%20BMA_RdM%2025-38.pdf), and the [reply by Biomed Austria](https://biomed-austria.at/sites/default/files/uploads/Stellungnahme_St%C3%B6ger%20et%20al%20Befundung%20BMA_RdM%2025-38_Biomed%20Austria_0.pdf)
 - [ELGA CDA implementation guide: lab report v2.06.3](https://www.gesundheit.gv.at/dam/jcr:850c95f5-438a-40e4-864c-30839c3b49ea/Implementierungsleitfaden_Laborbefund_V2.06.3.pdf)
 - [ELGA CDA implementation guide: medical discharge letter v2.06.5](https://www.gesundheit.gv.at/dam/jcr:ca65e81f-caff-410d-b6fb-0d83c3df5054/Implementierungsleitfaden_Entlassungsbrief_%C3%84rztlich_V2.06.5.pdf)

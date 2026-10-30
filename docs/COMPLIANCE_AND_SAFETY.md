@@ -76,7 +76,7 @@ AI is optional in this project. If we build the AI fallback parser:
 | GDPR Art. 35, impact assessment | A data protection impact assessment comes before any pilot with real data |
 | eIDAS | ID Austria at level high is the identity source. We record the level in the Provenance. |
 | EHDS, primary use | FHIR R4 output fits the European move toward exchangeable health records |
-| ÄrzteG 1998 §§ 2, 31; MTD-Gesetz 2024 §§ 4, 5; KAKuG §§ 7, 8, 24 | Only the physician responsible for the content releases a document. The release check confirms that person in the eHVD, see [Identity and misdelivery](IDENTITY.md#who-may-release-a-document). |
+| ÄrzteG 1998 §§ 2, 3, 31, 49; MTD-Gesetz 2024 §§ 4, 5; KAKuG §§ 2, 7, 24 | Only the physician responsible for the content releases a document. The release check confirms that person in the eHVD, see [Identity and misdelivery](IDENTITY.md#who-may-release-a-document). Pending clinical sign-off, see [the review for issue #18](clinical-review/SIGNOFF_18_IDENTITY_AND_RELEASE.md). |
 | ID Austria terms | Real use needs a registered service provider. [Identity and misdelivery](IDENTITY.md) has the steps. |
 | eHVD terms | Real use needs a registration with the health ministry |
 
@@ -100,3 +100,9 @@ Short form for the application footer: "Prototype with synthetic data. ID Austri
 | AI rules | Dev 3 |
 | Disclaimer everywhere it belongs | Dev 1 in the README and the app, Doc 2 in the video |
 | Final safety sign-off | Doc 1 |
+
+## Clinical review
+
+Rules that need a clinician's decision wait in [`clinical-review/`](clinical-review/README.md), one file per issue. A clinician fills in the answer boxes by hand, and the file is committed with the answers. Open reviews:
+
+- [Issue #18: identity rules and release check](clinical-review/SIGNOFF_18_IDENTITY_AND_RELEASE.md)
