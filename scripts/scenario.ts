@@ -3,12 +3,13 @@
 //
 // Each step has two parts. `act` drives the flow the way Dr. Hofer and the outside person would. `verify` checks the
 // result in the audit log, on HAPI, and in Matrix. A step without `act` is not runnable yet: `needs` names the open
-// issues and `todo` says what `act` must do once they land. Only entries written after the start of the run count.
+// issues and `todo` says what `act` must do once they land. Only entries written after the start of the run count. The
+// start comes from the clocks that write them: Postgres `now()` for the audit log, the newest room event for Matrix.
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
-import { gte } from "drizzle-orm";
+import { gte, sql } from "drizzle-orm";
 
 import { env, mxid } from "@/env";
 import { createCaller } from "@/server/api/root";
@@ -17,6 +18,7 @@ import { db } from "@/server/db";
 import { auditLog } from "@/server/db/schema";
 import { getBotClient, roomAlias, type MatrixEvent } from "@/server/matrix/client";
 import { coverageLines, effortSeconds, filedReferences, misdeliveryCaught, requestCoverage, type AuditRow, type MisdeliveryKind } from "@/server/metrics/audit";
+import { scanForNotice } from "@/server/metrics/notice-check";
 import { revealedOnPage } from "@/server/metrics/page-check";
 import {
   coverageMetric,
@@ -34,7 +36,11 @@ import { exportResources, runValidator } from "@/server/metrics/validator";
 const { values: flags } = parseArgs({ options: { "no-validate": { type: "boolean", default: false } } });
 
 type Ctx = {
+  // The start of the run on the Postgres clock, set by the preflight step. Until then the local clock.
   since: Date;
+  // Dr. Hofer's room and its newest event at the start of the run, set by the preflight step.
+  roomId?: string;
+  matrixMark?: string;
   // Request ids, set by `act`.
   r1?: number;
   m1?: number;
@@ -76,18 +82,33 @@ async function expectNotFiled(ctx: Ctx, requestId: number) {
   if (rows.length) fail(`request ${requestId} has an answer_filed entry`);
 }
 
-// A notice from the bot in Dr. Hofer's room since the start of the run, found by a part of its text.
-async function expectNotice(ctx: Ctx, text: string): Promise<string> {
-  const bot = await getBotClient();
-  const roomId = (await bot.resolveAlias(roomAlias())) ?? fail(`room ${roomAlias()} not found`);
-  const res = await bot.request<{ chunk: MatrixEvent[] }>(
+// Postgres writes `audit_log.at` with `now()`, so the run starts on that clock, not on this machine's.
+async function databaseNow(): Promise<Date> {
+  const [row] = await db.execute<{ epoch: string | number }>(sql`select extract(epoch from now()) as epoch`);
+  // Date truncates to milliseconds, so the start is never later than Postgres' own `now()`.
+  return new Date(Number(row.epoch) * 1000);
+}
+
+type MessagesPage = { chunk: MatrixEvent[]; end?: string };
+const roomMessages = async (roomId: string, limit: number, from?: string) =>
+  (await getBotClient()).request<MessagesPage>(
     "GET",
-    `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/messages?dir=b&limit=100`,
+    `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/messages?dir=b&limit=${limit}${from ? `&from=${encodeURIComponent(from)}` : ""}`,
   );
-  const hit = res.chunk.find(
-    (e) => e.type === "m.room.message" && e.origin_server_ts >= ctx.since.getTime() && String(e.content.body ?? "").includes(text),
-  );
-  return hit ? String(hit.content.body) : fail(`no notice containing "${text}" in ${roomAlias()}`);
+
+// A notice in Dr. Hofer's room that is newer than the mark, found by a part of its text. Reads back page by page.
+async function expectNotice(ctx: Ctx, text: string): Promise<string> {
+  const roomId = need(ctx.roomId, "Dr. Hofer's room");
+  const mark = need(ctx.matrixMark, "the Matrix mark");
+  let from: string | undefined;
+  for (let pages = 0; pages < 10; pages++) {
+    const page = await roomMessages(roomId, 100, from);
+    const scan = scanForNotice(page.chunk, mark, text);
+    if (scan.hit) return String(scan.hit.content.body);
+    if (scan.reachedMark || !page.end || !page.chunk.length) break;
+    from = page.end;
+  }
+  return fail(`no notice containing "${text}" in ${roomAlias()} since the start of the run`);
 }
 
 async function reachable(name: string, url: string) {
@@ -99,13 +120,16 @@ const steps: Step[] = [
   {
     id: "preflight",
     title: "The stack is up",
-    verify: async () => {
+    verify: async (ctx) => {
       const h = await createCaller(createContext({ kind: "anonymous" })).health.check();
       for (const [name, c] of Object.entries({ database: h.database, fhir: h.fhir, matrix: h.matrix })) if (!c.ok) fail(`${name}: ${c.detail}`);
       await reachable("ordy", `${env.PUBLIC_URL}/api/healthz`);
       await reachable("Keycloak", env.OIDC_METADATA_URL);
       await reachable("Mailpit", `${env.MAILPIT_API_URL}/api/v1/info`);
-      return "Postgres, HAPI, Synapse, ordy, Keycloak, and Mailpit answer";
+      ctx.since = await databaseNow();
+      ctx.roomId = (await (await getBotClient()).resolveAlias(roomAlias())) ?? fail(`room ${roomAlias()} not found`);
+      ctx.matrixMark = (await roomMessages(ctx.roomId, 1)).chunk[0]?.event_id ?? fail(`room ${roomAlias()} has no events`);
+      return `Postgres, HAPI, Synapse, ordy, Keycloak, and Mailpit answer; the run starts at ${ctx.since.toISOString()} on the Postgres clock`;
     },
   },
   {

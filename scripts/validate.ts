@@ -11,7 +11,7 @@ import { db } from "@/server/db";
 import { auditLog } from "@/server/db/schema";
 import { filedReferences } from "@/server/metrics/audit";
 import { METRICS_DIR, validationPassed } from "@/server/metrics/report";
-import { exportResources, runValidator, totalErrors } from "@/server/metrics/validator";
+import { exportResources, runValidator, totalErrors, type FileResult } from "@/server/metrics/validator";
 
 const { values, positionals } = parseArgs({ options: { since: { type: "string" } }, allowPositionals: true });
 const since = values.since === undefined ? undefined : new Date(values.since);
@@ -57,7 +57,14 @@ if (!files.length) {
 }
 
 console.log(`Validating ${files.length} resources against FHIR R4. The first run downloads the FHIR packages and takes a few minutes.`);
-const results = await runValidator(files, path.join(METRICS_DIR, "validator-output.json"));
+let results: FileResult[];
+try {
+  results = await runValidator(files, path.join(METRICS_DIR, "validator-output.json"));
+} catch (e) {
+  // No Java, a jar with the wrong hash, a failed download, or no result file.
+  console.error(`The validator did not run. ${e instanceof Error ? e.message : String(e)}`);
+  process.exit(1);
+}
 for (const r of results) {
   console.log(`${r.errors ? "FAIL" : "ok  "}  ${r.file}: ${r.errors} errors, ${r.warnings} warnings`);
   for (const i of r.issues.filter((i) => i.severity === "error" || i.severity === "fatal")) console.log(`      ${i.location}: ${i.message}`);

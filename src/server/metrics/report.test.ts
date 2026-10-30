@@ -39,6 +39,13 @@ test("effort is met under two minutes and not measured before request 1 is filed
   assert.equal(effortMetric(null).status, "blocked");
 });
 
+test("the effort status agrees with the shown number of seconds", () => {
+  const justUnder = effortMetric(119.4);
+  assert.deepEqual([justUnder.result.split(" s ")[0], justUnder.status], ["119", "met"]);
+  const roundsUp = effortMetric(119.6);
+  assert.deepEqual([roundsUp.result.split(" s ")[0], roundsUp.status], ["120", "missed"]);
+});
+
 test("audit coverage counts request 1", () => {
   const coverage = (covered: number): RequestCoverage => ({ requestId: 1, events: [], covered });
   assert.deepEqual([coverageMetric(coverage(6)).result, coverageMetric(coverage(6)).status], ["6 of 6 on request 1", "met"]);

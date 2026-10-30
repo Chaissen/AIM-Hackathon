@@ -208,7 +208,7 @@ The request service puts `track/scenario/patient.json` on the server with `PUT P
 1. After a run, `pnpm validate` (`scripts/validate.ts`) reads the ids of the filed resources from the `answer_filed` audit entries, all of them or with `--since <time>` those of one run: `detail.resources` lists every resource of the transaction as `Type/id`, and `detail.provenance` names the Provenance.
 2. It fetches each resource from HAPI into `out/filed/`.
 3. It runs the validator on all files at once, as the scenario README says: `java -jar validator_cli.jar <files> -version 4.0`, with `-locale en-US` so the messages are in English.
-4. It counts the issues with severity `error` or `fatal`. The target is 0. Warnings do not count. Every file must have a result. It prints each error, writes the raw validator result to `out/metrics/validator-output.json` and the counts to `out/metrics/validate.json`, and exits with 1 on any error or missing result.
+4. It counts the issues with severity `error` or `fatal`. The target is 0. Warnings do not count. Every file must have a result. It prints each error, writes the raw validator result to `out/metrics/validator-output.json` and the counts to `out/metrics/validate.json`, and exits with 1 on any error or missing result, or with a short message when the validator cannot run (no Java, a jar with another hash).
 
 `pnpm validate path/to/file.json path/to/folder` validates hand-made resources instead, without Postgres or HAPI. `pnpm scenario` runs the same check on the resources filed during its run.
 

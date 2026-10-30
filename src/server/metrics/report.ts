@@ -56,10 +56,12 @@ export function validationMetric(run: ValidationRun): Metric {
 export function effortMetric(seconds: number | null): Metric {
   const base = { name: "Effort for the outside person", target: "0 installs, 0 accounts, under 2 minutes" };
   if (seconds === null) return { ...base, result: "request 1 not filed", status: "blocked" };
+  // The status follows the shown number, so "120 s" is never "met".
+  const shown = Math.round(seconds);
   return {
     ...base,
-    result: `${Math.round(seconds)} s from link_opened to the answer_sent that was filed (automated run; the stopwatch test is #20)`,
-    status: seconds < 120 ? "met" : "missed",
+    result: `${shown} s from link_opened to the answer_sent that was filed (automated run; the stopwatch test is #20)`,
+    status: shown < 120 ? "met" : "missed",
   };
 }
 
