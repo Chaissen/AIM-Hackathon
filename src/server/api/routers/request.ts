@@ -12,8 +12,9 @@ import { auditActor, recordAudit } from "@/server/audit/record";
 import type { Db } from "@/server/db";
 import { auditLog } from "@/server/db/schema";
 import { type AddressCheck as EhvdAddressCheck, addressWarning, checkAddress } from "@/server/ehvd/address-check";
+import { FhirError } from "@/server/fhir/client";
 import { nameWords } from "@/server/identity/names";
-import { MessageRefused, sendRequestEmail } from "@/server/mail/send";
+import { IncompletePatient, MessageRefused, sendRequestEmail } from "@/server/mail/send";
 import { displayName } from "@/server/matrix/client";
 import { taskStatus, TransitionError } from "@/server/requests/lifecycle";
 import {
@@ -133,6 +134,17 @@ const auditOf = (db: Db, ids: number[]) =>
 
 export const linkDeps = { readPatient: readFhirPatient, sendRequestEmail };
 
+const MailFailure = z.object({ code: z.string().optional(), responseCode: z.number().optional() });
+
+/** Codes only. Nodemailer puts the SMTP server's response in the message, and the response can echo an address or a name. */
+function notSentReason(error: unknown): string {
+  if (error instanceof MessageRefused) return `refused for ${error.categories.join(", ")}`;
+  if (error instanceof IncompletePatient) return "refused for an incomplete patient record";
+  if (error instanceof FhirError) return `the FHIR server answered ${error.status}`;
+  const { code = "no code", responseCode } = MailFailure.catch({}).parse(error);
+  return responseCode ? `${code}, SMTP ${responseCode}` : code;
+}
+
 async function sendLink(request: RequestRow, token: string) {
   const link = `${env.PUBLIC_URL}/r/${token}`;
   if (request.channel === "sms") {
@@ -143,11 +155,15 @@ async function sendLink(request: RequestRow, token: string) {
     const patient = await linkDeps.readPatient(request.patientId);
     await linkDeps.sendRequestEmail({ to: request.address, requester: request.requesterName, clinic: env.CLINIC_NAME, link, expiresAt: request.expiresAt, patient });
   } catch (error) {
-    // A refused SMTP connection has an empty message; Nodemailer puts the reason in `code`, such as ESOCKET.
-    const code = error instanceof Error && "code" in error ? ` (${String(error.code)})` : "";
-    console.error(`The email for request ${request.id} was not sent: ${logReason(error)}${code}`);
+    console.error(`The email for request ${request.id} was not sent: ${notSentReason(error)}`);
     if (error instanceof MessageRefused) {
       throw new TRPCError({ code: "PRECONDITION_FAILED", message: `The email would contain ${error.categories.join(", ")}, so it was not sent. The request did not go out.` });
+    }
+    if (error instanceof IncompletePatient) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: "The patient's record on the FHIR server lacks a given name, a family name, or a birth date, so ordy cannot check the email. The request did not go out.",
+      });
     }
     throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "The email could not be sent. The request did not go out; try again in a few minutes." });
   }
