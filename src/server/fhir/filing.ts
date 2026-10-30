@@ -232,6 +232,7 @@ export type AnswerFiling = {
   acceptedByRequester: boolean;
   /** Extra sentences for the Provenance narrative, for example the outcome of the release check. */
   findings?: string[];
+  fhirBaseUrl: string;
 };
 
 /** Reference strings for the audit entry. Before the POST they are `urn:uuid:`, afterwards `resolveIds` maps them. */
@@ -331,7 +332,7 @@ export function buildFilingBundle(filing: AnswerFiling): Filing {
       // per answer. HAPI resolves the `urn:uuid:` in the condition to the output's server id.
       { fullUrl: provenanceUrl, resource: provenance, request: { method: "POST", url: "Provenance", ifNoneExist: `target=${clinical.output.fullUrl}` } },
       // PUT, so the Task the request created earlier is updated, or created if it does not exist yet.
-      { resource: task, request: { method: "PUT", url: `Task/${task.id}` } },
+      { fullUrl: `${filing.fhirBaseUrl}/Task/${task.id}`, resource: task, request: { method: "PUT", url: `Task/${task.id}` } },
     ],
   };
 
