@@ -68,7 +68,7 @@ The report and the people who handle it are different. Dr. Leitner wrote the reh
 | Table column `LOINC code` | `Observation.code.coding`, system `http://loinc.org`, without `display` |
 | Table column `Result` | `Observation.valueQuantity.value` |
 | Table column `Unit` | `Observation.valueQuantity` `unit`, `system` `http://unitsofmeasure.org`, and `code` in UCUM. A unit the parser cannot code keeps only `unit`. |
-| Table column `Reference range` | `Observation.referenceRange` `low`, `high`, and `text` |
+| Table column `Reference range` | `Observation.referenceRange` `low`, `high`, and `text`. A one-sided range has only one of `low` and `high` ([One-sided ranges](#one-sided-ranges)). |
 | Computed from value and range | `Observation.interpretation`: `N`, `H`, or `L` from `http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation` |
 | Free text such as `All values are within the reference range.` | `DiagnosticReport.conclusion` |
 | `Validated by: Dr. Eva Brandl, lab physician` | `DiagnosticReport.resultsInterpreter` and `Observation.performer`, both the Practitioner |
@@ -91,6 +91,14 @@ The document writes the platelet unit as `10^9/L`, which is not valid UCUM. The 
 JSON numbers have no trailing zeros, so INR `1.0` is filed as `1` and the fibrinogen bounds as `2` and `4`. The attached document and `referenceRange.text` keep the values as written.
 
 For Max Beispiel's result, INR 2.6 and aPTT 44 are above the range and get `H`. That result is never filed for Maria, because the patient check stops it first.
+
+### One-sided ranges
+
+A range with one end, such as CRP `< 5`, gives one bound with the row's unit. `< x`, `≤ x`, and `<= x` give only `high`. `> x`, `≥ x`, and `>= x` give only `low`. `text` keeps the range as written. The parser and the AI fallback read them with the same function (`oneSided()` in `src/server/documents/parse.ts`).
+
+`interpretation` uses the one bound: above `high` is `H`, below `low` is `L`, otherwise `N`. So CRP 14 with `< 5` is `H` with `high` 5 mg/L, and HDL 58 with `> 45` is `N` with `low` 45 mg/dL.
+
+A value equal to a strict bound is a clinician's call. Until Doc 1 decides ([#19](https://github.com/Chaissen/AIM-Hackathon/issues/19)), a strict bound excludes its own value: 5 with `< 5` is `H`, and 45 with `> 45` is `L`. With `≤ 5`, 5 is `N`. This default is pending clinical sign-off. FHIR's `low` and `high` include their value, so the filed bound of `< 5` reads as "at most 5". Only `text` shows that the bound is strict.
 
 ### Example Observation
 

@@ -240,6 +240,21 @@ test("a result with a thousands separator is refused, a decimal comma is read", 
   assert.equal(decimal.rows[3].value, 3.1);
 });
 
+test("a one-sided range keeps one end, and a strict end flags its own value", () => {
+  const aptt = (result: string, range: string) => {
+    const doc = parsed(scenario("lab-result-maria-beispiel.md").replace("| aPTT | 31 | s | 25 to 37 |", `| aPTT | ${result} | s | ${range} |`)) as LabResult;
+    const { low, high, rangeText, interpretation } = doc.rows[1];
+    return [low, high, rangeText, interpretation];
+  };
+  assert.deepEqual(aptt("37", "< 37"), [null, 37, "< 37", "H"]);
+  assert.deepEqual(aptt("37", "≤ 37"), [null, 37, "≤ 37", "N"]);
+  assert.deepEqual(aptt("37", "<= 37"), [null, 37, "<= 37", "N"]);
+  assert.deepEqual(aptt("25", "> 25"), [25, null, "> 25", "L"]);
+  assert.deepEqual(aptt("25", "≥ 25"), [25, null, "≥ 25", "N"]);
+  assert.deepEqual(aptt("25", ">= 25"), [25, null, ">= 25", "N"]);
+  assert.deepEqual(aptt("24", "≥ 25"), [25, null, "≥ 25", "L"]);
+});
+
 test("a LOINC code with a wrong check digit is refused", () => {
   const result = parseDocument(scenario("lab-result-maria-beispiel.md").replace("6301-6", "6301-5"));
   assert.equal(result.ok, false);

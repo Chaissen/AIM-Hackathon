@@ -50,7 +50,6 @@ export type LabRow = {
   ucum: string | null;
   /** Column `Unit` as written. */
   unitText: string;
-  /** Column `Reference range`, split at `" to "`. Null when the range cannot be read. */
   low: number | null;
   high: number | null;
   /** Column `Reference range` as written, for example `0.8 to 1.2`. */
