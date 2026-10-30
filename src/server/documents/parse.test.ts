@@ -464,3 +464,35 @@ test("a next-line value is read as on one line, unless it is a sentence", () => 
     [next("Patient", "Mobile, walks with crutches."), []],
   ]);
 });
+
+// #46 review, round 3.
+
+test("a two-column table without an identity key in its header is key/value, not columns", () => {
+  const table = (...rows: string[]) => `\n## Admin\n\n${rows[0]}\n|---|---|\n${rows.slice(1).join("\n")}\n`;
+  expectSafety(
+    [
+      [table("| Field | Status |", "| Patient | Max Beispiel |"), ["several-patients"]],
+      [table("| Type | Discharge |", "| Patient | Max Beispiel |"), ["several-patients"]],
+      [table("| Report | Admission |", "| Date of birth | 01.01.1960 |"), ["several-birth-dates"]],
+      [table("| Field | Status |", "| Patient | Maria Beispiel |"), []],
+    ],
+    [rehabLf(), referral],
+  );
+});
+
+test("a bold, italic, or backticked name on the next line is read as on one line", () => {
+  expectSafety([
+    ["\n**Patient:**\n**Max Beispiel**, 01.01.1960\n", ["several-patients"]],
+    ["\nPatient:\n*Max Beispiel* (01.01.1960)\n", ["several-patients"]],
+    ["\nPatient:\n`Max Beispiel`, 01.01.1960\n", ["several-patients"]],
+    ["\n**Patient:**\n**Maria Beispiel**\n", []],
+  ]);
+});
+
+test("a birth date is read from its start only when an age or sex marker follows", () => {
+  expectSafety([
+    ["\nDate of birth: 12.03.1961 (Max Beispiel)\n", ["several-birth-dates"]],
+    ["\nDate of birth: 12.03.1961 / 1 January 60\n", ["several-birth-dates"]],
+    ...["(64 y)", "(64 years)", ", 64", "(f)", "(m)"].map((m): [string, string[]] => [`\nDate of birth: 12.03.1961 ${m}\n`.replace(" ,", ","), []]),
+  ]);
+});

@@ -106,7 +106,10 @@ const isSentence = (value: string) =>
 function plausibleValue(norm: string, value: string): boolean {
   if (IDENTITY_KEYS.has(value.toLowerCase().replace(/[*_:]/g, "").trim())) return false;
   if (BIRTH_KEYS.has(norm) || HEADER_BIRTH_KEYS.has(norm)) return DATE_START.test(value);
-  const name = value.split(/[,(;]|\s[-–—]\s|\s(?:born|dob|d\.o\.b\.?|date of birth)(?![a-z])/i)[0].trim();
+  // Bold, italic, or backticked (`'` after unmark()) name words are names too: `**Max Beispiel**, 01.01.1960`.
+  const name = value
+    .replace(/[*_`]|(?<!\p{L})'|'(?!\p{L})/gu, "")
+    .split(/[,(;]|\s[-–—]\s|\s(?:born|dob|d\.o\.b\.?|date of birth)(?![a-z])/i)[0].trim();
   const words = name.split(/\s+/);
   const last = words[words.length - 1];
   return (
@@ -117,10 +120,13 @@ function plausibleValue(norm: string, value: string): boolean {
   );
 }
 
-/** `12.03.1961 (64 y)` as 12 March 1961, unless more follows that may be a second date. */
+/** An age or sex marker after a birth date: `(64 y)`, `(64 years)`, `, 64`, `(f)`, or `(m)`. */
+const AGE_OR_SEX = /^\s*(?:\(\s*(?:\d{1,3}\s*(?:y|yrs?|years?)?\.?|f|m|w|d|x|female|male)\s*\)|,\s*\d{1,3}(?:\s*(?:y|yrs?|years?)\.?)?)\s*$/i;
+
+/** `12.03.1961 (64 y)` as 12 March 1961. Anything else after the date, such as a name or a second date, is not read. */
 function leadingDate(text: string): IsoDate | null {
   const m = DATE_START.exec(text);
-  return m && !/\d{1,4}[./-]\d|\d{4}/.test(text.slice(m[0].length)) ? parseDateWide(m[0]) : null;
+  return m && AGE_OR_SEX.test(text.slice(m[0].length)) ? parseDateWide(m[0]) : null;
 }
 
 /**
@@ -152,14 +158,14 @@ export function isBareIdentityKey(line: string): boolean {
 /** `Max Beispiel DOB` as the key of `Max Beispiel DOB: 01.01.1960`: a name with a birth clause, not a key. */
 const ENDS_IN_BIRTH_KEY = /\s(?:born|dob|d\.o\.b|date of birth)$/;
 
-/** Column names that are no value for an identity key, so `| Patient | Ward |` is a header row, not a patient line. */
+/** Column names that are no value for an identity key, so `| Patient | Ward |` is a header row, but `| Field | Status |` is not. */
 const COLUMN_NAMES = new Set(["ward", "room", "bed", "age", "sex", "gender", "phone", "telephone", "address", "email", "department", "station", "case number", "insurance number", "admission", "discharge", "diagnosis", "physician", "doctor", "notes", "status"]);
 
 /**
  * The rows of a two-column table as key lines. A lab result table has more columns, and the first column of a
  * two-column one names tests, never the patient. The second header cell decides the layout:
- * - Columns, when it is a column name: an identity key or a word such as `Ward` or `Age`, as in `| Patient | Ward |`
- *   or `| Date of birth | Age |`. Each data row gives each column's key with its cell.
+ * - Columns, when it is an identity key, as in `| Ward | Patient |`, or a word such as `Ward` or `Age` after an identity
+ *   key, as in `| Patient | Ward |` or `| Date of birth | Age |`. Each data row gives each column's key with its cell.
  * - Key/value otherwise, such as `| Patient | Max Beispiel |`, `| Patient | Beispiel, Maria |`, or `| Ward | 3 |`:
  *   every row whose first cell is a key, the header row too, read as the same line would be.
  */
@@ -168,7 +174,7 @@ export function keyValueRows(rows: string[][], header: boolean): KeyLine[] {
   const cells = rows.map((r) => r.map((c) => unmark(c)));
   const keyCell = (cell: string) => cell.replace(/[\s*_]*:[\s*_]*$/, "");
   const [k0, k1] = cells[0].map((c) => keyValue(keyCell(c), "-", header));
-  const columns = k1 !== null && (IDENTITY_KEYS.has(k1.norm) || COLUMN_NAMES.has(k1.norm));
+  const columns = k1 !== null && (IDENTITY_KEYS.has(k1.norm) || (COLUMN_NAMES.has(k1.norm) && k0 !== null && IDENTITY_KEYS.has(k0.norm)));
   if (columns) return cells.slice(1).flatMap((row) => [k0, k1].flatMap((k, j) => (k && keyValue(k.key, row[j], header)) || []));
   return cells.flatMap(([key, value]) => keyValue(keyCell(key), value, header) ?? []);
 }
