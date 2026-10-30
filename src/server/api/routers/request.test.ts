@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { after, test } from "node:test";
 
 import { TRPCError } from "@trpc/server";
 import { and, eq, inArray, sql } from "drizzle-orm";
+import { UnsecuredJWT } from "jose";
 
 import { env, mxid } from "@/env";
 import { createCaller } from "@/server/api/root";
@@ -11,8 +13,10 @@ import { createContext } from "@/server/api/trpc";
 import { db } from "@/server/db";
 import { startEhvdMock } from "@/server/ehvd/start-mock";
 import { anonymousBrowser } from "@/server/audit/record";
-import { auditLog, requests } from "@/server/db/schema";
-import { capabilities } from "@/server/fhir/client";
+import { answerDeps, type AnswerDeps } from "@/server/answers/deps";
+import type { AnswerToFile } from "@/server/answers/ports";
+import { auditLog, bindings, heldAnswers, keptAnswers, requests } from "@/server/db/schema";
+import { capabilities, fhirFetch } from "@/server/fhir/client";
 import { findAnswerContext, findPublicRequest } from "@/server/portal/data";
 import { TransitionError } from "@/server/requests/lifecycle";
 import { LINK_TTL_MS } from "@/server/requests/link-token";
@@ -45,6 +49,7 @@ const ehvdMock = await startEhvdMock({}, Number(new URL(env.EHVD_URL).port)).cat
 const hofer = mxid(env.MATRIX_HOFER_USER);
 const clinic = createCaller(createContext({ kind: "clinic", mxid: hofer }));
 const created: number[] = [];
+const run = randomBytes(4).toString("hex");
 
 const request1 = {
   docType: "lab-result",
@@ -78,8 +83,8 @@ const auditOf = (requestId: number) => db.select().from(auditLog).where(eq(audit
 const decisionsOf = async (requestId: number) =>
   (await auditOf(requestId)).filter((a) => a.event === "request_decided").map((a) => [a.actorKind, a.actor, a.outcome, a.detail]);
 
-async function seedHeld(state: "identity_held" | "answer_held") {
-  const { request } = await seed();
+async function seedHeld(state: "identity_held" | "answer_held", overrides: Partial<NewRequest> = {}) {
+  const { request } = await seed(overrides);
   const to = state === "identity_held" ? "identity_held" : "verified";
   assert.equal(await applyLoginTransition(db, request.id, { from: "sent", to, personNumber: "GH:petra" }), true);
   if (state === "answer_held") assert.equal((await applyEvent(db, request.id, "answer_unconfirmed"))?.state, "answer_held");
@@ -93,9 +98,12 @@ async function seedAddressMismatch() {
 }
 
 after(async () => {
+  // The request service mirrored each request on its FHIR Task, if HAPI runs.
+  await Promise.all(created.map((id) => fhirFetch(`Task/ordy-request-${id}`, { method: "DELETE" }).catch(() => {})));
   if (!noDb && created.length) {
     await db.delete(auditLog).where(inArray(auditLog.requestId, created));
     await db.delete(requests).where(inArray(requests.id, created));
+    await db.delete(bindings).where(eq(bindings.org, `Labor Kanalstraße test ${run}`));
   }
   await db.$client.end();
   await ehvdMock?.close();
@@ -241,13 +249,95 @@ test("Reject cancels a held identity and a held answer and logs who rejected", {
   }
 });
 
-test("Accept refuses a held answer until filing it is built and leaves the state", { skip: noDb }, async () => {
-  const request = await seedHeld("answer_held");
-  await assert.rejects(
-    clinic.request.accept({ id: request.id }),
-    (e) => e instanceof TRPCError && e.code === "PRECONDITION_FAILED" && e.message === "Filing a held answer is not built yet.",
+/** A request in `answer_held` with Maria's lab result held, as the answer flow (T09) leaves it. */
+async function seedHeldAnswer() {
+  // An organisation of its own: filing binds the person number, and the demo's Labor Kanalstraße must stay unbound.
+  const request = await seedHeld("answer_held", { org: `Labor Kanalstraße test ${run}` });
+  await db.insert(heldAnswers).values({
+    requestId: request.id,
+    markdown: readFileSync(new URL("../../../../track/scenario/documents/lab-result-maria-beispiel.md", import.meta.url), "utf8"),
+    sha256: "0".repeat(64),
+    sender: { givenName: "Eva", familyName: "Brandl", gdaOid: null },
+    idToken: new UnsecuredJWT({ "urn:pvpgvat:oidc.bpk": "GH:petra" }).setIssuedAt().encode(),
+    reason: "Not confirmed.",
+    sentAt: new Date(),
+  });
+  return request;
+}
+
+/** Runs `run` with stand-ins for the FHIR server and Matrix in the answer flow the router uses. */
+async function withAnswerDeps(stand: Partial<AnswerDeps>, run: () => Promise<void>) {
+  const real = { ...answerDeps };
+  Object.assign(answerDeps, stand);
+  try {
+    await run();
+  } finally {
+    Object.assign(answerDeps, real);
+  }
+}
+
+const maria = async () => ({ family: "Beispiel", given: ["Maria"], birthDate: "1961-03-12", display: "Maria Beispiel" });
+const filedAs = (id: number) => ({
+  output: "DiagnosticReport/1",
+  targets: ["DiagnosticReport/1"],
+  provenance: "Provenance/2",
+  task: `Task/ordy-request-${id}`,
+  sender: "Practitioner/3",
+  author: "Practitioner/3",
+  organization: "Organization/4",
+  resources: ["DiagnosticReport/1", "Provenance/2"],
+});
+
+test("Accept files a held answer through the answer flow and logs who accepted", { skip: noDb }, async () => {
+  const request = await seedHeldAnswer();
+  const filed: AnswerToFile[] = [];
+  const notices: Notice[] = [];
+  await withAnswerDeps(
+    {
+      readPatient: maria,
+      fileAnswer: async (answer) => {
+        filed.push(answer);
+        return filedAs(request.id);
+      },
+      notify: async (_request, notice) => {
+        notices.push(notice);
+      },
+    },
+    async () => {
+      const accepted = await clinic.request.accept({ id: request.id });
+      assert.equal(accepted.state, "filed");
+      assert.equal(accepted.taskStatus, "completed");
+    },
   );
+  assert.equal(filed.length, 1);
+  assert.equal(filed[0].acceptedByRequester, true);
+  assert.deepEqual(filed[0].findings, ["Not confirmed."]);
+  assert.deepEqual(await decisionsOf(request.id), [["network_member", hofer, "accepted", { from: "answer_held", to: "filed" }]]);
+  assert.equal((await auditOf(request.id)).find((a) => a.event === "answer_filed")?.detail.acceptedBy, hofer);
+  assert.deepEqual(
+    notices.map((n) => n.kind),
+    ["filed"],
+  );
+  assert.equal((await db.select().from(heldAnswers).where(eq(heldAnswers.requestId, request.id))).length, 0);
+});
+
+test("a held answer stays held when Accept has nothing to file, its filing fails, or Reject meets an open outcome", { skip: noDb }, async () => {
+  const empty = await seedHeld("answer_held");
+  await assert.rejects(
+    clinic.request.accept({ id: empty.id }),
+    (e) => e instanceof TRPCError && e.code === "PRECONDITION_FAILED" && e.message === "This request has no held answer to file.",
+  );
+  assert.equal((await getRequest(db, empty.id))?.state, "answer_held");
+
+  const request = await seedHeldAnswer();
+  await withAnswerDeps({ readPatient: maria, fileAnswer: () => Promise.reject(new Error("fetch failed")), notify: async () => {} }, async () => {
+    await assert.rejects(clinic.request.accept({ id: request.id }), (e) => e instanceof TRPCError && e.code === "INTERNAL_SERVER_ERROR");
+  });
   assert.equal((await getRequest(db, request.id))?.state, "answer_held");
+  assert.equal((await db.select().from(keptAnswers).where(eq(keptAnswers.requestId, request.id))).length, 1, "the FHIR server may have it");
+  await assert.rejects(clinic.request.reject({ id: request.id }), (e) => e instanceof TRPCError && e.code === "PRECONDITION_FAILED");
+  assert.equal((await getRequest(db, request.id))?.state, "answer_held");
+  assert.deepEqual(await decisionsOf(empty.id), []);
   assert.deepEqual(await decisionsOf(request.id), []);
 });
 

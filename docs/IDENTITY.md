@@ -338,9 +338,9 @@ The Provenance names the responsible person as `author` and the sender as `infor
 The two kinds of checks fail differently:
 
 - **Block**, when the identity checks fail. The wrong person opened the link, for example in M1 and M2. They see nothing, cannot answer, and nothing is stored. Dr. Hofer gets a message.
-- **Hold**, when the release check does not pass. The right person answered, but the eHVD does not confirm that the responsible person may release this document. Reasons: not listed, not active, another specialty, not a member of the organisation, several people with that name or too many to tell, a name without a given or family name, a document from another organisation than the request went to, an eHVD entry for the sender's login with another name, or an eHVD that cannot be reached or answers with an error. [eHVD](EHVD.md#the-release-check) lists the reason codes. The request service keeps the answer but files nothing. Dr. Hofer gets a Matrix message with the reason and accepts or rejects the answer in the widget.
+- **Hold**, when the release check does not pass. The right person answered, but the eHVD does not confirm that the responsible person may release this document. Reasons: not listed, not active, another specialty, not a member of the organisation, several people with that name or too many to tell, a name without a given or family name, a document from another organisation than the request went to, an eHVD entry for the sender's login with another name, or an eHVD that cannot be reached or answers with an error. [eHVD](EHVD.md#the-release-check) lists the reason codes. Any other error in the release check holds too. The request service keeps the answer in `held_answers` but files nothing. Dr. Hofer gets a Matrix message with the reason and accepts or rejects the answer in the widget. [The answer](ARCHITECTURE.md#the-answer) has the steps.
 
-We hold instead of blocking because the eHVD can be out of date, and a physician of another specialty can be responsible for some tests. Dr. Hofer, a physician, makes that call. If she accepts, the audit log records who accepted and when, and the Provenance carries the policy `urn:aim-t2:identity-policy:accepted-by-requester:v1`.
+We hold instead of blocking because the eHVD can be out of date, and a physician of another specialty can be responsible for some tests. Dr. Hofer, a physician, makes that call. If she accepts, `answer_filed` records who accepted (`acceptedBy`) and when (`at`), and the Provenance carries the policy `urn:aim-t2:identity-policy:accepted-by-requester:v1`. If she rejects, the request is `cancelled` and the held answer is deleted.
 
 ## The eHVD
 
@@ -388,8 +388,8 @@ Dr. Brandl logs in and uploads `lab-result-max-beispiel.md`, a result for Max Be
 
 1. The parser reads "Max Beispiel" and 1960-01-01 from the document.
 2. The patient check fails. Neither the birth date nor the given name matches Maria Beispiel.
-3. Nothing is filed. Dr. Brandl sees "This document is about a different patient. Check the file and upload again."
-4. The audit log has `misdelivery_caught` with `patient_mismatch`. Dr. Hofer gets a Matrix message that names Maria and does not name Max.
+3. Nothing is filed. Dr. Brandl sees "This document is about a different patient. Check the file and upload again." The request stays `verified`, so she can upload the right file. If the document is right and only the name or birth date she typed is wrong, she sees "The name or birth date you entered does not match the patient of this request. Check them and send again." instead. Nothing was misdelivered then, so neither the audit log beyond `answer_sent` nor Dr. Hofer hears of it.
+4. The audit log has `answer_sent` with the upload's hash, then `misdelivery_caught` with `patient_mismatch`, the same hash, and `nameMatches` and `birthDateMatches` for the document. Dr. Hofer gets a Matrix message that names Maria and does not name Max.
 5. The request service discards the upload and keeps only its SHA-256 hash.
 
 ```ts
