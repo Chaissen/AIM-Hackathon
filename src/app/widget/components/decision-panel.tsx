@@ -58,7 +58,7 @@ function bodyOf(pending: PendingDecision, org: string): string {
     case "identity":
       return `${pending.person ?? "Someone"} logged in with ID Austria. You asked for ${pending.requested}. ${HOLD_REASON[pending.reason]}`;
     case "answer":
-      return `${pending.sender} sent it. ${pending.reason}${pending.filingOpen ? " The last Accept may have filed the answer. Click Accept again." : ""}`;
+      return `${pending.sender} sent a document. ${pending.reason}${pending.filingOpen ? " The last Accept may have filed the answer. Click Accept again." : ""}`;
     default:
       return pending satisfies never;
   }

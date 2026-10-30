@@ -42,6 +42,24 @@ const schema = z.object({
     .pipe(z.array(z.email()).min(1)),
   // eHVD web service (task T15): the mock from T23, or the real eHVD from an address BRZ has allowed.
   EHVD_URL: z.url().default("http://localhost:8095/"),
+  // The entries the Contacts view lists before any search, looked up with GetGDA: the eHVD has no call that lists
+  // entries (docs/EHVD.md, "How ordy uses the eHVD"). The default is the scenario's eHVD mock entries; empty lists none.
+  EHVD_DIRECTORY_OIDS: z
+    .string()
+    .default(
+      [
+        "1.2.40.0.34.3.1.99.1.1",
+        "1.2.40.0.34.3.1.99.1.2",
+        "1.2.40.0.34.3.1.99.1.3",
+        "1.2.40.0.34.3.2.99.1.1",
+        "1.2.40.0.34.3.2.99.1.2",
+        "1.2.40.0.34.3.2.99.1.3",
+        "1.2.40.0.34.3.2.99.1.4",
+        "1.2.40.0.34.3.2.99.1.5",
+      ].join(","),
+    )
+    .transform((list) => [...new Set(list.split(",").map((oid) => oid.trim()).filter(Boolean))])
+    .pipe(z.array(z.string().max(40).regex(/^[0-9]+(?:\.[0-9]+)*$/, "must be an OID such as 1.2.40.0.34.3.1.99.1.2")).max(50)),
   // AI fallback parser (task T22). Unset ANTHROPIC_API_KEY turns it off.
   ANTHROPIC_API_KEY: z.preprocess((value) => (value === "" ? undefined : value), z.string().optional()),
   AI_FALLBACK_MODEL: z.string().default("claude-opus-5-5"),

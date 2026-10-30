@@ -19,7 +19,7 @@ import { useTRPC } from "@/trpc/react";
 import type { RouterOutputs } from "@/trpc/types";
 
 import { type Action, DecideButton, DecisionPanel, useDecide } from "../components/decision-panel";
-import { DocumentView } from "../components/document-view";
+import { DocumentView, LabDates } from "../components/document-view";
 import { InlineRetry, LoadError } from "../components/load-error";
 import { RequestHistory } from "../components/request-history";
 import { RequestProgress } from "../components/request-progress";
@@ -34,7 +34,7 @@ type DocumentResult = RouterOutputs["document"]["forRequest"];
 
 const REQUESTS: Crumb = { label: "Requests", route: { view: "requests", filter: "all" } };
 
-const CHANNEL: Record<RequestDetail["channel"], string> = { email: "Email", sms: "SMS" };
+const CHANNEL: Record<RequestDetail["channel"], string> = { email: "Email", sms: "Text message" };
 
 const CANCEL_REQUEST: Action = { event: "cancel", label: "Cancel request", done: "Request cancelled", variant: "outline", confirm: "Click again to cancel" };
 
@@ -96,7 +96,7 @@ function RequestPage({ request }: { request: RequestDetail }) {
               <StatusBadge state={request.state} />
             </div>
             <p className="text-sm text-dim">
-              Asked from {person}, {request.org}, <Time at={request.createdAt} />
+              Asked from {person}, {request.org} · <Time at={request.createdAt} />
             </p>
             {decide.error && (
               <p role="alert" className="text-sm text-destructive">
@@ -104,7 +104,8 @@ function RequestPage({ request }: { request: RequestDetail }) {
               </p>
             )}
           </div>
-          {accepts(request.state, "cancel") && <DecideButton action={CANCEL_REQUEST} decide={decide} />}
+          {/* A pending decision has its own way out: Cancel, or Reject, which cancels too. */}
+          {accepts(request.state, "cancel") && !request.pending && <DecideButton action={CANCEL_REQUEST} decide={decide} />}
         </div>
 
         {request.pending && <DecisionPanel request={request} />}
@@ -198,6 +199,9 @@ const UNAVAILABLE: Record<Extract<DocumentResult, { status: "unavailable" }>["re
   unreadable: "The document could not be read.",
 };
 
+/** The heading's kind with a capital, as the card's title: "lab report" becomes "Lab report". */
+const kindTitle = (kind: string) => kind.charAt(0).toUpperCase() + kind.slice(1);
+
 function placeholder(request: RequestDetail, person: string): string {
   if (request.state === "awaiting_confirmation") return "The request goes out once you confirm the address.";
   if (isOpen(request.state)) return `The document appears here once ${person} has sent it.`;
@@ -241,7 +245,7 @@ function DocumentCard({ request, person }: { request: RequestDetail; person: str
         );
       case "held":
       case "filed":
-        return <DocumentView doc={doc.data.document} sectionHeading="h3" />;
+        return <DocumentView doc={doc.data.document} sectionHeading="h3" labDates={false} />;
       default:
         return doc.data satisfies never;
     }
@@ -252,18 +256,9 @@ function DocumentCard({ request, person }: { request: RequestDetail; person: str
       <CardHeader>
         <CardTitle>
           {/* A heading, so the report's h3 sections nest under it. The classes undo the base h2 style. */}
-          <h2 className="font-semibold [font-stretch:inherit]">{shown?.document.title ?? "Document"}</h2>
+          <h2 className="font-semibold [font-stretch:inherit]">{shown ? kindTitle(shown.document.kind) : "Document"}</h2>
         </CardTitle>
-        {shown?.status === "held" && (
-          <CardDescription>
-            Sent by {shown.sender}, <Time at={shown.sentAt} />. Not in the record yet.
-          </CardDescription>
-        )}
-        {shown?.status === "filed" && (
-          <CardDescription>
-            In the patient record since <Time at={shown.filedAt} />.
-          </CardDescription>
-        )}
+        {shown && <DocumentSource shown={shown} />}
       </CardHeader>
       <CardContent className="gap-4">
         {body()}
@@ -276,5 +271,19 @@ function DocumentCard({ request, person }: { request: RequestDetail; person: str
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * Under the title: when the lab took the sample and reported it, or who wrote the report, and for a held answer that
+ * it is not in the record yet. The decision panel above names the sender.
+ */
+function DocumentSource({ shown }: { shown: Extract<DocumentResult, { status: "held" | "filed" }> }) {
+  const doc = shown.document;
+  return (
+    <CardDescription>
+      {doc.type === "lab-result" ? <LabDates doc={doc} /> : doc.writtenBy ? `Written by ${doc.writtenBy.raw}` : doc.organisation}
+      {shown.status === "held" && " · Not in the record yet"}
+    </CardDescription>
   );
 }

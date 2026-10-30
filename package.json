@@ -17,6 +17,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "fhir:seed": "tsx --env-file-if-exists=.env scripts/seed-fhir.ts",
+    "demo:seed": "tsx --env-file-if-exists=.env scripts/demo-seed.ts",
     "matrix:bootstrap": "tsx --env-file-if-exists=.env scripts/bootstrap-matrix.ts",
     "citizen": "tsx --env-file-if-exists=.env scripts/citizen.ts",
     "validate": "tsx --env-file-if-exists=.env scripts/validate.ts",

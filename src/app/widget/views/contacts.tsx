@@ -9,11 +9,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useTRPC } from "@/trpc/react";
 
-import { DirectorySearch } from "../components/directory-search";
+import { DirectorySearch, listedTitle, useDirectoryListing } from "../components/directory-search";
 import { useDraft } from "../draft";
 import { ShellPage } from "../shell";
 
-/** The people outside the network Dr. Hofer asked for documents, and the eHVD search to find new ones. */
+/** The people outside the network Dr. Hofer asked for documents, and the eHVD entries to find new ones. */
 export function ContactsView() {
   return (
     <ShellPage crumbs={[{ label: "Contacts" }]}>
@@ -28,7 +28,7 @@ export function ContactsView() {
         <section className="grid gap-4">
           <div className="grid gap-1">
             <h2 className="text-lg">Healthcare directory</h2>
-            <p className="text-sm text-dim">Doctors and organisations listed in the eHVD. Search by name and press Enter.</p>
+            <p className="text-sm text-dim">Doctors and organisations listed in the eHVD. Used to check who you are asking.</p>
           </div>
           <DirectorySearch />
         </section>
@@ -41,6 +41,9 @@ function PeopleAsked() {
   const trpc = useTRPC();
   const { data, error, isPending } = useQuery(trpc.clinic.contacts.queryOptions(undefined, { retry: false }));
   const { startRequest } = useDraft();
+  // The title comes from the listed entries the directory below loads anyway, never from one eHVD call per contact.
+  const listing = useDirectoryListing();
+  const listed = listing.data?.status === "ok" ? listing.data.entries : [];
 
   if (error) {
     return (
@@ -68,6 +71,7 @@ function PeopleAsked() {
         <TableBody>
           {data.map((contact) => {
             const requests = contact.requests === 1 ? "1 request" : `${contact.requests} requests`;
+            const title = listedTitle(listed, contact);
             const status = contact.verified ? (
               <Badge variant="success">
                 <ShieldCheck /> Verified sender
@@ -78,9 +82,7 @@ function PeopleAsked() {
             return (
               <TableRow key={contact.lastRequestId}>
                 <TableCell className="wrap-anywhere whitespace-normal">
-                  <div className="font-medium text-loud">
-                    {contact.given} {contact.family}
-                  </div>
+                  <div className="font-medium text-loud">{[title, contact.given, contact.family].filter(Boolean).join(" ")}</div>
                   <div className="text-xs text-muted-foreground">{contact.org}</div>
                   <div className="text-xs text-muted-foreground @xl/main:hidden">
                     {contact.address} · {requests}

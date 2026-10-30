@@ -69,8 +69,11 @@ export function PatientsView() {
                   <TableRow>
                     <TableHead>Name</TableHead>
                     <TableHead>Born</TableHead>
-                    <TableHead className="hidden text-right @md/main:table-cell">Open</TableHead>
-                    <TableHead className="text-right">Received</TableHead>
+                    <TableHead className="hidden text-right @md/main:table-cell">Open requests</TableHead>
+                    <TableHead className="text-right">
+                      <span className="@md/main:hidden">Received</span>
+                      <span className="hidden @md/main:inline">Documents received</span>
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>

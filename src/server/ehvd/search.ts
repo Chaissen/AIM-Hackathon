@@ -1,18 +1,22 @@
+import { env } from "@/env";
 import type { DocumentType } from "@/lib/document-types";
 import { isSubset, nameWords } from "@/server/identity/names";
 
 import { ehvd, type EhvdClient } from "./client";
-import { GTELV_ROLE, hasCode, isActive, isPerson, SPECIALTY } from "./directory";
+import { GTELV_ROLE, hasCode, isActive, isOrganisation, isPerson, sameOrganisationName, SPECIALTY } from "./directory";
 import { codeLabels } from "./labels";
 import type { GdaDescriptor } from "./soap";
 
-// The directory search in the widget's Contacts view (docs/EHVD.md, "How ordy uses the eHVD").
+// The directory search in the widget's Contacts view (docs/EHVD.md, "How ordy uses the eHVD"). The listed entries in
+// listing.ts share the entry shape.
 
 export type DirectoryEntry = {
   oid: string;
   kind: "person" | "organisation";
   /** "Dr. Eva Brandl" or "Labor Kanalstraße" */
   name: string;
+  /** "Dr.", or null for an organisation and a person without a title */
+  title: string | null;
   /** For the New request prefill */
   given: string | null;
   family: string;
@@ -25,6 +29,11 @@ export type DirectoryEntry = {
   city: string | null;
   /** The lab medicine specialty suggests a lab result, membership of a hospital (role 300 or 301) a rehab report. */
   suggestedDocType: DocumentType | null;
+  /**
+   * The organisation named CLINIC_NAME, or a person who is a member of it. They are inside the closed network, so the
+   * widget offers no request to them; that covers the signed-in doctor, whose Matrix ID has no eHVD OID.
+   */
+  inNetwork: boolean;
 };
 
 export type DirectorySearch =
@@ -72,19 +81,29 @@ function suggestedDocType(gda: GdaDescriptor, organisations: Map<string, GdaDesc
   return gda.relations.memberof.some(hospital) ? "rehab-report" : null;
 }
 
-/** The entries with their organisations' names, looking up at most MEMBER_LOOKUPS organisations not among the hits. */
-async function toEntries(found: GdaDescriptor[], hits: GdaDescriptor[], client: EhvdClient): Promise<DirectoryEntry[]> {
+/**
+ * The entries with their organisations' names, looking up at most MEMBER_LOOKUPS organisations not among the hits.
+ * `clinic` is the name of the organisation that runs ordy, for `inNetwork`.
+ */
+export async function toEntries(
+  found: GdaDescriptor[],
+  hits: GdaDescriptor[],
+  client: EhvdClient,
+  clinic: string = env.CLINIC_NAME,
+): Promise<DirectoryEntry[]> {
   const organisations = new Map(hits.map((gda) => [gda.id.id, gda]));
   const lookups = [...new Set(found.flatMap((gda) => gda.relations.memberof))].filter((oid) => !organisations.has(oid)).slice(0, MEMBER_LOOKUPS);
   const looked = await Promise.all(lookups.map((id) => client.getGda({ id })));
   looked.forEach((lookup, i) => {
     if (lookup.ok && lookup.value) organisations.set(lookups[i], lookup.value);
   });
+  const isClinic = (gda: GdaDescriptor | undefined) => gda !== undefined && isOrganisation(gda) && sameOrganisationName(gda.surname, clinic);
 
   return found.map((gda) => ({
     oid: gda.id.id,
     kind: isPerson(gda) ? "person" : "organisation",
     name: fullName(gda),
+    title: gda.title ?? null,
     given: gda.firstname ?? null,
     family: gda.surname,
     active: isActive(gda),
@@ -97,6 +116,7 @@ async function toEntries(found: GdaDescriptor[], hits: GdaDescriptor[], client: 
     mailDomain: mailDomain(gda.mail),
     city: gda.address[0]?.city ?? null,
     suggestedDocType: suggestedDocType(gda, organisations),
+    inNetwork: isClinic(gda) || (isPerson(gda) && gda.relations.memberof.some((oid) => isClinic(organisations.get(oid)))),
   }));
 }
 

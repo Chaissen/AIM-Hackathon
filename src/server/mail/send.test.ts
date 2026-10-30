@@ -1,92 +1,26 @@
 import assert from "node:assert/strict";
-import { createServer, type Socket } from "node:net";
 import { test, type TestContext } from "node:test";
 
 import { env } from "@/env";
+import { parseEmail, type ReceivedEmail, startFakeSmtp } from "./fake-smtp";
 import { MessageRefused, sendRequestEmail } from "./send";
 
-type Received = { sender: string; recipients: string[]; raw: string };
-
-/** Replies to one SMTP client and adds each email it sends to `received`. Offers no STARTTLS and no login. */
-function smtpSession(socket: Socket, received: Received[]) {
-  let buffer = "";
-  let envelope: Omit<Received, "raw"> | undefined;
-  let data: Omit<Received, "raw"> | undefined;
-  const reply = (line: string) => socket.write(`${line}\r\n`);
-  const address = (line: string) => line.slice(line.indexOf("<") + 1, line.indexOf(">"));
-
-  reply("220 fake-smtp.test ESMTP");
-  socket.setEncoding("utf8");
-  socket.on("data", (chunk: string) => {
-    buffer += chunk;
-    for (;;) {
-      if (data) {
-        const end = buffer.indexOf("\r\n.\r\n");
-        if (end === -1) return;
-        const lines = buffer.slice(0, end + 2).split("\r\n");
-        received.push({ ...data, raw: lines.map((line) => (line.startsWith(".") ? line.slice(1) : line)).join("\r\n") });
-        buffer = buffer.slice(end + 5);
-        data = undefined;
-        reply("250 Queued");
-        continue;
-      }
-      const end = buffer.indexOf("\r\n");
-      if (end === -1) return;
-      const line = buffer.slice(0, end);
-      buffer = buffer.slice(end + 2);
-      const verb = line.split(" ")[0].toUpperCase();
-      if (verb === "EHLO" || verb === "HELO") reply("250 fake-smtp.test");
-      else if (verb === "MAIL") {
-        envelope = { sender: address(line), recipients: [] };
-        reply("250 OK");
-      } else if (verb === "RCPT" && envelope) {
-        envelope.recipients.push(address(line));
-        reply("250 OK");
-      } else if (verb === "DATA" && envelope) {
-        data = envelope;
-        envelope = undefined;
-        reply("354 End data with <CR><LF>.<CR><LF>");
-      } else if (verb === "QUIT") {
-        reply("221 Bye");
-        socket.end();
-      } else reply("503 Bad sequence of commands");
-    }
-  });
-}
-
 /** An SMTP server on 127.0.0.1 for this test. `env` sends to it, never to Gmail, until the test ends. */
-async function fakeSmtp(t: TestContext): Promise<Received[]> {
-  const received: Received[] = [];
-  const server = createServer((socket) => smtpSession(socket, received));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  assert.ok(address && typeof address === "object", "the fake SMTP server listens on a TCP port");
-
+async function fakeSmtp(t: TestContext): Promise<ReceivedEmail[]> {
+  const smtp = await startFakeSmtp();
   const saved = { SMTP_HOST: env.SMTP_HOST, SMTP_PORT: env.SMTP_PORT, SMTP_USER: env.SMTP_USER, MAIL_FROM: env.MAIL_FROM, MAIL_TEAM_INBOXES: env.MAIL_TEAM_INBOXES };
   Object.assign(env, {
     SMTP_HOST: "127.0.0.1",
-    SMTP_PORT: address.port,
+    SMTP_PORT: smtp.port,
     SMTP_USER: "",
     MAIL_FROM: "ordy · Klinikum Beispielstadt <request-service@ordy.test>",
     MAIL_TEAM_INBOXES: ["team@ordy.test", "second@ordy.test"],
   });
   t.after(async () => {
     Object.assign(env, saved);
-    await new Promise((resolve) => server.close(resolve));
+    await smtp.close();
   });
-  return received;
-}
-
-/** The headers by lowercase name, with folded lines joined, and the body with LF line ends. */
-function parseEmail(raw: string) {
-  const blank = raw.indexOf("\r\n\r\n");
-  const lines: string[] = [];
-  for (const line of raw.slice(0, blank).split("\r\n")) {
-    if (line.startsWith(" ") || line.startsWith("\t")) lines.push(`${lines.pop()}${line}`);
-    else lines.push(line);
-  }
-  const headers = new Map(lines.map((line) => [line.slice(0, line.indexOf(":")).toLowerCase(), line.slice(line.indexOf(":") + 1).trim()]));
-  return { headers, body: raw.slice(blank + 4).replaceAll("\r\n", "\n") };
+  return smtp.received;
 }
 
 const request1 = {

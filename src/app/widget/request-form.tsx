@@ -2,7 +2,7 @@
 
 import { skipToken, useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import type { TRPCClientErrorLike } from "@trpc/client";
-import { ChevronDown, CircleAlert, CircleCheck, Mail, MessageSquare, Send, TriangleAlert } from "lucide-react";
+import { ChevronDown, CircleCheck, Mail, MessageSquare, Send, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import type { z } from "zod";
@@ -26,6 +26,7 @@ import type { ContentCategory } from "@/server/mail/message";
 import type { RouterOutputs } from "@/trpc/types";
 import { useTRPC } from "@/trpc/react";
 
+import { ToneMark } from "./components/request-history";
 import { usePatients } from "./data";
 import type { RequestDraft } from "./draft";
 import { navigate } from "./use-widget-route";
@@ -42,7 +43,7 @@ const FIELDS: readonly Field[] = ["patient", "given", "family", "org", "contact"
 /** Which field shows a `requestInput` issue. The contact field carries both the email and the phone messages. */
 const ISSUE_FIELD: Readonly<Record<string, Field>> = { patient: "patient", given: "given", family: "family", org: "org", email: "contact", phone: "contact" };
 
-const CHANNEL_LABEL: Record<Channel, string> = { email: "email", sms: "SMS" };
+const CHANNEL_LABEL: Record<Channel, string> = { email: "email", sms: "text message" };
 
 const REFUSED_TEXT: Record<ContentCategory, string> = {
   "patient-name": "the patient's name",
@@ -229,7 +230,8 @@ function PatientSelect({ value, invalid, onChange, onBlur }: { value: string; in
             {p.name}
             {p.birthDate && (
               <>
-                , born <CalendarDate iso={p.birthDate} />
+                {" · born "}
+                <CalendarDate iso={p.birthDate} />
               </>
             )}
           </SelectItem>
@@ -285,7 +287,7 @@ function ContactField({
 }) {
   return (
     <fieldset className="grid gap-2">
-      <legend className="mb-2 text-sm font-medium text-dim">Send the link by</legend>
+      <legend className="mb-2 text-sm font-medium text-dim">How should we reach them?</legend>
       <ToggleGroup
         type="single"
         variant="outline"
@@ -298,7 +300,7 @@ function ContactField({
           <Mail /> Email
         </ToggleGroupItem>
         <ToggleGroupItem value="sms" size="sm">
-          <MessageSquare /> SMS
+          <MessageSquare /> Text message
         </ToggleGroupItem>
       </ToggleGroup>
       <Input
@@ -328,7 +330,7 @@ function RecipientChecks({ check, draft }: { check: CheckQuery; draft: RequestDr
           <TriangleAlert />
           <AlertTitle>This email address looks wrong</AlertTitle>
           <AlertDescription>
-            {draft.org.trim()} uses @{mismatch.expectedDomain}, but the address is @{mismatch.domain}. Check it before sending.
+            {draft.org.trim()} uses @{mismatch.expectedDomain}, but you typed @{mismatch.domain}. Check it before sending.
           </AlertDescription>
         </Alert>
       )}
@@ -339,11 +341,7 @@ function RecipientChecks({ check, draft }: { check: CheckQuery; draft: RequestDr
           <ul className="grid gap-1.5">
             {lines.map((line) => (
               <li key={line.text} className="flex gap-2">
-                {line.tone === "pass" ? (
-                  <CircleCheck aria-hidden className="mt-0.5 size-4 shrink-0 text-success" />
-                ) : (
-                  <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
-                )}
+                <ToneMark tone={line.tone} />
                 <span>{line.text}</span>
               </li>
             ))}

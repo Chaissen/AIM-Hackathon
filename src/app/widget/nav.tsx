@@ -4,6 +4,7 @@ import { ChartColumn, ExternalLink, Inbox, LayoutGrid, ListChecks, LogOut, type 
 import { useState } from "react";
 
 import { Logo } from "@/components/logo";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -91,8 +92,12 @@ export function WidgetNav({ onNavigate }: { onNavigate?: () => void }) {
         <a href={widgetHref({ view: "overview" })} onClick={onNavigate} className="w-fit px-1">
           <Logo />
         </a>
-        {me.isPending && !workspace ? <Skeleton className="mx-1 h-4 w-32" /> : <p className="truncate px-1 text-xs text-dim">{me.data?.clinic ?? workspace?.session.user.clinic}</p>}
-        <Button asChild className="w-full">
+        {me.isPending && !workspace ? (
+          <Skeleton className="h-9" />
+        ) : (
+          <p className="truncate border border-hairline bg-surface px-3 py-2 text-sm font-medium text-loud">{me.data?.clinic ?? workspace?.session.user.clinic}</p>
+        )}
+        <Button asChild className="w-full justify-start">
           <a href={widgetHref(NEW_REQUEST)} onClick={onNavigate} aria-current={current(NEW_REQUEST)}>
             <Plus /> New request
           </a>
@@ -157,6 +162,14 @@ function DemoTools() {
   );
 }
 
+/** "Dr. Lena Hofer" becomes "LH": the first and the last word that is not a title. A bare Matrix ID uses its localpart. */
+function initials(displayName: string): string {
+  const name = displayName.startsWith("@") ? displayName.slice(1).split(":")[0].replace(/[._-]+/g, " ") : displayName;
+  const words = name.split(/\s+/).filter((word) => word && !word.endsWith("."));
+  const picked = words.length > 1 ? [words[0], words[words.length - 1]] : words;
+  return picked.map((word) => word.charAt(0).toUpperCase()).join("");
+}
+
 function UserBlock() {
   const me = useMe();
   const workspace = useWorkspace();
@@ -164,10 +177,15 @@ function UserBlock() {
   return (
     <div className="grid gap-0.5 p-2 leading-tight">
       {identity ? (
-        <>
-          <span className="truncate text-sm font-medium text-loud">{identity.displayName}</span>
-          <span className="truncate font-mono text-xs text-muted-foreground">{identity.mxid}</span>
-        </>
+        <div className="flex items-center gap-2.5">
+          <Avatar aria-hidden>
+            <AvatarFallback className="bg-rose-surface text-xs font-medium text-loud">{initials(identity.displayName)}</AvatarFallback>
+          </Avatar>
+          <div className="grid min-w-0 gap-0.5">
+            <span className="truncate text-sm font-medium text-loud">{identity.displayName}</span>
+            <span className="truncate font-mono text-xs text-muted-foreground">{identity.mxid}</span>
+          </div>
+        </div>
       ) : me.isPending ? (
         <div className="grid gap-1.5">
           <Skeleton className="h-4 w-28" />

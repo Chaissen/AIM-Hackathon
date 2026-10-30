@@ -38,7 +38,7 @@ The notices number the requests in the order they are created after `pnpm reset`
 
 ## Before recording
 
-1. Record on the frozen build. If upgrading an installation that served Element on 8081, follow the [gateway migration](DEPLOYMENT.md#migrate-an-existing-element-entry) first. Run `pnpm reset`, then `pnpm dev`. Do not run `pnpm test` after the reset: its request tests move the request ids on. Keep the `pnpm dev` terminal off camera: until the SMS exists, request 2's link comes from its log. If a login returns to the landing page with `?login=failed`, read the `pnpm dev` log. If it says "A private ORDY_SECRET … is required", run `pnpm exec tsx scripts/init-env.ts` and restart `pnpm dev`. The email needs the Gmail app password in `.env`, as [Send email through Gmail](DEVELOPMENT.md#send-email-through-gmail) describes. `pnpm reset` does not empty the Gmail inbox, so delete the rehearsal emails there. Their links now say "This link does not work".
+1. Record on the frozen build. If upgrading an installation that served Element on 8081, follow the [gateway migration](DEPLOYMENT.md#migrate-an-existing-element-entry) first. Run `pnpm reset`, then `pnpm dev`. Do not run `pnpm test` or `pnpm demo:seed` after the reset: the request tests move the request ids on, and the [demo seed](#a-populated-workspace) fills the workspace that the recording starts empty. Keep the `pnpm dev` terminal off camera: until the SMS exists, request 2's link comes from its log. If a login returns to the landing page with `?login=failed`, read the `pnpm dev` log. If it says "A private ORDY_SECRET … is required", run `pnpm exec tsx scripts/init-env.ts` and restart `pnpm dev`. The email needs the Gmail app password in `.env`, as [Send email through Gmail](DEVELOPMENT.md#send-email-through-gmail) describes. `pnpm reset` does not empty the Gmail inbox, so delete the rehearsal emails there. Their links now say "This link does not work".
 2. `pnpm reset` keeps the Matrix room and the notices from rehearsals. For a clean room, set a new `MATRIX_ROOM_ALIAS` in `.env`, run `pnpm matrix:bootstrap`, restart `pnpm dev`, and select the new room in the workspace's **Messages** view. Room administration is outside the workspace; use optional Element on port 8082 if needed.
 3. Open these tabs: the ordy workspace at http://localhost:8081 logged in as `lena.hofer` / `hofer-demo-2026`, with "Dr. Hofer · Outside documents" selected in **Messages**, the team's Gmail inbox, the SMS screen at http://localhost:3010/sms, the recipient's inbox at http://localhost:3010/inbox, and HAPI FHIR's web UI at http://localhost:8090. The recipient's inbox shows the SMS screen and a button that opens Gmail for the first team inbox, and the workspace's **Demo tools** card opens it. It is not in a production build. The base URL http://localhost:8090/fhir alone shows only an error, so use the search links in scenes 6 and 7.
 4. Every notice is a new message in the room until the "request sent" notice exists. Tests and rehearsals post into the same room, so use a clean room (step 2).
@@ -156,3 +156,32 @@ Never cut the HAPI view in scene 6. It is the only place the video shows the FHI
 ## If the SMS is still not sent at the freeze
 
 Record scene 7 with the log link. Cut the SMS screen in scene 7, and use the freed seconds for the HAPI view in scene 6. Name the missing SMS again in the spoken part of scene 9.
+
+## A populated workspace
+
+The recording starts from `pnpm reset`, with an empty workspace. To show the workspace full instead, for example at the booth or for screenshots, run `pnpm demo:seed` after `pnpm reset`. It needs the containers, not `pnpm dev`, and refuses while Dr. Hofer has requests, unless `--force` adds another set. It creates eleven requests about the three synthetic patients from `pnpm fhir:seed`, in the order below. After `pnpm reset` their ids are 1 to 11, unless tests ran in between.
+
+| # | Patient | Asked from | State | How it got there |
+|---|---|---|---|---|
+| 1 | Maria Beispiel | Dr. Eva Brandl, Labor Kanalstraße, by email | filed | Request 1 with M2 and M3: `thomas.wagner` logs in and is refused, `eva.brandl` uploads `lab-result-max-beispiel.md` (`patient_mismatch`), then `lab-result-maria-beispiel.md` |
+| 2 | Maria Beispiel | Stefan Kern, Reha Waldblick, by SMS | filed | Request 2: `stefan.kern` uploads `rehab-report-maria-beispiel.md`. Filed rather than waiting as in the prototype, so Stefan Kern becomes a verified sender and Maria's record has the discharge report. |
+| 3 | Maria Beispiel | Eva Brandl at `eva.brandl@labor-kanaI.example` | sent | M1 after **Send anyway**: `anna.huber` logs in and is refused. One failed check. |
+| 4 | Maria Beispiel | Eva Brandl at `eva.brandl@labor-kanaI.example` | awaiting_confirmation | M1 at the address warning, left for **Send anyway** or **Cancel** |
+| 5 | Johann Muster | Eva Maria Brandl, Labor Kanalstraße, by email | identity_held | `eva.brandl` logs in. Her name matches "Eva Maria Brandl" only in part, so Dr. Hofer decides. |
+| 6 | Maria Beispiel | Dr. Eva Brandl, by email | answer_held | `eva.brandl` uploads `scripts/fixtures/documents/lab-result-maria-beispiel-liver.md`, validated by Dr. Martin Brandl. The eHVD does not list him at Labor Kanalstraße, so the release check holds the answer. |
+| 7 | Johann Muster | Karl Heinz Moser-Wallner, Reha Waldblick, by SMS | sent | Nobody has opened it |
+| 8 | Petra Probst | Dr. Eva Brandl, by email | verified | `eva.brandl` logged in and has not uploaded yet |
+| 9 | Maria Beispiel | Stefan Kern, by SMS | cancelled | Dr. Hofer cancels it |
+| 10 | Petra Probst | Stefan Kern, by SMS | expired | Stefan Kern opens the link and does not answer. See below. |
+| 11 | Johann Muster | Dr. Eva Brandl, by email | locked | `thomas.wagner`, `eva.brandl2` (another person number than the bound Eva Brandl), and `anna.huber` fail the identity check |
+
+Everything goes through the code the widget, the portal, and the login use, so the audit log, the bindings, the held answer, the Tasks, and the filed Bundles on HAPI agree, and the notices reach Dr. Hofer's room. Dr. Hofer's steps are tRPC calls through `createCaller`. Each outside person opens the link (`link_opened`) and logs in through the route handlers of `POST /auth/login` and `GET /auth/callback`, which the script calls in its own process. Between the two, it posts the username and password to Keycloak's real login form and catches the redirect to the callback without following it. So Keycloak checks the password and signs the ID token, and the callback verifies it and runs the identity checks, as for a browser. Uploads go through `portal.answer` with the session the callback set. The seed sends no email: each request email is built and passes the content check, and nodemailer then hands it to an SMTP server inside the script instead of Gmail, so Gmail gets nothing and no app password is needed. The script reads the email links from there. SMS links come from the line the request service prints in development, which the script catches, so it never prints a link.
+
+Two things differ from a real run:
+
+- All requests are created within a minute, so the workspace shows them all as just sent.
+- A link lasts seven days, so request 10 cannot expire on its own. The script moves that one request's `expires_at` into the past and calls `expireDueRequests`, the function every read calls. It sets the request `expired`, clears its ID token, and the Task becomes `failed`.
+
+The login route handlers sign cookies with `ORDY_SECRET`. Without one in `.env`, the script uses a random key of its own, and the cookies never leave its process.
+
+The script prints only request ids, states, and document types. At the end it checks the [data rules](COMPLIANCE_AND_SAFETY.md#data-we-keep) on what it stored: no closed request keeps an ID token, a held answer exists only for a request in `answer_held`, the Max Beispiel upload left only its hash in the audit log, and no audit entry holds document text. It exits with an error if one fails.

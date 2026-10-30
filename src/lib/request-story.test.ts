@@ -103,7 +103,7 @@ test("a failed login keeps its own line when no wrong_person of the same actor f
   ]);
 });
 
-test("holds, decisions, refused links, and SMS read as their sentences", () => {
+test("holds, decisions, refused links, and text messages read as their sentences", () => {
   const request2 = { channel: "sms", address: "+43 660 000 0101", org: "Reha Waldblick" } as const;
   const audit = story(
     ["request_sent", "sent", { docType: "rehab-report", channel: "sms", address: request2.address, sentAnyway: false }, hofer],
@@ -119,17 +119,25 @@ test("holds, decisions, refused links, and SMS read as their sentences", () => {
     ["request_decided", "accepted", {}, hofer],
   );
   assert.deepEqual(lines(request2, audit).reverse(), [
-    [1, "Sent by SMS to +43 660 000 0101", "pass"],
+    [1, "Sent by text message to +43 660 000 0101", "pass"],
     [2, "A login could not be finished, because ID Austria could not be reached", "hold"],
-    [3, "Petra Brandl logged in and needs your check", "hold"],
-    [4, "You accepted the person", "pass"],
+    [3, "Petra Brandl logged in, but the name only partly matches", "hold"],
+    [4, "You confirmed the sender", "pass"],
     [5, "You accepted the document", "pass"],
     [6, "Added to the patient record after you accepted it", "pass"],
-    [7, "You rejected the person", "none"],
+    [7, "You rejected the sender", "none"],
     [8, "You rejected the document", "none"],
     [9, "You cancelled the request", "none"],
     [10, "Someone opened the link after it stopped working", "none"],
     [11, "Unreadable audit entry: request_decided, accepted", "none"],
+  ]);
+});
+
+test("a hold for another reason than the partial name asks for a check", () => {
+  const audit = story(sent(), ["identity_checked", "hold", { checks: [{ check: "service", result: "hold", reason: "ehvd_unreachable" }] }, eva]);
+  assert.deepEqual(lines(request1, audit), [
+    [2, "Eva Brandl logged in and needs your check", "hold"],
+    [1, "Sent by email to eva.brandl@labor-kanal.example", "pass"],
   ]);
 });
 

@@ -1,0 +1,38 @@
+{
+  "resourceType": "Patient",
+  "id": "petra-probst",
+  "identifier": [
+    {
+      "system": "urn:example:klinikum-beispielstadt:mrn",
+      "value": "KB-000204"
+    }
+  ],
+  "active": true,
+  "name": [
+    {
+      "use": "official",
+      "family": "Probst",
+      "given": ["Petra"]
+    }
+  ],
+  "telecom": [
+    {
+      "system": "phone",
+      "value": "+43 660 000 0177",
+      "use": "mobile"
+    }
+  ],
+  "gender": "female",
+  "birthDate": "1975-11-19",
+  "address": [
+    {
+      "line": ["Am Anger 3"],
+      "city": "Beispielstadt",
+      "postalCode": "1000",
+      "country": "AT"
+    }
+  ],
+  "managingOrganization": {
+    "display": "Klinikum Beispielstadt"
+  }
+}

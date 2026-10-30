@@ -69,11 +69,16 @@ Check that it works:
 |---|---|
 | `pnpm dev` | Next.js (`dev:web`) and the Matrix bot (`dev:bot`), both reload on changes |
 | `pnpm typecheck` · `pnpm lint` · `pnpm test` · `pnpm build` | Checks before every push |
+<<<<<<< HEAD
 | `pnpm reset` | Empty Postgres and HAPI, and reload the patient. The Gmail inbox keeps its emails. |
+=======
+| `pnpm reset` | Empty Postgres and HAPI, and reload the three synthetic patients |
+>>>>>>> 6541ecc (feat(widget): bring the workspace close to the prototype)
 | `pnpm citizen --given <given> --family <family> --birthdate <yyyy-mm-dd>` | Add a test citizen to the simulated ID Austria, for example a new outside person |
 | `pnpm db:generate --name <name>` · `pnpm db:migrate` | Create a migration from `src/server/db/schema.ts`, apply it |
 | `pnpm db:studio` | Browse the database |
-| `pnpm fhir:seed` · `pnpm matrix:bootstrap` | Load the scenario patient; create the room and pin the widget |
+| `pnpm fhir:seed` · `pnpm matrix:bootstrap` | Load the three synthetic patients; create the room and pin the widget |
+| `pnpm demo:seed` | Fill Dr. Hofer's workspace with eleven synthetic requests in every state, through the real code paths ([Demo](docs/DEMO.md#a-populated-workspace)) |
 | `pnpm scenario` · `pnpm validate` · `pnpm audit:check` | All four metrics in one run, once its flow steps have code that drives them (today they report blocked); the HL7 validator on the filed resources; the six audit events per request |
 
 ## Architecture
