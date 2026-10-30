@@ -60,6 +60,27 @@ export const requests = pgTable("requests", {
   matrixEvent: text("matrix_event"),
 });
 
+/** The sender of a held answer, as ID Austria named them at login. */
+export type HeldAnswerSender = { givenName: string; familyName: string; gdaOid: string | null };
+
+// An answer that passed the patient check but waits for Dr. Hofer, because the release check did not pass.
+// Accept files it and deletes the row, Reject deletes it. docs/ARCHITECTURE.md, "Storage".
+export const heldAnswers = pgTable("held_answers", {
+  requestId: integer("request_id")
+    .primaryKey()
+    .references(() => requests.id, { onDelete: "cascade" }),
+  // The upload as text. It passed the patient check, so it is about the requested patient.
+  markdown: text("markdown").notNull(),
+  sha256: text("sha256").notNull(),
+  sender: jsonb("sender").$type<HeldAnswerSender>().notNull(),
+  // The ID token from the sender's login, exactly as received, for the Provenance signature.
+  idToken: text("id_token").notNull(),
+  // The sentence Dr. Hofer got with the held notice.
+  reason: text("reason").notNull(),
+  // When the sender pressed send.
+  sentAt: timestamp("sent_at", { withTimezone: true }).notNull(),
+});
+
 // Which ID Austria person number answered as a given person at a given organisation. docs/IDENTITY.md, "Person number binding".
 export const bindings = pgTable(
   "bindings",
