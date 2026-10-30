@@ -198,6 +198,8 @@ export type LoginRun = {
   /** The change that was tried, and whether the request was still in `from`. */
   transition: LoginTransition | null;
   applied: boolean;
+  /** The request is now bound to this login's person: a pass on the answer page, or an applied hold. Only they get a session. */
+  bound: boolean;
   /** The count after a fail, from `incrementFailedChecks`. Null when nothing was counted. */
   failedChecks: number | null;
   audit: AuditEntry[];
@@ -220,7 +222,7 @@ export async function runIdentityChecks(
   unreachable: ReadonlyArray<"ehvd"> = [],
 ): Promise<LoginRun> {
   if (!isLive(request.state)) {
-    return { result: null, page: "closed", transition: null, applied: false, failedChecks: null, audit: [], notice: null };
+    return { result: null, page: "closed", transition: null, applied: false, bound: false, failedChecks: null, audit: [], notice: null };
   }
   const live = { ...request, state: request.state };
 
@@ -263,5 +265,6 @@ export async function runIdentityChecks(
       console.error(`identity check: notice for request ${request.id} failed`, error);
     }
   }
-  return { result: decision.result, page, transition, applied, failedChecks, audit: decision.audit, notice };
+  const bound = page === "answer" || (applied && transition?.to === "identity_held");
+  return { result: decision.result, page, transition, applied, bound, failedChecks, audit: decision.audit, notice };
 }

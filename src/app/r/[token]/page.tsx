@@ -3,22 +3,24 @@ import { headers } from "next/headers";
 import { Suspense } from "react";
 
 import { PortalFrame, PortalMessage } from "@/components/portal/portal-frame";
+import { Alert, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { findPublicRequest } from "@/server/portal/data";
 
 const formatDate = (d: Date) => d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
 
 // GET /r/{token}: shows only the requesting doctor and clinic and the login button (docs/ARCHITECTURE.md).
-export default function RequestLanding({ params }: PageProps<"/r/[token]">) {
+export default function RequestLanding(props: PageProps<"/r/[token]">) {
   return (
     <Suspense fallback={<PortalFrame>{null}</PortalFrame>}>
-      <Landing params={params} />
+      <Landing {...props} />
     </Suspense>
   );
 }
 
-async function Landing({ params }: { params: PageProps<"/r/[token]">["params"] }) {
+async function Landing({ params, searchParams }: PageProps<"/r/[token]">) {
   const { token } = await params;
+  const loginFailed = (await searchParams).login === "failed";
   // X-Forwarded-For as Next.js passes it on. Next.js fills it from the socket only when the client sent none, so without
   // a proxy in front the client can set it. The hash is a hint for the audit log, not proof. Only the hash is stored.
   const ip = (await headers()).get("x-forwarded-for")?.split(",").at(-1)?.trim() || null;
@@ -46,12 +48,18 @@ async function Landing({ params }: { params: PageProps<"/r/[token]">["params"] }
             Log in with ID Austria to see what is needed. You need no account and nothing to install.
           </p>
         </div>
+        {loginFailed && (
+          <Alert variant="destructive">
+            <AlertTitle>The login did not work. Try again.</AlertTitle>
+          </Alert>
+        )}
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <Button size="lg" asChild>
-            <a href={`/auth/login?token=${encodeURIComponent(token)}`}>
+          <form action="/auth/login" method="post">
+            <input type="hidden" name="token" value={token} />
+            <Button size="lg" type="submit">
               <ShieldCheck /> Log in with ID Austria
-            </a>
-          </Button>
+            </Button>
+          </form>
           <span className="text-sm text-muted-foreground">Valid until {formatDate(request.expiresAt)}</span>
         </div>
       </section>

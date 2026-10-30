@@ -45,6 +45,12 @@ export async function findPublicRequest(token: string, { ip }: { ip: string | nu
   return live ? publicPart(request) : null;
 }
 
+/** The request behind a link that still works, for the login. Unlike findPublicRequest, it writes no `link_opened`. */
+export async function findOpenRequest(token: string): Promise<RequestRow | null> {
+  const request = await findRequestByToken(db, token);
+  return request && linkIsLive(request.state) ? request : null;
+}
+
 /**
  * The request bound to the ID Austria session, only while it is `verified` and only for the person it is bound to.
  * Reads the patient from the FHIR server.
