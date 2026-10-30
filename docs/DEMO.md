@@ -8,7 +8,7 @@ The steps follow the documented target behaviour in [Architecture](ARCHITECTURE.
 - **Partly**: the screen exists, but the data or the action behind it does not yet.
 - **Not built**: waits for the tasks named. [Timeline](TIMELINE.md) has the owners.
 
-States as of 30 October 2026, 02:00, with the filing (T13) and the metric runner (T17, T18) on `main`. Check them again on the frozen build before recording. Cut every step that is still not built, or replace it with one spoken sentence. If you show a screen from `prototype/ordy-app`, label it on screen as a design mock-up, not the running app.
+States as of 30 October 2026, 02:00, with the filing (T13), the metric runner (T17, T18), and the AI fallback parser (T22) on `main`. Check them again on the frozen build before recording. Cut every step that is still not built, or replace it with one spoken sentence. If you show a screen from `prototype/ordy-app`, label it on screen as a design mock-up, not the running app.
 
 The notices below quote the names as [Architecture](ARCHITECTURE.md#matrix-bot) writes them, for example "Dr. Eva Brandl". The request form has no title field, so check on the frozen build how the notices write the names.
 
@@ -76,7 +76,7 @@ Say: A forwarded link is useless. Only the person Dr. Hofer named can open it.
 | Close the private window, open the same link in a new one, and click **Log in with ID Austria** | The Keycloak login titled "ID Austria (Simulation)" | Partly: the Keycloak realm works, ordy's login is not built (T07) |
 | Log in as `eva.brandl` / `demo-eva` | The answer page: "Lab result for Maria Beispiel, born 12 March 1961", an upload field, and fields for the patient's name and birth date | Partly: the page exists, loading its data is not built (T04, T07) |
 
-Say: ID Austria is simulated here.
+Say: No account, no app: she logs in with ID Austria, simulated here.
 
 ## Scene 5: M3, wrong patient (8 s)
 
@@ -104,7 +104,8 @@ Say: Dr. Hofer gets structured values she can trend and reuse, not a scan, and t
 | In the widget, pick **Rehab discharge report**, Stefan Kern, Reha Waldblick, `+43 660 000 0101`, send | The form switches to SMS. The notice "Request 2 sent to Stefan Kern (Reha Waldblick) by SMS." | Partly: the form works, sending is not built (T04, T05, T06) |
 | Open the SMS screen and the link in it | The SMS on a phone frame, then the landing page | Partly: the SMS screen exists, the SMS log is not built (T06) |
 | Log in as `stefan.kern` / `demo-stefan`, upload `rehab-report-maria-beispiel.md`, enter Maria Beispiel and 12 March 1961, send | The answer page, then a confirmation | Partly: the answer page and form exist, the login and the upload are not built (T07, T09) |
-| Switch to Element, open the thread of request 2, then HAPI | "Rehab discharge report for Maria Beispiel from Stefan Kern is filed. Identity checked with ID Austria." and a DocumentReference with the report attached | Partly: the notice text and the filing Bundle (T13) are built, the upload, the rehab mapper, and the release check are not (T09, T14, T15) |
+| Switch to Element and open the thread of request 2 | "Rehab discharge report for Maria Beispiel from Stefan Kern is filed. Identity checked with ID Austria." | Partly: the notice text and the filing Bundle (T13) are built, the upload, the rehab mapper, and the release check are not (T09, T14, T15) |
+| Open HAPI FHIR | A DocumentReference with the report attached, and its Provenance | Not built: the rehab mapper (T14) and the upload (T09). The filing Bundle is built (T13) but not connected. |
 
 Say: Stefan Kern only sends the report. The Provenance names Dr. Leitner, who wrote it, as author and Stefan Kern as informant.
 
@@ -123,7 +124,7 @@ Say: ordy warns before sending, and even if Dr. Hofer sends anyway, the stranger
 
 | Click | What you see | State |
 |---|---|---|
-| Open the **Audit log** tab in the widget | The entries of request 1 with all six event types: "Request sent", "Link opened", "Identity checked", "Answer sent", "Answer filed", and "Misdelivery caught", plus the "Misdelivery caught" entries of request 3 for M1 | Partly: the tab works, the request flow does not write entries yet (T04) |
+| Open the **Audit log** tab in the widget | The entries of request 1 with all six event types: "Request sent", "Link opened", "Identity checked", "Answer sent", "Answer filed", and "Misdelivery caught", plus, for M1, the "Identity checked" entry with outcome `fail` and the "Misdelivery caught" entries of request 3 | Partly: the tab works, the request flow does not write entries yet (T04) |
 | Show the metric results from the README | FHIR validation, effort, misdeliveries, and audit coverage | Partly: `pnpm scenario` (T17, T18) runs and writes the table to `out/metrics/metrics.md`, but reports the flow steps as blocked. The stopwatch test (T19) is not done. |
 
 Say, filled in from the frozen build and the README status: "What works: …. Not built yet: …. Simulated: ID Austria with Keycloak and without the phone-app confirmation, the eHVD with our mock, email in Mailpit, and SMS on our SMS screen."
@@ -146,7 +147,7 @@ Record only what is Ready, and say plainly what is not built. A possible order:
 
 1. Dr. Hofer's room, the widget, and the request form with its input check. Its message "Sending from the widget is not connected yet." is honest on screen.
 2. `!status` in the room, with the checks of the database, the FHIR server, and Matrix.
-3. The tests for M1, M2, and M3 in `pnpm test`: the login checks in `src/server/identity/login.test.ts` and the patient check in `src/server/documents/patient-check.test.ts`.
+3. The tests for M1, M2, and M3 in `pnpm test`: the login checks in `src/server/identity/login.test.ts` and the patient check in `src/server/documents/patient-check.test.ts`. Also the filing Bundle with Provenance and Task in `src/server/fhir/filing.test.ts` and the AI fallback in `src/server/documents/fallback.test.ts`.
 4. The eHVD mock at http://localhost:8095/healthz.
 5. The output of `pnpm scenario`: which steps pass and which are blocked, and why.
 6. The design in one sentence per step, then scene 9 with the list of what is not built, and scene 10.
