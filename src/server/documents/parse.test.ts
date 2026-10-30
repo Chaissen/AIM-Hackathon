@@ -423,3 +423,44 @@ test("a backslash hard break, an HTML block, or a dash also put the value on the
     ["\nPatient -\nMax Beispiel\n", ["several-patients"]],
   ]);
 });
+
+// #46 review, round 2.
+
+test("a failed value in a table's first row never makes the table columns", () => {
+  const table = (...rows: string[]) => `\n## Details\n\n${rows[0]}\n|---|---|\n${rows.slice(1).join("\n")}\n`;
+  expectSafety(
+    [
+      [table("| Patient | maria beispiel |", "| Date of birth | 12.03.1961 |", "| Ward | 3 |"), []],
+      [table("| Patient | Maria Beispiel (f) |"), []],
+      [table("| Date of birth | 12.03.1961 (64 y) |", "| Patient | Maria Beispiel |", "| Ward | 3 |"), []],
+      [table("| Patient | Max Beispiel (m) |", "| Ward | 3 |"), ["several-patients"]],
+      [table("| Date of birth | 01.01.1960 (65 y) |", "| Ward | 3 |"), ["several-birth-dates"]],
+    ],
+    [rehabLf(), referral],
+  );
+});
+
+test("a next-line value is read as on one line, unless it is a sentence", () => {
+  const next = (key: string, value: string) => `\n${key}:\n${value}\n`;
+  const max = [
+    "Beispiel, Max",
+    "Max Beispiel, 01.01.1960",
+    "Max Beispiel (01.01.1960)",
+    "Max Beispiel (*01.01.1960)",
+    "Max Beispiel - 01.01.1960",
+    "Max Beispiel; DOB 01.01.1960",
+    "Max Beispiel, b. 01.01.1960",
+    "Max Beispiel, male, 65",
+    "Max Beispiel Jr.",
+    "max beispiel",
+    "Max Josef Karl Peter Paul Beispiel",
+  ];
+  expectSafety([
+    ...max.map((v): [string, string[]] => [next("Patient", v), v.includes(";") ? ["several-patients", "several-birth-dates"] : ["several-patients"]]),
+    [next("Date of birth", "01.01.1960 (65 years)"), ["several-birth-dates"]],
+    [next("Date of birth", "12th March 1961"), ["several-birth-dates"]],
+    [next("Patient", "maria beispiel"), []],
+    [next("Date of birth", "12.03.1961 (64 y)"), []],
+    [next("Patient", "Mobile, walks with crutches."), []],
+  ]);
+});

@@ -520,3 +520,26 @@ test("a next-line value with DOB, a backslash hard break, an HTML block, or a da
     assert.equal((await record(insertAfter(lab, "Reported: 22.10.2026 11:40\n", line), goodLab())).patient.name, "Maria Beispiel", line);
   }
 });
+
+// #46 review, round 2.
+
+test("a failed value in a table's first row is read as that value in the fallback, never as a column name", async () => {
+  const table = (...rows: string[]) => `\n## Details\n\n${rows[0]}\n|---|---|\n${rows.slice(1).join("\n")}\n`;
+  // Without a patient line, `| Patient | Beispiel, Maria |` is an unreadable name, never the patient "Ward".
+  const noName = rehab.replace("Patient name: Maria Beispiel\n", "") + table("| Patient | Beispiel, Maria |", "| Ward | 3 |");
+  const errors = await unreadable(noName);
+  assert.ok(errors.includes('The patient line "Beispiel, Maria" has more than a name and a birth date such as ", born 12 March 1961".'), errors.join("; "));
+  // The same patient in lower case, or the birth date with the age after it, is no refusal. Code reads the value as
+  // written, so the model's `Maria Beispiel` or `12.03.1961` differs from it and the answer is held unverified.
+  assert.deepEqual(await disagrees(`${rehab}${table("| Date of birth | 12.03.1961 (64 y) |", "| Ward | 3 |")}`, goodRehab()), ['patientBirthDate: "12.03.1961"']);
+  const lower = `${rehab}${table("| Patient | maria beispiel |", "| Date of birth | 12.03.1961 |", "| Ward | 3 |")}`;
+  assert.deepEqual(await disagrees(lower, goodRehab()), ['patientName: "Maria Beispiel"']);
+});
+
+test("a next-line value is read as on one line in the fallback, unless it is a sentence", async () => {
+  for (const value of ["Beispiel, Max", "Max Beispiel (01.01.1960)", "Max Beispiel, male, 65", "max beispiel", "Max Beispiel Jr."]) {
+    assert.ok((await refused(insertAfter(lab, "Reported: 22.10.2026 11:40\n", `Patient:\n${value}`))).includes("several-patients"), value);
+  }
+  assert.deepEqual(await refused(insertAfter(lab, "Reported: 22.10.2026 11:40\n", "Date of birth:\n01.01.1960 (65 years)")), ["several-birth-dates"]);
+  assert.equal((await record(insertAfter(lab, "Reported: 22.10.2026 11:40\n", "Patient:\nMobile, walks with crutches."), goodLab())).patient.name, "Maria Beispiel");
+});

@@ -83,34 +83,44 @@ const unmark = (text: string) =>
     .replace(/\\\s*$/, "")
     .trim();
 
-/** `12.03.1961`, `1961-03-12`, `12 March 1961`, or `March 12, 1961`, also an impossible date such as `31.02.1961`. */
-const DATE_SHAPE = /^(?:\d{1,4}[./-] ?\d{1,2}[./-] ?\d{2,4}|\d{1,2}\.? \p{L}{3,}\.? \d{4}|\p{L}{3,}\.? \d{1,2},? \d{4})$/u;
-const looksLikeDate = (text: string) => DATE_SHAPE.test(text.replace(/\s+/g, " ").trim().replace(/[.,;]$/, ""));
+/**
+ * A value that starts with a date: `12.03.1961`, `1961-03-12`, `12 March 1961`, `12th March 1961`, or `March 12, 1961`,
+ * also an impossible date such as `31.02.1961`, and anything after it, such as `12.03.1961 (64 y)`.
+ */
+const DATE_START = /^(?:\d{1,4}[./-] ?\d{1,2}[./-] ?\d{2,4}|\d{1,2}(?:st|nd|rd|th)?\.? \p{L}{3,}\.? \d{4}|\p{L}{3,}\.? \d{1,2}(?:st|nd|rd|th)?,? \d{4})(?![\p{L}\d])/iu;
 const NAME_WORD = /^\p{L}[\p{L}'.-]*$/u;
-/** `Maria Beispiel` or `BEISPIEL Maria`: a few words of letters, the first and last capitalised, not a sentence. */
-function looksLikeName(text: string, minWords: number): boolean {
-  const words = text.trim().split(/\s+/);
-  return (
-    words.length >= minWords &&
-    words.length <= 5 &&
-    words.every((w) => NAME_WORD.test(w)) &&
-    /^\p{Lu}/u.test(words[0]) &&
-    /^\p{Lu}/u.test(words[words.length - 1]) &&
-    !/[.!?;:]$/.test(text.trim())
-  );
-}
+/** Words a name never has. */
+const PROSE_WORDS = new Set(["a", "an", "the", "is", "was", "were", "are", "has", "had", "have", "for", "with", "after", "before", "on", "in", "at", "to", "from", "of", "and", "or"]);
+/** A sentence: a verb, or a final `.` after a word of four letters or more, in a value of four words or more. */
+const isSentence = (value: string) =>
+  /\b(?:is|was|were|are|has|had|have|been|admitted|discharged|presented|reports|reported|underwent|walks|lives)\b/i.test(value) ||
+  (value.split(/\s+/).length >= 4 && /\p{L}{4,}[.!?]$/u.test(value));
 
 /**
- * The value reads as a value for this identity key, not as a sentence or another key: a date for a birth date key,
- * and for a patient key a name of two to five words, optionally with a birth clause. Only a value the scan takes from
- * another place than the key's own line must pass: the next line, or the header row of a two-column table.
+ * The value reads as a value for this identity key, not as a sentence or another key. For a birth date key it starts
+ * with a date. For a name key the part before the first `,`, `(`, `;`, ` - `, or birth clause is one to six words of
+ * letters, in any case, with a suffix such as `Jr.`, and not prose. `patientIdentity()` then reads the whole value as on
+ * one line: `Beispiel, Max` is unreadable and `Max Beispiel (01.01.1960)` another name. Only a value from the next line
+ * must pass, so `Patient:` above `72-year-old woman after a total hip replacement on the left.` names no one.
  */
 function plausibleValue(norm: string, value: string): boolean {
   if (IDENTITY_KEYS.has(value.toLowerCase().replace(/[*_:]/g, "").trim())) return false;
-  if (BIRTH_KEYS.has(norm) || HEADER_BIRTH_KEYS.has(norm)) return looksLikeDate(value);
-  if (FIRST_KEYS.has(norm) || LAST_KEYS.has(norm)) return looksLikeName(value, 1);
-  const split = splitPatientValue(value);
-  return split !== null && looksLikeName(split.name, 2) && (split.birth === null || looksLikeDate(split.birth));
+  if (BIRTH_KEYS.has(norm) || HEADER_BIRTH_KEYS.has(norm)) return DATE_START.test(value);
+  const name = value.split(/[,(;]|\s[-–—]\s|\s(?:born|dob|d\.o\.b\.?|date of birth)(?![a-z])/i)[0].trim();
+  const words = name.split(/\s+/);
+  const last = words[words.length - 1];
+  return (
+    !isSentence(value) &&
+    words.length <= 6 &&
+    words.every((w) => NAME_WORD.test(w) && !PROSE_WORDS.has(w.toLowerCase())) &&
+    (!last.endsWith(".") || last.length <= 3)
+  );
+}
+
+/** `12.03.1961 (64 y)` as 12 March 1961, unless more follows that may be a second date. */
+function leadingDate(text: string): IsoDate | null {
+  const m = DATE_START.exec(text);
+  return m && !/\d{1,4}[./-]\d|\d{4}/.test(text.slice(m[0].length)) ? parseDateWide(m[0]) : null;
 }
 
 /**
@@ -142,20 +152,23 @@ export function isBareIdentityKey(line: string): boolean {
 /** `Max Beispiel DOB` as the key of `Max Beispiel DOB: 01.01.1960`: a name with a birth clause, not a key. */
 const ENDS_IN_BIRTH_KEY = /\s(?:born|dob|d\.o\.b|date of birth)$/;
 
+/** Column names that are no value for an identity key, so `| Patient | Ward |` is a header row, not a patient line. */
+const COLUMN_NAMES = new Set(["ward", "room", "bed", "age", "sex", "gender", "phone", "telephone", "address", "email", "department", "station", "case number", "insurance number", "admission", "discharge", "diagnosis", "physician", "doctor", "notes", "status"]);
+
 /**
  * The rows of a two-column table as key lines. A lab result table has more columns, and the first column of a
- * two-column one names tests, never the patient. The header row decides the layout:
- * - Key/value, such as `| Patient | Max Beispiel |` or `| Ward | 3 |`: every row whose first cell is a key, the header
- *   row too, such as `| **Date of birth:** | 01.01.1960 |`.
- * - Columns, when the second header cell is an identity key, or the first is one and the second is no value for it,
- *   such as `| Patient | Ward |` or `| Date of birth | Age |`: each data row gives each column's key with its cell.
+ * two-column one names tests, never the patient. The second header cell decides the layout:
+ * - Columns, when it is a column name: an identity key or a word such as `Ward` or `Age`, as in `| Patient | Ward |`
+ *   or `| Date of birth | Age |`. Each data row gives each column's key with its cell.
+ * - Key/value otherwise, such as `| Patient | Max Beispiel |`, `| Patient | Beispiel, Maria |`, or `| Ward | 3 |`:
+ *   every row whose first cell is a key, the header row too, read as the same line would be.
  */
 export function keyValueRows(rows: string[][], header: boolean): KeyLine[] {
   if (!rows.length || rows.some((cells) => cells.length !== 2)) return [];
   const cells = rows.map((r) => r.map((c) => unmark(c)));
   const keyCell = (cell: string) => cell.replace(/[\s*_]*:[\s*_]*$/, "");
   const [k0, k1] = cells[0].map((c) => keyValue(keyCell(c), "-", header));
-  const columns = (k1 && IDENTITY_KEYS.has(k1.norm)) || (k0 && IDENTITY_KEYS.has(k0.norm) && !plausibleValue(k0.norm, cells[0][1]));
+  const columns = k1 !== null && (IDENTITY_KEYS.has(k1.norm) || COLUMN_NAMES.has(k1.norm));
   if (columns) return cells.slice(1).flatMap((row) => [k0, k1].flatMap((k, j) => (k && keyValue(k.key, row[j], header)) || []));
   return cells.flatMap(([key, value]) => keyValue(keyCell(key), value, header) ?? []);
 }
@@ -226,8 +239,14 @@ export type PatientIdentity = {
   refusals: { safety: SafetyRefusal; error: string }[];
 };
 
-/** Lower-case name words in order, so `BEISPIEL Maria` and `Maria Beispiel` are the same patient. */
-const words = (name: string) => name.toLowerCase().split(/[\s-]+/).filter(Boolean).sort();
+/** Lower-case name words in order, so `BEISPIEL Maria`, `Maria Beispiel`, and `Maria Beispiel (f)` are the same patient. */
+const words = (name: string) =>
+  name
+    .toLowerCase()
+    .replace(/\((?:f|m|w|d|x|female|male)\)/g, " ")
+    .split(/[\s-]+/)
+    .filter(Boolean)
+    .sort();
 
 /** The patient as the file names them, and a refusal when the lines name more than one patient or birth date. */
 export function patientIdentity(lines: KeyLine[]): PatientIdentity {
@@ -239,7 +258,7 @@ export function patientIdentity(lines: KeyLine[]): PatientIdentity {
   const addName = (name: string) => names.set(words(name).join(" "), name);
   const addBirth = (raw: string) => {
     const text = raw.trim().replace(/[,;]$/, "");
-    const date = parseDateWide(text) ?? parseDateWide(text.replace(/\.$/, ""));
+    const date = parseDateWide(text) ?? parseDateWide(text.replace(/\.$/, "")) ?? leadingDate(text);
     births.set(date ?? `text:${text.toLowerCase()}`, { text, date });
   };
   for (const { norm, value, header } of lines) {
