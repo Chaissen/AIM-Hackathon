@@ -91,7 +91,7 @@ test("blood count: winter offset, 10^12/L, and four values outside the range", (
   assert.equal(row(doc, "Haematocrit").ucum, "%");
 });
 
-test("blood count: CRP 14 with the range < 5 is H", { todo: "parser gap: one-sided reference ranges" }, () => {
+test("blood count: CRP 14 with the range < 5 is H", () => {
   const crp = row(lab("lab-result-maria-beispiel-blood-count.md"), "C-reactive protein");
   assert.deepEqual([crp.low, crp.high, crp.rangeText, crp.interpretation], [null, 5, "< 5", "H"]);
 });
@@ -130,7 +130,7 @@ test("metabolic: family name first in capitals, and the ranges that have two end
   assert.equal(row(doc, "HbA1c").ucum, "%");
 });
 
-test("metabolic: LDL < 116 and HDL > 45 keep one end each", { todo: "parser gap: one-sided reference ranges" }, () => {
+test("metabolic: LDL < 116 and HDL > 45 keep one end each", () => {
   const doc = lab("lab-result-maria-beispiel-metabolic.md");
   const ldl = row(doc, "LDL cholesterol");
   const hdl = row(doc, "HDL cholesterol");

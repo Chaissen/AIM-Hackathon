@@ -148,6 +148,38 @@ export function rowUnit(loinc: string, unitText: string): { ucum: string | null 
   return { ucum };
 }
 
+type Bound = { value: number; strict: boolean };
+type Range = { low: Bound; high: Bound | null } | { low: Bound | null; high: Bound };
+
+export const twoSided = (low: number, high: number): Range => ({ low: { value: low, strict: false }, high: { value: high, strict: false } });
+
+const ONE_SIDED: [sign: string, end: "low" | "high", strict: boolean][] = [
+  ["<=", "high", false],
+  ["≤", "high", false],
+  ["<", "high", true],
+  [">=", "low", false],
+  ["≥", "low", false],
+  [">", "low", true],
+];
+
+export function oneSided(text: string): Range | null {
+  const t = text.trim();
+  const found = ONE_SIDED.find(([sign]) => t.startsWith(sign));
+  if (!found) return null;
+  const [sign, end, strict] = found;
+  const value = toNumber(t.slice(sign.length));
+  if (value === null) return null;
+  return end === "high" ? { low: null, high: { value, strict } } : { low: { value, strict }, high: null };
+}
+
+export function rangeFields(value: number, range: Range | null): Pick<LabRow, "low" | "high" | "interpretation"> {
+  if (!range) return { low: null, high: null, interpretation: null };
+  const { low, high } = range;
+  const below = low !== null && (value < low.value || (low.strict && value === low.value));
+  const above = high !== null && (value > high.value || (high.strict && value === high.value));
+  return { low: low?.value ?? null, high: high?.value ?? null, interpretation: below ? "L" : above ? "H" : "N" };
+}
+
 function labRows(table: Table, errors: string[]): LabRow[] {
   const col = Object.fromEntries(LAB_COLUMNS.map((c) => [c, table.header.indexOf(c)])) as Record<(typeof LAB_COLUMNS)[number], number>;
   const missing = LAB_COLUMNS.filter((c) => col[c] < 0);
@@ -175,10 +207,11 @@ function labRows(table: Table, errors: string[]): LabRow[] {
       errors.push(`${label}: ${unit.error}`);
       return [];
     }
-    const [lowText, highText, ...extra] = cell("Reference range").split(" to ");
+    const rangeText = cell("Reference range");
+    const [lowText, highText, ...extra] = rangeText.split(" to ");
     const low = extra.length ? null : toNumber(lowText ?? "");
     const high = extra.length ? null : toNumber(highText ?? "");
-    const hasRange = low !== null && high !== null;
+    const range = low !== null && high !== null ? twoSided(low, high) : oneSided(rangeText);
     return [
       {
         test,
@@ -186,11 +219,9 @@ function labRows(table: Table, errors: string[]): LabRow[] {
         valueText: cell("Result"),
         ucum: unit.ucum,
         unitText,
-        low: hasRange ? low : null,
-        high: hasRange ? high : null,
-        rangeText: cell("Reference range"),
+        rangeText,
         loinc,
-        interpretation: hasRange ? (value < low ? "L" : value > high ? "H" : "N") : null,
+        ...rangeFields(value, range),
       },
     ];
   });
