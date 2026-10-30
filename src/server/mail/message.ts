@@ -51,26 +51,35 @@ function fold(text: string): string {
   return spelled.normalize("NFKD").toLowerCase();
 }
 
-function words(text: string): string[] {
-  const result: string[] = [];
+type Word = { text: string; letters: number };
+
+function scan(text: string): Word[] {
+  const result: Word[] = [];
   let word = "";
+  let letters = 0;
+  const end = () => {
+    if (word) result.push({ text: Array.from(word).every(isDigit) ? BigInt(word).toString() : word, letters });
+    word = "";
+    letters = 0;
+  };
   for (const c of fold(text)) {
-    if (isWordChar(c)) word += c;
+    if (isWordChar(c)) {
+      word += c;
+      letters++;
+    }
     // An umlaut is spelled out (ü as ue), also with a tone mark as in "Lǚ", whose diaeresis decomposes after the u.
     else if (c === DIAERESIS && (word.endsWith("a") || word.endsWith("o") || word.endsWith("u"))) word += "e";
-    else if (isMark(c)) continue;
-    else if (word) {
-      result.push(word);
-      word = "";
-    }
+    else if (!isMark(c)) end();
   }
-  if (word) result.push(word);
-  return result.map((w) => (Array.from(w).every(isDigit) ? BigInt(w).toString() : w));
+  end();
+  return result;
 }
 
-const oneWordTerms = (category: ContentCategory, text: string): Term[] => words(text).map((word) => ({ category, words: [word] }));
+const words = (text: string) => scan(text).map((word) => word.text);
 
-const DOCUMENT_TYPE_TERMS = Object.values(DOCUMENT_TYPES).flatMap((type) => oneWordTerms("document-type", type.forbiddenWords.join(" ")));
+const DOCUMENT_TYPE_TERMS = Object.values(DOCUMENT_TYPES).flatMap((type) =>
+  words(type.forbiddenWords.join(" ")).map((word): Term => ({ category: "document-type", words: [word] })),
+);
 
 function birthDateForms(birthDate: IsoDate): string[] {
   if (!birthDate) return [];
@@ -83,7 +92,9 @@ const patientName = (patient: ExpectedPatient) => [...patient.given, patient.fam
 function forbiddenTerms(patient: ExpectedPatient): Term[] {
   return [
     // An initial names nobody, and the link has the word "r" and the text the word "a".
-    ...oneWordTerms("patient-name", patientName(patient)).filter((term) => Array.from(term.words[0]).length > 1),
+    ...scan(patientName(patient))
+      .filter((word) => word.letters > 1)
+      .map((word): Term => ({ category: "patient-name", words: [word.text] })),
     ...birthDateForms(patient.birthDate).map((form): Term => ({ category: "birth-date", words: words(form) })),
     ...DOCUMENT_TYPE_TERMS,
   ];
