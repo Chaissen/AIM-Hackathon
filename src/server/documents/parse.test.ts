@@ -114,7 +114,13 @@ test("a document with a key twice is refused, so a second patient cannot slip pa
   const maria = scenario("lab-result-maria-beispiel.md").replace(/\r\n/g, "\n");
   const result = parseDocument(maria.replace("\nSample taken:", "\nPatient: Max Beispiel, born 1 January 1960\nSample taken:"));
   assert.equal(result.ok, false);
-  if (!result.ok) assert.deepEqual(result.errors, ['The file has more than one "Patient:" line.']);
+  if (!result.ok)
+    assert.deepEqual(result.errors, [
+      'The file has more than one "Patient:" line.',
+      "The file names more than one patient.",
+      "The file gives more than one birth date for the patient.",
+    ]);
+  if (!result.ok) assert.deepEqual(result.safety, ["repeated-key", "several-patients", "several-birth-dates"]);
 
   // A known key inside a section counts too.
   const rehab = scenario("rehab-report-maria-beispiel.md").replace(/\r\n/g, "\n");
@@ -127,6 +133,7 @@ test("a lab report needs exactly one result table with rows", () => {
   const second = parseDocument(`${maria}\n| Test | Result |\n|---|---|\n| CRP | 3 |\n`);
   assert.equal(second.ok, false);
   if (!second.ok) assert.deepEqual(second.errors, ["The lab report has more than one table. Put all results in one table."]);
+  if (!second.ok) assert.deepEqual(second.safety, ["several-tables"]);
 
   const empty = parseDocument(
     "# Labor Kanalstraße: lab report\n\nPatient: Maria Beispiel, born 12 March 1961\nSample taken: yesterday\nReported: 22 October 2026, 11:40\n\n| Test | Result | Unit | Reference range | LOINC code |\n|---|---|---|---|---|\n",
@@ -141,6 +148,8 @@ test("a lab row with a result that is not a number is reported with its row", ()
   const result = parseDocument(markdown);
   assert.equal(result.ok, false);
   if (!result.ok) assert.deepEqual(result.errors, ['Row 2 (aPTT): the result "pending" is not a number.']);
+  // A format problem, not a safety refusal: the AI fallback may still read it.
+  if (!result.ok) assert.deepEqual(result.safety, []);
 });
 
 test("a unit the UCUM list does not know stays text only", () => {
