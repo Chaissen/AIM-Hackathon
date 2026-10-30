@@ -59,8 +59,8 @@ High that the laboratory specialist is the right specialty to confirm on its own
 - [Ärztegesetz 1998, § 31 Abs 3](https://www.ris.bka.gv.at/NormDokument.wxe?Abfrage=Bundesnormen&Gesetzesnummer=10011138&Paragraf=31), RIS, version of 30 October 2026
 - [ÄAO 2015](https://www.ris.bka.gv.at/GeltendeFassung.wxe?Abfrage=Bundesnormen&Gesetzesnummer=20009186), RIS, version of 30 October 2026, for the definition of each specialty ("A. Definition des Aufgabengebiets"): Anlage 19 (Medizinische und Chemische Labordiagnostik), Anlage 12, 5. Abschnitt (Innere Medizin und Hämatologie und internistische Onkologie), and Anlage 31 (Transfusionsmedizin). The list of specialties is in § 15 Abs 1, Transfusionsmedizin as Z 30. The annexes in the version of BGBl. II Nr. 224/2026 apply from 1 August 2026 (§ 39 Abs 14).
 - Medical chamber, [KEF und RZ-V 2015](https://www.aerztekammer.at/documents/261766/417698/KEF_RZ_VO_2015%20konsolidierte%20Fassung/a999fc10-7fad-ed7e-9aee-b58c87d31eb4), consolidated version including the 7th amendment of 19 June 2026, for the training content:
-  - Anlage 19, Medizinische und Chemische Labordiagnostik: basic training, skills C 7, C 9, and C 16, and module 1 "Blutdepotleitung/Blutgruppenserologie/Hämatologie/Hämostaseologie"
-  - Anlage 12.5, Innere Medizin und Hämatologie und internistische Onkologie: focus training A 7, B 1, and C 1
+  - Anlage 19, Medizinische und Chemische Labordiagnostik: basic training, skills C 7, C 9, and C 16, and focus-training module 1 (elective) "Blutdepotleitung/Blutgruppenserologie/Hämatologie/Hämostaseologie"
+  - Anlage 12.5, Innere Medizin und Hämatologie und internistische Onkologie: basic training C 8, focus training A 5, A 7, B 1, C 1
   - Anlage 31, Transfusionsmedizin: basic training, knowledge A 17 to A 19
 - [Specialty codes in the eHVD (OEAEK_Fachrichtung)](https://termgit.elga.gv.at/CodeSystem-oeaek-fachrichtung.html): laboratory diagnostics (19), internal medicine with haematology and internal oncology (782), transfusion medicine (41), and clinical microbiology (23 and 482) each have their own code, so a wider rule could be built if you want one
 
