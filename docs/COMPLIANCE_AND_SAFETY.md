@@ -6,7 +6,7 @@ This page sets the team rules for data, messages, identity, and AI, and it holds
 
 1. No real patient data enters the project. That covers the repository, the databases, Keycloak, Mailpit, logs, screenshots, slides, and the video.
 2. Every person, organisation, phone number, email address, eHVD entry, and document is made up. The eHVD mock uses the real OID structure under `1.2.40.0.34.3.1.99.1` and `1.2.40.0.34.3.2.99.1`, but no entry is copied from the real directory. The scenario's `.example` addresses cannot receive mail, and the phone number is made up.
-3. The request service sends email only to Mailpit and SMS only to its own SMS screen. It never sends to a real address or number.
+3. The request service sends email only to Mailpit, or through Gmail SMTP as ordysoftware@gmail.com only to the team inboxes in `MAIL_TEAM_INBOXES`. It sends SMS only to its own SMS screen. It never sends to any other real address or number.
 4. If anyone suspects real data somewhere, they post `PRIVACY:` in the team chat. We delete it from the working tree, purge it from git history if it was committed, and note the incident in `docs/privacy_log.md`.
 
 ## What an outgoing email or SMS may contain
@@ -20,7 +20,7 @@ The brief forbids the patient's name, the patient's birth date, and the document
 | The expiry date | The document type, such as "lab result" or "discharge report" |
 | A note that ID Austria is needed | Anything from the request beyond the above |
 
-The request service checks every message before sending. It splits the message into words and refuses to send if the message contains:
+The request service checks every message before sending. It splits the subject and the text into words and refuses to send if the message contains:
 
 - any word of the patient's given or family names
 - the birth date as `1961-03-12`, `12.03.1961`, or `12 March 1961`
