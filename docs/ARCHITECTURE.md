@@ -12,7 +12,7 @@ This page describes what runs, how the parts talk, and what the request service 
 | Matrix bot | Notices and `!status` in Dr. Hofer's room | Built | TypeScript process in `src/bot/`, small Matrix client on `fetch` in `src/server/matrix/client.ts` | none |
 | Postgres | Requests, bindings, audit log | Reused | [`postgres:17-alpine`](https://hub.docker.com/_/postgres) | 5433, mapped to 5432 in the container |
 | Simulated ID Austria | OpenID Connect login with fake citizens | Configured (T02) | [Keycloak](https://www.keycloak.org/server/containers) | 8080 |
-| eHVD mock | Directory of healthcare people and organisations, same SOAP interface as the real eHVD | Built (T23, planned) | TypeScript service in its own container, see [eHVD](EHVD.md) | 8095 |
+| eHVD mock | Directory of healthcare people and organisations, same SOAP interface as the real eHVD | Built (T23) | TypeScript service on `node:24-alpine` with [`saxes`](https://github.com/lddubeau/saxes), in `services/ehvd-mock/`, see [eHVD](EHVD.md) | 8095 |
 | Mailpit | Catches every outgoing email | Reused | [`axllent/mailpit`](https://hub.docker.com/r/axllent/mailpit) | 1025 SMTP, 8025 web |
 | HAPI FHIR | FHIR R4 server | Reused | [`hapiproject/hapi`](https://hub.docker.com/r/hapiproject/hapi) | 8090, mapped to 8080 in the container |
 | HL7 validator | Validates every filed resource | Reused | [`validator_cli.jar`](https://github.com/hapifhir/org.hl7.fhir.core/releases) | none |
@@ -85,13 +85,13 @@ A failed identity check does not change the state, so the real person can still 
 
 `failed_checks` counts every failed identity check while the link works, but only a `sent` request locks on the third one.
 
-No job watches the expiry. Before the request service reads or changes a request, it sets that request to `expired` if it is open and past `expires_at`. Before it lists requests, it does the same for all of them (`expireDueRequests` in `src/server/requests/service.ts`). `applyEvent` in the same file locks the request row while it changes the state, so two events on one request never overlap. Its callback writes the audit entry for the change in the same transaction.
+No job watches the expiry. Before the request service reads or changes a request, it sets that request to `expired` if it is open and past `expires_at`. Before it lists requests, it does the same for all of them (`expireDueRequests` in `src/server/requests/service.ts`). `applyEvent` in the same file locks the request row while it changes the state, so two events on one request never overlap. Its callback writes the audit entry for the change in the same transaction. It takes every event except a login's: `identity_pass`, `identity_hold`, and `identity_fail` go only through `applyLoginTransition` below, so a login always stores the bPK.
 
 The login changes a request through the five ports that `runIdentityChecks` in `src/server/identity/login.ts` takes. `identityCheckPorts(db, notify)` in `src/server/requests/identity-ports.ts` builds them from the request service:
 
 - `incrementFailedChecks` adds one to `failed_checks` in one statement and returns the new count.
-- `applyLoginTransition` applies `sent` to `verified`, `identity_held`, or `locked` only while the request is still `sent` and not expired. It stores the bPK in the same statement. It returns false when the state changed in between, and it refuses a change the lifecycle table does not allow, such as a lock before the third failure.
-- `findBinding` reads `bindings`, and `recordAudit` writes the entry.
+- `applyLoginTransition` applies `sent` to `verified`, `identity_held`, or `locked` only while the request is still `sent` and not expired. It stores the bPK in the same statement. It returns false when the state changed in between, and it refuses a change the lifecycle table does not allow, such as a lock before the third failure. If a `sent` request already has three failures counted because the lock after the third one never ran, the next login locks it instead of passing or holding. It then returns false, and the person sees "try again" once and "This link does not work" after that.
+- `findBinding` reads `bindings`. `recordAudit` parses the entry against the audit types before it writes it: `identity_checked` with `pass`, `hold`, or `fail`, or `misdelivery_caught` with `wrong_person`, each with check names, verdicts, and reason codes only. Anything else throws.
 - The caller passes `notify`, because the thread of a request belongs to T05.
 
 The link token and the 7 days start when the request goes out. **Send anyway** (`sendAnyway`) gives the request a new token and a new expiry and writes `request_sent` then, not when the request was created.
@@ -236,9 +236,20 @@ In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `
 | `answer_filed` | The request service | `filed` | FHIR resource ids and the Provenance id |
 | `misdelivery_caught` | Whoever triggered it | `address_mismatch`, `wrong_person`, or `patient_mismatch` | The two domains, the failed checks, or the upload's SHA-256 and which part of the patient did not match |
 
-Every entry has a UTC timestamp in `at`. The widget and `GET /audit` show the entries.
+Every entry has a UTC timestamp in `at`. The `outcome` column holds the short result: `pass`, `hold`, or `fail` for `identity_checked`, and the kind for `misdelivery_caught`. The What sits in `detail`, with these fields, which `pnpm audit:check` requires:
 
-`recordAudit()` in `src/server/audit/record.ts` writes every entry. Its types fix the outcome and the detail fields for each event and each misdelivery reason, and they hold ids, hashes, and check results only, never document text or the data of a wrong patient. An entry that belongs to a state change goes into the same transaction.
+| Event | `detail` fields |
+|---|---|
+| `request_sent` | `docType`, `channel`, `address` |
+| `link_opened` | `state` |
+| `identity_checked` | `checks`, one entry per check with its result and reason |
+| `answer_sent` | `sha256`, `size` |
+| `answer_filed` | `output`, `targets`, `provenance`, `task`, `sender`, `author`, `organization`, and `resources` (every resource in the transaction as `Type/id`, which `pnpm validate` reads); `AnswerFiled` in `src/server/fhir/file-answer.ts` |
+| `misdelivery_caught` | `address_mismatch`: `domain`, `expectedDomain`. `wrong_person`: `checks`. `patient_mismatch`: `sha256`, `size`, `nameMatches`, `birthDateMatches`. |
+
+The widget and `GET /audit` show the entries.
+
+`recordAudit()` in `src/server/audit/record.ts` writes the entries. Its types fix the outcome and the detail fields for each event and each misdelivery reason, and they hold ids, hashes, and check results only, never document text or the data of a wrong patient. An entry that belongs to a state change goes into the same transaction. `fileAnswer` in `src/server/fhir/file-answer.ts` (T13) still inserts `answer_filed` directly, with the same fields, until it switches to `recordAudit()`.
 
 The IP hash is an HMAC-SHA256 with a key derived from `ORDY_SECRET`, cut to 16 hex characters, because a plain hash of an IPv4 address can be reversed by trying all of them. Without a private `ORDY_SECRET`, the entry says `ip unknown` instead. Next.js fills `X-Forwarded-For` from the connection only when the client sent none. Without a proxy in front, the client can set it, so the hash is a hint, not proof.
 
@@ -264,6 +275,8 @@ Configuration is read in `src/env.ts`. Service addresses and demo accounts have 
 | `SMTP_HOST`, `SMTP_PORT`, `MAILPIT_API_URL` | `localhost`, `1025`, `http://localhost:8025` |
 | `ANTHROPIC_API_KEY` | unset, only for the optional AI fallback |
 
+The eHVD mock's `EHVD_ALLOWLIST` and `EHVD_SCHEMA_ERRORS` are read only by its container, so they live in `docker-compose.yml` and `.env.example`, not in `src/env.ts`. See [eHVD](EHVD.md#configuration).
+
 To switch to real ID Austria, change `OIDC_METADATA_URL`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET`. The simulator already sends the real claim names, which [Identity and misdelivery](IDENTITY.md) lists.
 
 ## Repository layout
@@ -271,13 +284,17 @@ To switch to real ID Austria, change `OIDC_METADATA_URL`, `OIDC_CLIENT_ID`, and 
 Files marked *planned* do not exist yet. The task id says who builds them.
 
 ```
-docker-compose.yml            Synapse, Element, HAPI, Mailpit, Postgres, Keycloak (eHVD mock: T23)
+docker-compose.yml            Synapse, Element, HAPI, Mailpit, Postgres, Keycloak, eHVD mock
 .env.example                  all variables with demo values
 docker/element/config.json    Element config
 docker/synapse/               generated homeserver.yaml (git ignores it)
 docker/keycloak/idaustria-sim-realm.json   simulated ID Austria: client, mappers, test citizens
 docs/ehvd/eHVD.wsdl           the real eHVD WSDL, version 2 from BRZ
-services/ehvd-mock/           eHVD mock service and its synthetic directory, planned, T23
+services/ehvd-mock/           eHVD mock service and its synthetic directory (T23)
+  src/                        SOAP wire format, field rules, queries, directory, HTTP server
+  test/                       tests over real HTTP, run by pnpm test
+  Dockerfile.dockerignore     keeps the image's build context to the files it needs
+  Dockerfile                  image built from the repository root
 drizzle/                      generated SQL migrations
 src/
   env.ts                      zod-validated configuration
@@ -307,11 +324,14 @@ src/
     identity/login.ts         what a check result does: state, audit entries, page, notice, and runIdentityChecks for the callback (T08)
     ehvd/oid.ts               OID check shared by the login and pnpm citizen
     ehvd/                     eHVD SOAP client, planned (T15)
+    fhir/filing.ts            one answer as a transaction Bundle with Provenance and Task; fhir/file-answer.ts posts it (T13)
     matrix/client.ts          Matrix client-server API
     matrix/notices.ts         notice texts and notifyRoom for Dr. Hofer's room
+    metrics/                  metrics from audit rows, validator runner, metrics table (T17, T18)
     auth/eid-session.ts       outside person's session cookie and login cookie
-    auth/id-austria.ts        OpenID Connect login: discovery, code swap, Keycloak logout, claims to session
+    auth/id-austria.ts        OpenID Connect login: discovery, code swap, Keycloak logout, claims for the identity checks
     portal/data.ts            data loaders for the portal, the login, and the SMS page. The SMS log is a stub until T06
+    portal/paths.ts           the portal page for each login result
   bot/                        Matrix bot process and commands
 scripts/
   setup.sh                    one-time setup
@@ -319,8 +339,9 @@ scripts/
   bootstrap-matrix.ts         room, invites, widget
   seed-fhir.ts                Maria Beispiel into HAPI
   citizen.ts                  add a test citizen to the simulated ID Austria
-  validate.ts                 planned, T18: HL7 validator on every filed resource
-  audit-check.ts              planned, T17: six event types per request
+  validate.ts                 HL7 validator on every filed resource or on given files (T18)
+  audit-check.ts              six event types per request, each with who, what, and when (T17)
+  scenario.ts                 request 1, M1 to M3, request 2, and the four metrics in one run (T17, T18)
 track/                        track brief, scenario, patient.json, test documents, and our extra set in scenario/extra/
 ```
 
