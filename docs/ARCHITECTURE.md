@@ -214,7 +214,7 @@ The request service keeps three Postgres tables, defined with Drizzle in `src/se
 | `link_opened` | An anonymous browser session, with a hash of the IP address | Request id |
 | `identity_checked` | The ID Austria name and person number | `pass`, `hold`, or `fail`, with the reason for each check |
 | `answer_sent` | The verified person | SHA-256 and size of the upload |
-| `answer_filed` | The request service | FHIR resource ids and the Provenance id ([FHIR model](FHIR.md#validation) lists the fields) |
+| `answer_filed` | The request service | FHIR resource ids and the Provenance id |
 | `misdelivery_caught` | Whoever triggered it | `address_mismatch`, `wrong_person`, or `patient_mismatch` |
 
 Every entry has a UTC timestamp in `at`. The widget and `GET /audit` show the entries.
