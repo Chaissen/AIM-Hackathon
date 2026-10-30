@@ -518,7 +518,7 @@
         "resourceType": "Provenance",
         "text": {
           "status": "generated",
-          "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\">Sent by Sophie Lindner-Pichler on 29 October 2026 at 14:02. Written by Dr. Eva Brandl for Labor Kanalstraße. Identity checked with ID Austria (simulation), full function, level high. The eHVD confirms Dr. Eva Brandl as responsible for the content at Labor Kanalstraße, found by name.</div>"
+          "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\">Sent by Sophie Lindner-Pichler on 29 October 2026 at 14:02. Validated by Dr. Eva Brandl for Labor Kanalstraße. Identity checked with ID Austria (simulation), full function, level high. The eHVD confirms Dr. Eva Brandl as responsible for the content at Labor Kanalstraße, found by name.</div>"
         },
         "target": [
           {
