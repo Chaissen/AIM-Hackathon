@@ -4,7 +4,7 @@ The eHealth directory (eHVD, eHealth Verzeichnisdienst) lists every person and o
 
 The real web service needs a registration with the health ministry and an IP allowlist entry at BRZ, so we cannot call it during the hackathon. We build a mock that behaves like the real service in every documented way. This page records what is public about the interface, which gaps we fill and how, and what the mock contains.
 
-Status: the mock is built (T23) and runs as the container `ehvd`. The client in ordy, the address check, and the release check are built (T15, `src/server/ehvd/`). The request procedure calls the address check once T04 is in, and the answer flow (T09) calls the release check. See [Timeline](TIMELINE.md).
+Status: the mock is built (T23) and runs as the container `ehvd`. The client in ordy, the address check, and the release check are built (T15, `src/server/ehvd/`). `request.create` calls the address check before sending, and the answer flow (T09) calls the release check. See [Timeline](TIMELINE.md).
 
 ## Sources and what they give us
 

@@ -52,7 +52,7 @@ The request service stores each request with one state. The FHIR Task for the re
 
 | State | Meaning | Task status |
 |---|---|---|
-| `awaiting_confirmation` | The address check failed and Dr. Hofer has not confirmed yet | `draft` |
+| `awaiting_confirmation` | The address check failed or could not confirm the address, and Dr. Hofer has not confirmed yet | `draft` |
 | `sent` | The email or SMS went out | `requested` |
 | `identity_held` | The identity check held: the name matched only partly, the requested name had no words, or the eHVD could not be reached. Dr. Hofer decides. | `on-hold` |
 | `verified` | The identity check passed, and the outside person can answer | `in-progress` |
@@ -65,7 +65,7 @@ The request service stores each request with one state. The FHIR Task for the re
 | Event | In code | From | To |
 |---|---|---|---|
 | Dr. Hofer sends the request form and the address check passes | `initialState(true)` | none | `sent` |
-| Dr. Hofer sends the request form and the address check fails | `initialState(false)` | none | `awaiting_confirmation` |
+| Dr. Hofer sends the request form and the address check fails or cannot confirm the address | `initialState(false)` | none | `awaiting_confirmation` |
 | Dr. Hofer clicks **Send anyway** | `send_anyway` | `awaiting_confirmation` | `sent` |
 | Identity check passes | `identity_pass` | `sent` | `verified` |
 | Identity check holds: partial name, requested name without words, or eHVD unreachable | `identity_hold` | `sent` | `identity_held` |
@@ -95,6 +95,14 @@ The login changes a request through the five ports that `runIdentityChecks` in `
 - The caller passes `notify`, because the thread of a request belongs to T05.
 
 The link token and the 7 days start when the request goes out. **Send anyway** (`sendAnyway`) gives the request a new token and a new expiry and writes `request_sent` then, not when the request was created.
+
+`request.create` runs the address check (`checkAddress` from `src/server/ehvd/address-check.ts`) before it stores the request:
+
+- A pass is `sent`.
+- A mismatch waits in `awaiting_confirmation`, and `misdelivery_caught` records `address_mismatch` with both domains.
+- An address the eHVD could not confirm waits too, but with no audit entry: nothing was caught, and nothing went out.
+
+`create` returns `addressWarning`, the text next to **Send anyway**, or null. `get` returns it while the request waits. A mismatch is rebuilt from its audit entry; for an unconfirmed address `get` says only that the eHVD could not confirm it. `request.sendAnyway` sends a waiting request, and answers `CONFLICT` for any other state.
 
 ## Link rules
 
