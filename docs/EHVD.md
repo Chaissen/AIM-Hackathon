@@ -4,7 +4,7 @@ The eHealth directory (eHVD, eHealth Verzeichnisdienst) lists every person and o
 
 The real web service needs a registration with the health ministry and an IP allowlist entry at BRZ, so we cannot call it during the hackathon. We build a mock that behaves like the real service in every documented way. This page records what is public about the interface, which gaps we fill and how, and what the mock contains.
 
-Status: the mock is planned as T23, the client in ordy as T15. See [Timeline](TIMELINE.md).
+Status: the mock is built (T23) and runs as the container `ehvd`. The client in ordy is planned as T15. See [Timeline](TIMELINE.md).
 
 ## Sources and what they give us
 
@@ -72,7 +72,7 @@ The target namespace is `eHVD`, with `elementFormDefault="qualified"`.
 
 A number without its `oidIssuingAuthority` is not unique. No hit returns fault 6002.
 
-Undocumented: the MOA-ID module looks people up by their bPK for the health sector (`urn:publicid:gv.at:cdid+GH`) and uses `1.2.40.0.10.2.1.1.149` as `oidIssuingAuthority`. We read this from its compiled code, not from any document. The mock supports it only behind a switch that is off by default.
+Undocumented: the MOA-ID module looks people up by their bPK for the health sector (`urn:publicid:gv.at:cdid+GH`) and uses `1.2.40.0.10.2.1.1.149` as `oidIssuingAuthority`. We read this from its compiled code, not from any document. The mock does not support it. A real bPK such as `QqRyJqno/aFVJYjMxkWpDJWj878=` contains `/`, `+`, or `=`. The `id` rule does not allow those characters, so the mock returns 6001. An `id` without them returns 6002, because `1.2.40.0.10.2.1.1.149` names no kind of id the mock knows.
 
 ### GdaSearch: search by name and other fields
 
@@ -96,7 +96,7 @@ Fields in WSDL order. The order matters for schema validation.
 Rules from the handbook:
 
 - Without `*`, the value must match the entry exactly.
-- A wildcard search uses `*ABC`, `ABC*`, or `*ABC*`, with at least two letters A to Z or a to z next to the `*`. A bare `*` is not allowed.
+- A wildcard search uses `*ABC`, `ABC*`, or `*ABC*`. Besides the `*`, the value must contain at least two letters A to Z or a to z. A bare `*` is not allowed.
 - If there are more hits than `maxResults`, the service returns fault 6005 instead of a list. The service-wide limit is 200.
 
 ### Allowed characters in requests
@@ -131,7 +131,7 @@ Fields in WSDL order. "Handbook" notes where the handbook differs.
 | `roles` | `GDARoles` | 1..1 | `role` (GTelV), `elgaRole` (ELGA aggregate role), `specialisation` (medical chamber), each 0..n, written `<code system OID>:<code>` |
 | `relations` | `GDARelationship` | 0..1 | `memberof` and `ownerof`, each 0..n OIDs of other entries |
 | `tel`, `fax`, `web`, `mail` | string | 0..1 each | `fax` only in the WSDL |
-| `timestamps` | `GDADBTimestamps` | 1..1 | `add` and `modify`, `yyyy-MM-dd`. Optional in the WSDL, required in the handbook. |
+| `timestamps` | `GDADBTimestamps` | 1..1 | `add` and `modify`, `yyyy-MM-dd`. The WSDL makes `add` and `modify` optional. The handbook requires them. |
 
 `ehvdstatus` `Aktiv` means the person or organisation may currently practise. `elgastatus` `Aktiv` means they may also use ELGA. `elgastatus` is `Inaktiv` whenever `ehvdstatus` is.
 
@@ -154,9 +154,9 @@ All role values are written `<code system OID>:<code>`, for example `1.2.40.0.34
 
 | Field | Code system | OID | Codes we use |
 |---|---|---|---|
-| `role` | ELGA_GTelVoGDARollen (roles under the health telematics regulation) | `1.2.40.0.34.5.2` | 100 general practitioner, 159 specialist physician (under the 2015 medical training regulation), 300 general hospital, 301 special hospital, 304 independent outpatient clinic |
+| `role` | ELGA_GTelVoGDARollen (roles under the health telematics regulation) | `1.2.40.0.34.5.2` | 100 general practitioner, 158 specialist physician (under the 2006 medical training regulation), 159 specialist physician (under the 2015 medical training regulation), 300 general hospital, 301 special hospital, 304 independent outpatient clinic |
 | `elgaRole` | ELGA_GDA_Aggregatrollen (ELGA aggregate roles) | `1.2.40.0.34.5.3` | 700 physician, 702 hospital, 724 laboratory and pathology |
-| `specialisation` | OEAEK_Fachrichtung (medical chamber specialties) | `1.2.40.0.34.3.1.10.20` | 7 internal medicine, 12 physical medicine and general rehabilitation, 19 medical and chemical laboratory diagnostics |
+| `specialisation` | OEAEK_Fachrichtung (medical chamber specialties) | `1.2.40.0.34.3.1.10.20` | 7 internal medicine, 12 physical medicine and general rehabilitation, 19 medical and chemical laboratory diagnostics, 49 neurology |
 | `specialisation` | OEAEK_Berechtigungen (medical chamber authorisations) | `1.2.40.0.34.3.1.10` | 0 general medicine |
 
 In Austria, rehab clinics are special hospitals, and many labs are independent outpatient clinics. The code systems hold the official names in German.
@@ -199,30 +199,65 @@ For a healthcare professional, this ties the login to the eHVD entry through the
 
 ### What it does
 
-- A TypeScript service in its own container, `ehvd` in `docker-compose.yml`, on port 8095.
-- `GET /ehvd.wsdl` serves [`ehvd/eHVD.wsdl`](ehvd/eHVD.wsdl) unchanged, except that `soap12:address` points to the mock.
-- `POST /` takes SOAP 1.2 requests for `GetGDA` and `GdaSearch` exactly as in the WSDL. It finds the operation from the body element and accepts the SOAP action in the `action` parameter of the content type.
+- A TypeScript service in its own container, `ehvd` in `docker-compose.yml`, on port 8095. The code is in `services/ehvd-mock/`, see [Code](#code).
+- `GET /ehvd.wsdl` serves [`ehvd/eHVD.wsdl`](ehvd/eHVD.wsdl) byte for byte, except that the `soap12:address` location becomes `http://<Host header>/`, or `http://localhost:8095/` when the Host header is missing or empty. A SOAP client built from it then calls the mock.
+- `POST /` takes SOAP 1.2 requests for `GetGDA` and `GdaSearch` exactly as in the WSDL. It finds the operation from the body element. An `action` parameter in the content type must name the same operation.
 - It checks lengths, allowed characters, wildcard rules, and `maxResults`, applies the status filters, and returns the faults 6001 to 6006 as in the table above.
-- An allowlist of client networks plays the BRZ firewall. Other clients get HTTP 403. Each allowlist entry can be limited to one operation, which triggers 6006 for the other.
-- `GET /healthz` for `setup.sh` and Docker.
-- The log holds the operation, the client, the number of hits, and the fault code.
+- An allowlist of client networks plays the BRZ firewall. Other clients get HTTP 403 with an empty body. Each allowlist entry can be limited to one operation, which triggers 6006 for the other.
+- `GET /healthz` reports the number of entries, for `setup.sh` and Docker. It is the only path outside the allowlist.
+- Each request other than `/healthz` writes one JSON line to the container log: client address, method, path, operation, number of hits, fault code, and HTTP status. The path is `/` or `/ehvd.wsdl`, and the log writes any other path as `other`. The log never holds search values.
+
+### Configuration
+
+The container reads two variables. Compose passes them from `.env` without defaults of its own. The mock treats an empty value as unset and uses the default below. ordy never reads them. An invalid value stops the container at startup with a message that names it. Apply a change with `docker compose up -d ehvd`.
+
+| Variable | Default | Format |
+|---|---|---|
+| `EHVD_ALLOWLIST` | `127.0.0.0/8, ::1/128, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7` | Comma-separated networks in CIDR notation. A network followed by a blank and `GetGDA` or `GdaSearch` may use only that operation. The default is loopback and the private ranges, because Docker and colima forward requests from the host through a gateway such as `172.21.0.1`. |
+| `EHVD_SCHEMA_ERRORS` | `http-403` | `http-403` answers a request that breaks SOAP 1.2 or the WSDL with an empty HTTP 403, like the real firewall. `fault-6001` answers it with fault 6001. |
+
+Quote the allowlist in `.env`, because `setup.sh` reads the file with bash: `EHVD_ALLOWLIST="10.0.0.0/8, 172.16.0.0/12 GetGDA"`.
+
+### Trigger each fault
+
+| Code | How |
+|---|---|
+| 6001 | Break a field rule, for example `id` with a trailing blank, `surname` `*B`, `rolecode` `1.2.40.0.34.5.2:159`, or `maxResults` `201` |
+| 6002 | `GetGDA` with an OID that is not in the directory, such as `1.2.40.0.34.3.2.99.9.1`, or with a well-formed `oidIssuingAuthority` that names no kind of id, such as `1.0.2` |
+| 6003 | `GetGDA` with the reserved OID `1.2.40.0.34.3.1.99.9.6003` |
+| 6004 | `GetGDA` with `1.2.40.0.34.3.1.99.9.6004`. That entry has no `timestamps`. `GdaSearch` never returns or counts it. |
+| 6005 | `GdaSearch` with `surname` `Brandl` and `maxResults` `1`. There are two hits. |
+| 6006 | Start the container with `EHVD_ALLOWLIST="0.0.0.0/0 GetGDA, ::/0 GetGDA"` and call `GdaSearch`. Every client may then use only `GetGDA`. |
+| HTTP 403 | A client outside `EHVD_ALLOWLIST`, or a request that breaks SOAP 1.2 or the WSDL, such as `Content-Type: text/xml` or fields out of WSDL order |
 
 ### Our choices where the sources say nothing
 
 | Question | Mock behaviour |
 |---|---|
-| Exact match: case-sensitive? | Case-insensitive, otherwise exact |
-| `rolecode` format, given that `:` is not an allowed character | The bare code, for example `159` or `724`. GTelV and ELGA codes do not overlap. |
+| Exact match: case-sensitive? | Case-insensitive, otherwise exact. This holds for the search fields and for the ids in `GetGDA`. |
+| Unicode normalisation | The mock normalises request values to NFC before every check, so a decomposed `Ö` matches `Ö`. It does not trim them. |
+| Which fields take a wildcard | `firstname`, `surname`, and `description`. A `*` anywhere else is 6001. |
+| What a wildcard matches | `ABC*` a prefix, `*ABC` a suffix, `*ABC*` a substring, case-insensitive. `ABC` must not contain `*`. |
+| `description` search | Matches when any `description` value of the entry matches. `:` is not allowed and the field is at most 24 characters long, so in practice it is a wildcard such as `*rztekammer`. |
+| `firstname` on an entry without one | Never matches, so a `firstname` search finds no organisations |
+| Address criteria | `postcode` (against `zip`), `streetNumber`, `streetName`, `city`, and `state` must all match the same address of the entry, exactly |
+| `rolecode` format, given that `:` is not an allowed character | The bare code, for example `159` or `724`. It matches an entry with a `role` or an `elgaRole` of that code. GTelV and ELGA codes do not overlap. |
+| An optional element without text | Counts as absent. An empty `id` or `surname` is 6001. |
+| `maxResults` | An `xs:integer`, so a sign and surrounding whitespace pass the schema. Then it must have at most 3 characters and lie between 1 and 200. |
 | Search without `ehvdstatus` | Returns active and inactive entries |
 | Search without hits | Empty `GdaIndexResponseList`. Only `GetGDA` returns 6002. |
-| Fault layout | `soap:Code/soap:Value` is `soap:Sender` for 6001 and 6005, `soap:Receiver` otherwise. `soap:Subcode/soap:Value` and `soap:Detail` carry the number, `soap:Reason/soap:Text` the message from the table. |
+| 6004 in a search | Never. Only `GetGDA` reaches the entry without `timestamps`, so a wildcard search such as `*Test*` still returns its hits. |
+| Order of results | Directory order |
+| `oidIssuingAuthority` that is well-formed but names no kind of id | 6002, like an id without a hit. Well-formed means at least two arcs of digits, separated by `.`, without leading zeros. As in ITU-T X.660, the first arc is 0, 1, or 2, and after 0 or 1 the second arc is below 40. A malformed one, such as `1..2`, `3.1`, or `1.45`, is 6001. |
+| bPK lookup | Not supported. A real bPK such as `QqRyJqno/aFVJYjMxkWpDJWj878=` contains `/`, `+`, or `=`, which the `id` rule rejects, so it returns 6001. With an `id` the rule allows, `1.2.40.0.10.2.1.1.149` is an unknown kind of id and returns 6002. |
+| Fault layout | `soap:Code/soap:Value` is `soap:Sender` (HTTP 400) for 6001 and 6005, `soap:Receiver` (HTTP 500) otherwise. `soap:Reason/soap:Text` with `xml:lang="en"` carries the message from the table, without the text in brackets. `soap:Detail` holds one element, `<code xmlns="eHVD">6001</code>`. There is no `soap:Subcode`, because a bare `6001` is not a valid `xs:QName` and strict SOAP stacks reject it. |
 | `otherID` format | `<id kind OID>:<number>`, for example `1.2.40.0.34.4.18:99002` |
-| A request that breaks the schema | HTTP 403, as the third-party Python client `ehvd` reports for the real firewall. Can be switched to fault 6001. |
-| bPK lookup | Off by default |
+| A request that breaks the schema | HTTP 403 with an empty body, as the third-party Python client `ehvd` reports for the real firewall. `EHVD_SCHEMA_ERRORS=fault-6001` switches it to fault 6001. A schema error is any of these: a `Content-Type` that Node's `MIMEType` cannot parse, another media type, an `action` of the other operation, a charset other than UTF-8, XML that is not well-formed with namespaces (such as a bare `&`, an unbound prefix, or two attributes with the same namespace and local name), a DOCTYPE, a character outside XML 1.0 (also as a character reference such as `&#0;` or `&#x110000;`), a body over 64 KiB, elements that do not follow the WSDL sequence, an attribute on an eHVD element other than a namespace declaration, or a header block that must be understood. A header block must be understood when `soap:mustUnderstand` is `true` or `1` and `soap:role` is absent, `…/role/next`, or `…/role/ultimateReceiver`. The mock understands no header block, so it answers such a request as a schema error, not with a `MustUnderstand` fault. It ignores all other header blocks. It parses every request as XML 1.0, even one that declares version 1.1. It ignores content type parameters other than `charset` and `action`, and a quoted parameter may contain `;`. `MIMEType` follows the WHATWG MIME rules, so it recovers some malformed parameters, such as a quote that is never closed. Over 64 KiB, the mock stops reading, answers, and closes the connection. A client that sends a body of a few MB may see a reset connection instead of that answer, because the mock closes the connection while the client is still sending. |
+| Order of checks | Firewall, then schema, then 6006, then the field rules (6001), then the lookup |
 
 ### Directory content
 
-All entries are synthetic. Each has `description` with its registration body and `timestamps`.
+All entries are synthetic. Each has `description` with its registration body and `timestamps`, except the 6004 entry below. Persons have the `description` `Registrierungsstelle:Österreichische Ärztekammer`, and organisations have `Registrierungsstelle:Amt der Landesregierung`. The handbook's group practice `1.2.40.0.34.3.1.0.5` is the one exception. It is a practice of doctors, so the mock gives it the medical chamber as its registration body. `GET /healthz` reports 313 entries.
 
 | OID | Name | `role` / `elgaRole` | `specialisation` | `memberof` | `otherID` | Status | Address, `mail` |
 |---|---|---|---|---|---|---|---|
@@ -235,22 +270,39 @@ All entries are synthetic. Each has `description` with its registration body and
 | `1.2.40.0.34.3.2.99.1.4` | Dr. Martin Brandl | 100 / 700 | 10:0 | | Arzt-Nr `99004` | Aktiv, Aktiv | Linz. A different Brandl for name searches. |
 | `1.2.40.0.34.3.2.99.1.5` | Dr. Eva Brandl-Huber | 159 / 700 | 10.20:19 | | Arzt-Nr `99005` | Inaktiv, Inaktiv | Graz. Tests the status filter and double names. |
 
-Short forms: `10.20:19` is `1.2.40.0.34.3.1.10.20:19`, `10:0` is `1.2.40.0.34.3.1.10:0`, `…3.1.99.1.2` is `1.2.40.0.34.3.1.99.1.2`. Dr. Eva Brandl's descriptor matches the `urn:eidgvat:attributes.gda` claim of the Keycloak user `eva.brandl` field for field.
+Short forms: `10.20:19` is `1.2.40.0.34.3.1.10.20:19`, `10:0` is `1.2.40.0.34.3.1.10:0`, `…3.1.99.1.2` is `1.2.40.0.34.3.1.99.1.2`. Dr. Eva Brandl's descriptor matches the `urn:eidgvat:attributes.gda` claim of the Keycloak user `eva.brandl` on every field of the claim, and a test checks it. Her entry also has the lab address and `memberof`, which the claim does not carry.
 
-Also in the mock:
+Test entries, all Aktiv, Aktiv:
 
-- The three test entries from the handbook with their documented OIDs and names: "Test-GDA Ambulatorium" (`1.2.40.0.34.3.1.0.2`, Ambu-Nr `A9999`), "Gruppenpraxis Dr. Aldemar SVC Betriebsordination Wahlarzt OG" (`1.2.40.0.34.3.1.0.5`), and "XXXeHealth Test-GDA XXXTest-GDA Support-Ordination BMG" (`1.2.40.0.34.3.2.0.10`). The handbook's sample requests then work against the mock. Their other fields are made up.
-- ID Austria's test doctor "Dr. XXXOtto XXXOttakringer" (`1.2.40.0.34.3.2.99.0.11003`) with the roles from the ID Austria example.
-- About 300 generated entries from a fixed seed: a realistic mix of roles and federal states, about 10 percent inactive, fictional streets. They make wildcard searches, the status filter, and fault 6005 behave like the real thing.
+| OID | Name | `role` / `elgaRole` | `specialisation` | `otherID` | Address | Purpose |
+|---|---|---|---|---|---|---|
+| `1.2.40.0.34.3.1.0.2` | Test-GDA Ambulatorium | 304 / 702 | | Ambu-Nr `A9999` | Wien | Handbook test entry |
+| `1.2.40.0.34.3.1.0.5` | Gruppenpraxis Dr. Aldemar SVC Betriebsordination Wahlarzt OG | 100 / 700 | 10:0 | | Wien and Graz | Handbook test entry. The two addresses test that address criteria match one address. |
+| `1.2.40.0.34.3.2.0.10` | XXXeHealth Test-GDA XXXTest-GDA Support-Ordination BMG | 100 / 700 | 10:0 | | Scheingasse 1/3/3/40, 1010 Wien, the handbook's sample address | Handbook test entry |
+| `1.2.40.0.34.3.2.99.0.11003` | Dr. XXXOtto XXXOttakringer | 158 and 100 / 700 | 10:0 and 10.20:49 | | none | ID Austria's test doctor, with the roles from the ID Austria example. Added and modified on 2022-09-10. |
+| `1.2.40.0.34.3.1.99.9.6004` | ordy test entry without timestamps | 304 / 702 | | | none | Has no `timestamps`, so `GetGDA` on it returns fault 6004. `GdaSearch` never returns or counts it. |
+
+The handbook's sample requests work against the mock. Apart from the OIDs, the names, and `A9999`, the handbook entries are made up. `1.2.40.0.34.3.1.99.9.6003` is reserved. It is not in the directory, and `GetGDA` on it returns 6003.
+
+300 more entries come from a fixed-seed generator and are the same on every start. 249 are persons, with `role` 100 or 159, `elgaRole` 700, and an Arzt-Nr from `91000`. 83 of them are members of a generated organisation. 51 are organisations, with `role` 300, 301, or 304, a KA-Nr or Ambu-Nr, and `mail` on an `.example` domain. A generated person has the OID `1.2.40.0.34.3.2.99.1.<n>`, and a generated organisation has `1.2.40.0.34.3.1.99.1.<n>`, where each n from 1000 to 1299 appears once. They cover all nine federal states with fictional streets. 36 are inactive, and 13 more are active without ELGA. The generator never uses the surnames Brandl, Hofer, Leitner, Huber, Wagner, Kern, Beispiel, or Ottakringer. It never adds a member to the three scenario organisations. Both rules keep the results of the scenario's searches exact. The generated entries make wildcard searches, the status filter, and fault 6005 behave like the real thing.
 
 Not in the directory: Stefan Kern and Karl Heinz Moser-Wallner (discharge management staff are not healthcare professionals), Sophie Lindner-Pichler (a biomedical scientist who sends results Dr. Eva Brandl validated), Thomas Wagner, Anna Huber, and the second Eva Brandl.
 
-### Done when
+### Code
 
-- The handbook's sample requests return the test entries.
-- Every fault code from 6001 to 6006 and the HTTP 403 can be triggered.
-- A SOAP client generated from [`ehvd/eHVD.wsdl`](ehvd/eHVD.wsdl) works against the mock without changes.
-- `docker compose up` starts the container, and `./scripts/setup.sh` waits for `/healthz`.
+| Path in `services/ehvd-mock/` | Content |
+|---|---|
+| `src/soap.ts` | The wire format from the WSDL: the request sequences, the operation table, a strict XML parser on [saxes](https://github.com/lddubeau/saxes), envelope parsing, responses, and the fault registry |
+| `src/rules.ts` | The field rules: lengths, allowed characters with a table of the Latin letters in Unicode, and wildcards |
+| `src/query.ts` | `GetGDA` and `GdaSearch` over the directory, and the conversion to `GdaDescriptor` that raises 6004 |
+| `src/directory.ts`, `src/generated.ts`, `src/codes.ts` | The fixed entries, the generator, and the id kinds and registration bodies that both use |
+| `src/server.ts`, `src/config.ts`, `src/main.ts` | HTTP, the allowlist, the WSDL, the log, and the two variables |
+| `test/` | The tests that `pnpm test` runs |
+| `Dockerfile` | `node:24-alpine`, built from the repository root, with only the mock's production dependencies from the lockfile |
+
+Node runs the TypeScript files directly with type stripping, so the service has no build step. Its own `tsconfig.json` allows only erasable syntax, and `pnpm typecheck` checks it. To run it without Docker, on Node.js 22.18 or newer: `pnpm --filter ehvd-mock start`.
+
+The tests start the server on a free port and send real SOAP over HTTP. They cover the handbook's sample requests, every fault from 6001 to 6006 and both kinds of HTTP 403, the wildcard, status, and address rules, and the served WSDL. A node-soap client built from the served WSDL calls both operations and receives a fault. One test compares Eva Brandl's entry with her Keycloak claim, and one compares the request tables with [`ehvd/eHVD.wsdl`](ehvd/eHVD.wsdl).
 
 ## How ordy uses the eHVD (T15)
 
