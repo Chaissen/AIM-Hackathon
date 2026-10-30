@@ -5,14 +5,16 @@ import { z } from "zod";
 import { env } from "@/env";
 import { requestInput } from "@/lib/request-input";
 import { type Actor, clinicProcedure, createTRPCRouter } from "@/server/api/trpc";
-import { answerDeps } from "@/server/answers/deps";
+import { answerDeps, readFhirPatient } from "@/server/answers/deps";
 import { logReason } from "@/server/answers/file";
 import { acceptAnswer, FilingOutcomeOpen, NoHeldAnswer, rejectAnswer } from "@/server/answers/held";
 import { auditActor, recordAudit } from "@/server/audit/record";
 import type { Db } from "@/server/db";
 import { auditLog } from "@/server/db/schema";
 import { type AddressCheck as EhvdAddressCheck, addressWarning, checkAddress } from "@/server/ehvd/address-check";
+import { FhirError } from "@/server/fhir/client";
 import { nameWords } from "@/server/identity/names";
+import { IncompletePatient, MessageRefused, sendRequestEmail } from "@/server/mail/send";
 import { displayName } from "@/server/matrix/client";
 import { taskStatus, TransitionError } from "@/server/requests/lifecycle";
 import {
@@ -130,9 +132,44 @@ async function decideHeldAnswer(ctx: DecideContext, event: "accept" | "reject") 
 const auditOf = (db: Db, ids: number[]) =>
   db.select().from(auditLog).where(inArray(auditLog.requestId, ids)).orderBy(asc(auditLog.at), asc(auditLog.id));
 
-// TODO(T06): send the link by email or SMS. Until then, print it in development so the portal can be tried.
-function printLink(request: RequestRow, token: string) {
-  if (env.NODE_ENV === "development") console.info(`Request ${request.id}: ${env.PUBLIC_URL}/r/${token}`);
+export const linkDeps = { readPatient: readFhirPatient, sendRequestEmail };
+
+const MailFailure = z.object({ code: z.string().optional(), responseCode: z.number().optional(), cause: z.object({ code: z.string() }).optional() });
+
+/** Codes only. Nodemailer puts the SMTP server's response in the message, and the response can echo an address or a name. */
+function notSentReason(error: unknown): string {
+  if (error instanceof MessageRefused) return `refused for ${error.categories.join(", ")}`;
+  if (error instanceof IncompletePatient) return "refused for an incomplete patient record";
+  if (error instanceof FhirError) return `the FHIR server answered ${error.status}`;
+  const failure = MailFailure.catch({}).parse(error);
+  const code = failure.code ?? failure.cause?.code ?? "no code";
+  return failure.responseCode ? `${code}, SMTP ${failure.responseCode}` : code;
+}
+
+async function sendLink(request: RequestRow, token: string) {
+  const link = `${env.PUBLIC_URL}/r/${token}`;
+  if (request.channel === "sms") {
+    if (env.NODE_ENV === "development") console.info(`Request ${request.id}: ${link}`);
+    return;
+  }
+  const patient = await linkDeps.readPatient(request.patientId).catch((error: unknown) => notSent(request, "reading the patient", error));
+  await linkDeps
+    .sendRequestEmail({ to: request.address, requester: request.requesterName, clinic: env.CLINIC_NAME, link, expiresAt: request.expiresAt, patient })
+    .catch((error: unknown) => notSent(request, "sending", error));
+}
+
+function notSent(request: RequestRow, stage: string, error: unknown): never {
+  console.error(`The email for request ${request.id} was not sent while ${stage}: ${notSentReason(error)}`);
+  if (error instanceof MessageRefused) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: `The email would contain ${error.categories.join(", ")}, so it was not sent. The request did not go out.` });
+  }
+  if (error instanceof IncompletePatient) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "The patient's record on the FHIR server lacks a given name, a family name, or a full birth date, so ordy cannot check the email. The request did not go out.",
+    });
+  }
+  throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "The email could not be sent. The request did not go out; try again in a few minutes." });
 }
 
 export const requestRouter = createTRPCRouter({
@@ -150,7 +187,7 @@ export const requestRouter = createTRPCRouter({
 
     // The address check against the eHVD (T15). An SMS always passes it.
     const check = await checkAddress({ ...contact, org: input.org });
-    const { request, token } = await createRequest(
+    const { request } = await createRequest(
       ctx.db,
       {
         docType: input.docType,
@@ -163,8 +200,8 @@ export const requestRouter = createTRPCRouter({
         requesterName: (await displayName(ctx.actor.mxid)) ?? ctx.actor.mxid,
       },
       stored(check),
+      sendLink,
     );
-    if (request.state === "sent") printLink(request, token);
     return { ...summary(request), addressWarning: check.result === "pass" ? null : addressWarning(check, input.org) };
   }),
 
@@ -184,9 +221,8 @@ export const requestRouter = createTRPCRouter({
 
   /** Dr. Hofer confirms the address after the warning. The request goes out with a new 7-day link. */
   sendAnyway: ownRequestProcedure.mutation(async ({ ctx }) => {
-    const sent = await sendAnyway(ctx.db, ctx.request.id, auditActor(ctx.actor)).catch(conflict);
+    const sent = await sendAnyway(ctx.db, ctx.request.id, auditActor(ctx.actor), sendLink).catch(conflict);
     if (!sent) throw notFound(ctx.request.id);
-    printLink(sent.request, sent.token);
     return summary(sent.request);
   }),
 

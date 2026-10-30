@@ -81,6 +81,7 @@ async function verifiedRequest(person: typeof EVA | typeof STEFAN, docType: NewR
       requesterName: "Dr. Lena Hofer",
     },
     { passed: true },
+    async () => {},
   );
   created.push(request.id);
   assert.ok(await applyLoginTransition(db, request.id, { from: "sent", to: "verified", personNumber: person.personNumber }));

@@ -46,20 +46,24 @@ export type AddressCheck =
   /** The eHVD could not confirm the address. The request waits too, but nothing was caught. */
   | { passed: false; unchecked: true };
 
+export type SendLink = (request: RequestRow, token: string) => Promise<void>;
+
 /**
  * Stores a new request, with its audit entry in the same transaction. If the address check passed, the request is
  * `sent` with `request_sent`. Otherwise it waits in `awaiting_confirmation`: with `misdelivery_caught: address_mismatch`
  * for another domain, and with no entry yet for an address the eHVD could not confirm, until Send anyway logs
  * `request_sent`. Returns the link token, which exists only here: the database keeps its hash.
  */
-export async function createRequest(db: Db, input: NewRequest, addressCheck: AddressCheck) {
+export async function createRequest(db: Db, input: NewRequest, addressCheck: AddressCheck, sendLink: SendLink) {
   const { token, hash } = newLinkToken();
   const state = initialState(addressCheck.passed);
   const request = await db.transaction(async (tx) => {
     const [row] = await tx.insert(requests).values({ ...input, state, linkHash: hash, expiresAt: newExpiry() }).returning();
     const actor: AuditActor = { kind: "network_member", id: row.requester };
-    if (addressCheck.passed) await recordAudit(tx, requestSent(row, actor, false));
-    else if ("domain" in addressCheck) {
+    if (addressCheck.passed) {
+      await recordAudit(tx, requestSent(row, actor, false));
+      await sendLink(row, token);
+    } else if ("domain" in addressCheck) {
       await recordAudit(tx, {
         event: "misdelivery_caught",
         requestId: row.id,
@@ -78,11 +82,12 @@ export async function createRequest(db: Db, input: NewRequest, addressCheck: Add
  * Dr. Hofer clicked Send anyway after the address warning. The request goes out now: it gets a new link token, valid
  * for 7 days from now, and `request_sent` is logged. Returns the new token, or null for an unknown request.
  */
-export async function sendAnyway(db: Db, id: number, actor: AuditActor) {
+export async function sendAnyway(db: Db, id: number, actor: AuditActor, sendLink: SendLink) {
   const { token, hash } = newLinkToken();
   const request = await applyEvent(db, id, "send_anyway", async (tx) => {
     const [row] = await tx.update(requests).set({ linkHash: hash, expiresAt: newExpiry() }).where(eq(requests.id, id)).returning();
     await recordAudit(tx, requestSent(row, actor, true));
+    await sendLink(row, token);
     return row;
   });
   return request && { request, token };
