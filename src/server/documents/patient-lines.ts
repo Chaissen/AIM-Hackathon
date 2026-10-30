@@ -12,7 +12,7 @@ import type { IsoDate, SafetyRefusal } from "./types";
  * A `key: value` line with its markup stripped. `norm` is the key in lower case, without `(2)` and a final `.`.
  * `header` is true inside the header block (`headerBlock()`).
  */
-export type KeyLine = { key: string; norm: string; value: string; header: boolean };
+export type KeyLine = { key: string; norm: string; value: string; header: boolean; mayBeLabel: boolean };
 
 /** Keys that name the patient anywhere in the file. */
 const PATIENT_KEYS = new Set(["patient", "patient name", "patient's name", "name of patient", "name of the patient", "patient full name"]);
@@ -25,6 +25,7 @@ const HEADER_BIRTH_KEYS = new Set(["born"]);
 /** A name in two lines, in the header block. */
 const FIRST_KEYS = new Set(["first name", "first names", "given name", "given names", "forename"]);
 const LAST_KEYS = new Set(["surname", "family name", "last name"]);
+const MAY_HEAD_A_LABEL = new Set(["patient"]);
 
 /** Every key that identifies the patient somewhere. The fallback reads none of them as an ordinary field. */
 export const IDENTITY_KEYS = new Set([...PATIENT_KEYS, ...HEADER_PATIENT_KEYS, ...BIRTH_KEYS, ...HEADER_BIRTH_KEYS, ...FIRST_KEYS, ...LAST_KEYS]);
@@ -70,8 +71,10 @@ function keyValue(keyPart: string, valuePart: string, header: boolean): KeyLine 
   const value = valuePart.replace(/^[\s*_]+|[\s*_]+$/g, "").replace(/\s+/g, " ");
   if (!value || key.length > 50 || !KEY.test(key)) return null;
   const norm = key.toLowerCase().replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim().replace(/\.$/, "");
-  return { key, norm, value, header };
+  return { key, norm, value, header, mayBeLabel: false };
 }
+
+const namesPatient = ({ norm, header }: KeyLine) => PATIENT_KEYS.has(norm) || (header && HEADER_PATIENT_KEYS.has(norm));
 
 /** Link text instead of the link, no HTML tags, straight apostrophes, ASCII colons, and no `\` hard break at the end. */
 const unmark = (text: string) =>
@@ -96,6 +99,14 @@ const isSentence = (value: string) =>
   /\b(?:is|was|were|are|has|had|have|been|admitted|discharged|presented|reports|reported|underwent|walks|lives)\b/i.test(value) ||
   (value.split(/\s+/).length >= 4 && /\p{L}{4,}[.!?]$/u.test(value));
 
+const withoutEmphasis = (value: string) => value.replace(/[*_`]|(?<!\p{L})'|'(?!\p{L})/gu, "");
+
+/** The value up to the first `,`, `(`, `;`, ` - `, or birth clause. */
+const namePart = (value: string) =>
+  withoutEmphasis(value)
+    .split(/[,(;]|\s[-–—]\s|\s(?:born|dob|d\.o\.b\.?|date of birth)(?![a-z])/i)[0]
+    .trim();
+
 /**
  * The value reads as a value for this identity key, not as a sentence or another key. For a birth date key it starts
  * with a date. For a name key the part before the first `,`, `(`, `;`, ` - `, or birth clause is one to six words of
@@ -106,10 +117,7 @@ const isSentence = (value: string) =>
 function plausibleValue(norm: string, value: string): boolean {
   if (IDENTITY_KEYS.has(value.toLowerCase().replace(/[*_:]/g, "").trim())) return false;
   if (BIRTH_KEYS.has(norm) || HEADER_BIRTH_KEYS.has(norm)) return DATE_START.test(value);
-  // Bold, italic, or backticked (`'` after unmark()) name words are names too: `**Max Beispiel**, 01.01.1960`.
-  const name = value
-    .replace(/[*_`]|(?<!\p{L})'|'(?!\p{L})/gu, "")
-    .split(/[,(;]|\s[-–—]\s|\s(?:born|dob|d\.o\.b\.?|date of birth)(?![a-z])/i)[0].trim();
+  const name = namePart(value);
   const words = name.split(/\s+/);
   const last = words[words.length - 1];
   return (
@@ -175,8 +183,20 @@ export function keyValueRows(rows: string[][], header: boolean): KeyLine[] {
   const keyCell = (cell: string) => cell.replace(/[\s*_]*:[\s*_]*$/, "");
   const [k0, k1] = cells[0].map((c) => keyValue(keyCell(c), "-", header));
   const columns = k1 !== null && (IDENTITY_KEYS.has(k1.norm) || (COLUMN_NAMES.has(k1.norm) && k0 !== null && IDENTITY_KEYS.has(k0.norm)));
-  if (columns) return cells.slice(1).flatMap((row) => [k0, k1].flatMap((k, j) => (k && keyValue(k.key, row[j], header)) || []));
-  return cells.flatMap(([key, value]) => keyValue(keyCell(key), value, header) ?? []);
+  if (columns) {
+    // Below the header block a `Name` column is a contact, so the birth date in its row is the contact's too.
+    if (!header && [k0, k1].some((k) => k && HEADER_PATIENT_KEYS.has(k.norm))) return [];
+    return cells.slice(1).flatMap((row) => [k0, k1].flatMap((k, j) => (k && keyValue(k.key, row[j], header)) || []));
+  }
+  const startsWithKnownKey = ([key]: string[]) => {
+    const k = keyValue(keyCell(key), "-", header);
+    return k !== null && (IDENTITY_KEYS.has(k.norm) || COLUMN_NAMES.has(k.norm));
+  };
+  const mayBeColumnNames = cells.length > 1 && !cells.slice(1).some(startsWithKnownKey);
+  return cells.flatMap(([key, value], i) => {
+    const kl = keyValue(keyCell(key), value, header);
+    return kl ? [{ ...kl, mayBeLabel: i === 0 && mayBeColumnNames && namesPatient(kl) }] : [];
+  });
 }
 
 /**
@@ -213,7 +233,7 @@ export function keyLines(markdown: string): KeyLine[] {
       const isBare = isBareIdentityKey(line);
       const own = toKeyLine(line, header.open);
       const joined = bare && !isBare && (!own || ENDS_IN_BIRTH_KEY.test(own.norm)) ? toKeyLine(`${bare.line} ${line}`, bare.header) : null;
-      const kl = joined && plausibleValue(joined.norm, joined.value) ? joined : own;
+      const kl = joined && plausibleValue(joined.norm, joined.value) ? { ...joined, mayBeLabel: MAY_HEAD_A_LABEL.has(joined.norm) } : own;
       if (kl) lines.push(kl);
       bare = isBare ? { line: unmark(line), header: header.open } : null;
     }
@@ -254,6 +274,17 @@ const words = (name: string) =>
     .filter(Boolean)
     .sort();
 
+function withoutLabels(lines: KeyLine[]): KeyLine[] {
+  const mayBeLabels = lines.filter((l) => l.mayBeLabel);
+  const named = lines.filter((l) => !l.mayBeLabel && (namesPatient(l) || (l.header && (FIRST_KEYS.has(l.norm) || LAST_KEYS.has(l.norm)))));
+  const moreThanAName = (l: KeyLine) => namePart(l.value) !== withoutEmphasis(l.value).trim();
+  const patientIfNoneNamed = named.length ? undefined : (mayBeLabels.find(moreThanAName) ?? mayBeLabels[0]);
+  const nameOf = (l: KeyLine) => words(withoutEmphasis(splitPatientValue(l.value)?.name ?? l.value).replaceAll(",", " "));
+  const patient = new Set([...named, ...(patientIfNoneNamed ? [patientIfNoneNamed] : [])].flatMap(nameOf));
+  const sharesPatientWord = (l: KeyLine) => nameOf(l).some((w) => patient.has(w));
+  return lines.filter((l) => !l.mayBeLabel || l === patientIfNoneNamed || moreThanAName(l) || sharesPatientWord(l));
+}
+
 /** The patient as the file names them, and a refusal when the lines name more than one patient or birth date. */
 export function patientIdentity(lines: KeyLine[]): PatientIdentity {
   const names = new Map<string, string>();
@@ -267,8 +298,9 @@ export function patientIdentity(lines: KeyLine[]): PatientIdentity {
     const date = parseDateWide(text) ?? parseDateWide(text.replace(/\.$/, "")) ?? leadingDate(text);
     births.set(date ?? `text:${text.toLowerCase()}`, { text, date });
   };
-  for (const { norm, value, header } of lines) {
-    if (PATIENT_KEYS.has(norm) || (header && HEADER_PATIENT_KEYS.has(norm))) {
+  for (const line of withoutLabels(lines)) {
+    const { norm, value, header } = line;
+    if (namesPatient(line)) {
       const split = splitPatientValue(value);
       if (!split) {
         errors.push(`The patient line "${value}" has more than a name and a birth date such as ", born 12 March 1961".`);

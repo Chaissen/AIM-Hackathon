@@ -541,3 +541,24 @@ test("a next-line value is read as on one line in the fallback, unless it is a s
   assert.deepEqual(await refused(insertAfter(lab, "Reported: 22.10.2026 11:40\n", "Date of birth:\n01.01.1960 (65 years)")), ["several-birth-dates"]);
   assert.equal((await record(insertAfter(lab, "Reported: 22.10.2026 11:40\n", "Patient:\nMobile, walks with crutches."), goodLab())).patient.name, "Maria Beispiel");
 });
+
+test("a table in a code block is not read in the fallback", async () => {
+  const markdown = insertAfter(lab, "Reported: 22.10.2026 11:40\n", "```example\n| Patient | Max Beispiel |\n|---|---|\n```");
+  assert.deepEqual((await record(markdown, goodLab())).patient, { name: "Maria Beispiel", birthDate: "1961-03-12" });
+});
+
+test("a birth date column beside a Name column is a contact's in the fallback", async () => {
+  const markdown = `${rehab}\n## Relatives\n\n| Name | Date of birth |\n|---|---|\n| Stefan Kern | 05.05.1970 |\n`;
+  assert.deepEqual((await record(markdown, goodRehab())).patient, { name: "Maria Beispiel", birthDate: "1961-03-12" });
+});
+
+test("a name that may be a label or a column name is no second patient in the fallback", async () => {
+  const after = (line: string) => insertAfter(lab, "Reported: 22.10.2026 11:40\n", line);
+  for (const line of ["**Patient:**\nElective Inpatient Admission", "**Patient:**\n\nElective Inpatient Admission"]) {
+    assert.equal((await record(after(line), goodLab())).patient.name, "Maria Beispiel", line);
+  }
+  const floor = `${rehab}\n## Ward\n\n| Patient | Floor |\n|---|---|\n| Maria Beispiel | 2 |\n`;
+  assert.equal((await record(floor, goodRehab())).patient.name, "Maria Beispiel");
+  const nextLineOnly = lab.replace("Patient name: Maria Beispiel\n", "Patient:\nMaria Beispiel\n\n**Patient:**\n\nElective Inpatient Admission\n\n");
+  assert.equal((await record(nextLineOnly, goodLab())).patient.name, "Maria Beispiel", "with no other patient line, the first next-line name is the patient's");
+});
