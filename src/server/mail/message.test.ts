@@ -72,6 +72,13 @@ test("a character that joins the next one does not hide it", () => {
   assert.deepEqual(check("born \u06001961-03-12"), ["birth-date"]);
 });
 
+test("a Turkish name is caught in either case, with or without the dot on its i", () => {
+  const yilmaz = { family: "Yılmaz", given: ["Işık"], birthDate: "1950-05-05" };
+  for (const text of ["Dr. Selin YILMAZ", "Yılmaz", "yilmaz", "IŞIK", "Isik"]) assert.deepEqual(check(text, yilmaz), ["patient-name"], text);
+  const ince = { family: "İnce", given: ["Ayşe"], birthDate: "1950-05-05" };
+  for (const text of ["INCE", "ince", "İNCE"]) assert.deepEqual(check(text, ince), ["patient-name"], text);
+});
+
 test("an upper-case Greek name is caught whatever follows its final sigma", () => {
   const pavlos = { family: "Παύλος", given: ["Νίκος"], birthDate: "1950-05-05" };
   for (const text of ["ΠΑΥΛΟΣ", "ΠΑΥΛΟΣ's", "ΠΑΥΛΟΣ:ABC", "Παυλος"]) assert.deepEqual(check(text, pavlos), ["patient-name"], text);
