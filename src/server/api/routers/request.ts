@@ -134,15 +134,16 @@ const auditOf = (db: Db, ids: number[]) =>
 
 export const linkDeps = { readPatient: readFhirPatient, sendRequestEmail };
 
-const MailFailure = z.object({ code: z.string().optional(), responseCode: z.number().optional() });
+const MailFailure = z.object({ code: z.string().optional(), responseCode: z.number().optional(), cause: z.object({ code: z.string() }).optional() });
 
 /** Codes only. Nodemailer puts the SMTP server's response in the message, and the response can echo an address or a name. */
 function notSentReason(error: unknown): string {
   if (error instanceof MessageRefused) return `refused for ${error.categories.join(", ")}`;
   if (error instanceof IncompletePatient) return "refused for an incomplete patient record";
   if (error instanceof FhirError) return `the FHIR server answered ${error.status}`;
-  const { code = "no code", responseCode } = MailFailure.catch({}).parse(error);
-  return responseCode ? `${code}, SMTP ${responseCode}` : code;
+  const failure = MailFailure.catch({}).parse(error);
+  const code = failure.code ?? failure.cause?.code ?? "no code";
+  return failure.responseCode ? `${code}, SMTP ${failure.responseCode}` : code;
 }
 
 async function sendLink(request: RequestRow, token: string) {
@@ -151,22 +152,24 @@ async function sendLink(request: RequestRow, token: string) {
     if (env.NODE_ENV === "development") console.info(`Request ${request.id}: ${link}`);
     return;
   }
-  try {
-    const patient = await linkDeps.readPatient(request.patientId);
-    await linkDeps.sendRequestEmail({ to: request.address, requester: request.requesterName, clinic: env.CLINIC_NAME, link, expiresAt: request.expiresAt, patient });
-  } catch (error) {
-    console.error(`The email for request ${request.id} was not sent: ${notSentReason(error)}`);
-    if (error instanceof MessageRefused) {
-      throw new TRPCError({ code: "PRECONDITION_FAILED", message: `The email would contain ${error.categories.join(", ")}, so it was not sent. The request did not go out.` });
-    }
-    if (error instanceof IncompletePatient) {
-      throw new TRPCError({
-        code: "PRECONDITION_FAILED",
-        message: "The patient's record on the FHIR server lacks a given name, a family name, or a birth date, so ordy cannot check the email. The request did not go out.",
-      });
-    }
-    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "The email could not be sent. The request did not go out; try again in a few minutes." });
+  const patient = await linkDeps.readPatient(request.patientId).catch((error: unknown) => notSent(request, "reading the patient", error));
+  await linkDeps
+    .sendRequestEmail({ to: request.address, requester: request.requesterName, clinic: env.CLINIC_NAME, link, expiresAt: request.expiresAt, patient })
+    .catch((error: unknown) => notSent(request, "sending", error));
+}
+
+function notSent(request: RequestRow, stage: string, error: unknown): never {
+  console.error(`The email for request ${request.id} was not sent while ${stage}: ${notSentReason(error)}`);
+  if (error instanceof MessageRefused) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: `The email would contain ${error.categories.join(", ")}, so it was not sent. The request did not go out.` });
   }
+  if (error instanceof IncompletePatient) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "The patient's record on the FHIR server lacks a given name, a family name, or a full birth date, so ordy cannot check the email. The request did not go out.",
+    });
+  }
+  throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "The email could not be sent. The request did not go out; try again in a few minutes." });
 }
 
 export const requestRouter = createTRPCRouter({
