@@ -167,10 +167,10 @@ test("a vital sign needs a unit its FHIR profile allows, and blood pressure cann
   if (!pressure.ok) assert.match(pressure.errors.join(" "), /^Row 2 \(Systolic\): blood pressure needs systolic and diastolic together/);
 
   // The oxygen profile's code means arterial blood, so a venous or capillary saturation is refused rather than mislabelled.
-  for (const [test, loinc] of [["SvO2", "19224-5"], ["sO2 cap", "2709-4"]]) {
-    const result = parseDocument(maria.replace("| aPTT | 31 | s | 25 to 37 | 14979-9 |", `| ${test} | 70 | % | 65 to 75 | ${loinc} |`));
+  for (const [name, loinc] of [["SvO2", "19224-5"], ["sO2 cap", "2709-4"]]) {
+    const result = parseDocument(maria.replace("| aPTT | 31 | s | 25 to 37 | 14979-9 |", `| ${name} | 70 | % | 65 to 75 | ${loinc} |`));
     assert.equal(result.ok, false);
-    if (!result.ok) assert.match(result.errors.join(" "), new RegExp(`^Row 2 \\(${test}\\): the FHIR profile for oxygen saturation adds the code for arterial blood`));
+    if (!result.ok) assert.match(result.errors.join(" "), new RegExp(`^Row 2 \\(${name}\\): the FHIR profile for oxygen saturation adds the code for arterial blood`));
   }
 
   const temperature = (parsed(maria.replace("| aPTT | 31 | s | 25 to 37 | 14979-9 |", "| Temperature | 37.2 | °C | 36 to 37.5 | 8310-5 |")) as LabResult).rows[1];

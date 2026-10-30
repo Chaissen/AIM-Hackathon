@@ -131,21 +131,21 @@ function labRows(table: Table, errors: string[]): LabRow[] {
   return table.rows.flatMap((cells, n) => {
     const cell = (c: (typeof LAB_COLUMNS)[number]) => cells[col[c]] ?? "";
     const test = cell("Test");
-    const row = `Row ${n + 1} (${test || "no test name"})`;
+    const label = `Row ${n + 1} (${test || "no test name"})`;
     const value = toNumber(cell("Result"));
     if (value === null) {
-      errors.push(`${row}: the result "${cell("Result")}" is not a number.`);
+      errors.push(`${label}: the result "${cell("Result")}" is not a number.`);
       return [];
     }
     const loinc = cell("LOINC code");
     if (!isLoinc(loinc)) {
-      errors.push(`${row}: "${loinc}" is not a LOINC code such as 6301-6, or its check digit is wrong.`);
+      errors.push(`${label}: "${loinc}" is not a LOINC code such as 6301-6, or its check digit is wrong.`);
       return [];
     }
     // FHIR files vital signs by their own profiles (vital-signs.ts).
     const refused = REFUSED_VITAL_SIGNS.get(loinc);
     if (refused) {
-      errors.push(`${row}: ${refused}`);
+      errors.push(`${label}: ${refused}`);
       return [];
     }
     const unitText = cell("Unit");
@@ -153,7 +153,7 @@ function labRows(table: Table, errors: string[]): LabRow[] {
     const vital = vitalSign(loinc);
     if (vital && !(ucum && vital.units.includes(ucum))) {
       const problem = unitText ? `"${unitText}" is not a unit for this vital sign` : "this vital sign has no unit";
-      errors.push(`${row}: ${problem}. Use a unit such as ${vital.example}.`);
+      errors.push(`${label}: ${problem}. Use a unit such as ${vital.example}.`);
       return [];
     }
     const [lowText, highText, ...extra] = cell("Reference range").split(" to ");

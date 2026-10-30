@@ -56,7 +56,10 @@ const BLOOD_PRESSURE = "blood pressure needs systolic and diastolic together, wh
 const NOT_ARTERIAL =
   "the FHIR profile for oxygen saturation adds the code for arterial blood, which a venous or capillary saturation is not. Write it below the table.";
 
-/** Vital sign codes that cannot be one table row, with the reason the parser gives. With `VITAL_SIGNS`, the validator's list. */
+/**
+ * Vital sign codes that cannot be one table row, with the reason the parser gives. With `VITAL_SIGNS`, the validator's
+ * list, plus diastolic 8462-4, which the list lacks but which cannot be a row either.
+ */
 export const REFUSED_VITAL_SIGNS: ReadonlyMap<string, string> = new Map([
   ...["85354-9", "35094-2", "8459-0", "76534-7", "55284-4", "8480-6", "8462-4"].map((code) => [code, BLOOD_PRESSURE] as const),
   ["85353-1", "a vital signs panel cannot be one table row. Give each vital sign its own row."],

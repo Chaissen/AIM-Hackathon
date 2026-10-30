@@ -31,7 +31,7 @@ export type Entry<T extends FhirResource> = { fullUrl: `urn:uuid:${string}`; res
 export type MapContext = {
   /** `Patient/maria-beispiel`, chosen by the request, never by the document. */
   patient: Reference;
-  /** The organisation from the heading. */
+  /** `PreparedParties.organization`: the outside organisation the author answers for. */
   organization: Reference;
   /**
    * `PreparedParties.author`: the author, or the sender when the sender is the author. It becomes the performer, the
