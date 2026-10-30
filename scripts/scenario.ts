@@ -16,19 +16,20 @@ import { createContext } from "@/server/api/trpc";
 import { db } from "@/server/db";
 import { auditLog } from "@/server/db/schema";
 import { getBotClient, roomAlias, type MatrixEvent } from "@/server/matrix/client";
+import { coverageLines, effortSeconds, filedReferences, misdeliveryCaught, requestCoverage, type AuditRow, type MisdeliveryKind } from "@/server/metrics/audit";
+import { revealedOnPage } from "@/server/metrics/page-check";
 import {
-  AUDIT_EVENTS,
-  bestCoverage,
-  coverageLines,
-  effortSeconds,
-  filedReferences,
-  misdeliveryCaught,
-  requestCoverage,
-  type AuditRow,
-  type MisdeliveryKind,
-} from "@/server/metrics/audit";
-import { METRICS_DIR, metricsMarkdown, type Metric } from "@/server/metrics/report";
-import { exportResources, runValidator, totalErrors } from "@/server/metrics/validator";
+  coverageMetric,
+  effortMetric,
+  METRICS_DIR,
+  metricsMarkdown,
+  misdeliveryMetric,
+  validationMetric,
+  type Metric,
+  type StepResult,
+  type ValidationRun,
+} from "@/server/metrics/report";
+import { exportResources, runValidator } from "@/server/metrics/validator";
 
 const { values: flags } = parseArgs({ options: { "no-validate": { type: "boolean", default: false } } });
 
@@ -38,9 +39,11 @@ type Ctx = {
   r1?: number;
   m1?: number;
   r2?: number;
-  // The misdelivery_caught entry per test, set by `verify`.
-  caught: Partial<Record<"M1" | "M2" | "M3", AuditRow>>;
+  // The page the wrong person saw after the ID Austria login in M1, set by `act`.
+  m1Page?: string;
 };
+
+const PATIENT = { name: "Maria Beispiel", birthDate: "1961-03-12" };
 
 type Step = {
   id: string;
@@ -50,8 +53,6 @@ type Step = {
   todo?: string;
   verify: (ctx: Ctx) => Promise<string>;
 };
-
-type StepResult = { id: string; title: string; status: "pass" | "fail" | "blocked" | "skipped"; detail: string };
 
 class CheckFailed extends Error {}
 const fail = (message: string): never => {
@@ -125,13 +126,21 @@ const steps: Step[] = [
     needs: "#11 (address check), #14 or createCaller (Send anyway), #6 (login), #7 (identity check)",
     todo:
       "Send request 1 again to eva.brandl@labor-kanaI.example and set ctx.m1. Expect awaiting_confirmation, then Send anyway. " +
-      "Open the link from Mailpit and log in as anna.huber / demo-anna. The page must show neither patient nor document type.",
+      "Open the link from Mailpit, log in as anna.huber / demo-anna, and set ctx.m1Page to the HTML of the page after the login.",
+    // Caught if the person cannot see the patient or the document type, cannot answer, and the failed identity check is logged.
     verify: async (ctx) => {
       const m1 = need(ctx.m1, "the M1 request");
-      ctx.caught.M1 = await expectMisdelivery(ctx, m1, "wrong_person");
+      const shown = revealedOnPage(need(ctx.m1Page, "the page after the M1 login"), PATIENT);
+      if (shown.length) fail(`the page after the login shows ${shown.join(", ")}`);
+      const caught = await expectMisdelivery(ctx, m1, "wrong_person");
+      const rows = (await rowsSince(ctx)).filter((r) => r.requestId === m1);
+      if (!rows.some((r) => r.event === "identity_checked" && r.outcome === "fail" && r.actor === caught.actor)) {
+        fail(`no identity_checked: fail for ${caught.actor} on request ${m1}`);
+      }
+      if (rows.some((r) => r.event === "answer_sent")) fail(`request ${m1} has an answer_sent entry`);
       await expectNotFiled(ctx, m1);
-      const address = misdeliveryCaught(await rowsSince(ctx), m1, "address_mismatch", ctx.since);
-      return `wrong_person logged for ${ctx.caught.M1.actor}${address ? ", address_mismatch logged before sending" : ""}`;
+      const address = misdeliveryCaught(rows, m1, "address_mismatch", ctx.since);
+      return `identity_checked: fail and wrong_person logged for ${caught.actor}, nothing shown${address ? ", address_mismatch logged before sending" : ""}`;
     },
   },
   {
@@ -141,9 +150,9 @@ const steps: Step[] = [
     todo: "Open the request 1 link and log in as thomas.wagner / demo-thomas.",
     verify: async (ctx) => {
       const r1 = need(ctx.r1, "request 1");
-      ctx.caught.M2 = await expectMisdelivery(ctx, r1, "wrong_person");
+      const caught = await expectMisdelivery(ctx, r1, "wrong_person");
       await expectNotFiled(ctx, r1);
-      return `wrong_person logged for ${ctx.caught.M2.actor}`;
+      return `wrong_person logged for ${caught.actor}`;
     },
   },
   {
@@ -153,7 +162,7 @@ const steps: Step[] = [
     todo: "Open the request 1 link, log in as eva.brandl / demo-eva, and upload track/scenario/documents/lab-result-max-beispiel.md.",
     verify: async (ctx) => {
       const r1 = need(ctx.r1, "request 1");
-      ctx.caught.M3 = await expectMisdelivery(ctx, r1, "patient_mismatch");
+      await expectMisdelivery(ctx, r1, "patient_mismatch");
       await expectNotFiled(ctx, r1);
       await expectNotice(ctx, "is about a different patient");
       return "patient_mismatch logged, nothing filed, Dr. Hofer told in Matrix";
@@ -209,60 +218,30 @@ async function runSteps(ctx: Ctx): Promise<StepResult[]> {
   return results;
 }
 
-async function measure(ctx: Ctx, results: StepResult[]): Promise<Metric[]> {
-  const ran = (id: string) => ["pass", "fail"].includes(results.find((r) => r.id === id)?.status ?? "");
-  const rows = results[0].status === "pass" ? await rowsSince(ctx) : [];
-  const metrics: Metric[] = [];
-
-  const refs = filedReferences(rows);
-  const validation: Metric = { name: "FHIR validation", target: "0 errors", result: "no filed resources", status: "blocked" };
-  if (refs.length && flags["no-validate"]) validation.result = `${refs.length} filed resources, validator skipped (--no-validate)`;
-  else if (refs.length) {
-    try {
-      const files = await exportResources(refs);
-      const checked = await runValidator(files, path.join(METRICS_DIR, "validator-output.json"));
-      const errors = totalErrors(checked);
-      Object.assign(validation, { result: `${errors} errors in ${checked.length} resources`, status: errors === 0 ? "met" : "missed" });
-    } catch (e) {
-      validation.result = `validator did not run: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`;
-    }
+async function validate(refs: string[]): Promise<ValidationRun> {
+  if (!refs.length) return { kind: "nothing_filed" };
+  if (flags["no-validate"]) return { kind: "skipped", resources: refs.length };
+  try {
+    const files = await exportResources(refs);
+    return { kind: "done", files: files.length, results: await runValidator(files, path.join(METRICS_DIR, "validator-output.json")) };
+  } catch (e) {
+    return { kind: "failed", error: e instanceof Error ? e.message.split("\n")[0] : String(e) };
   }
-  metrics.push(validation);
-
-  const effort = ctx.r1 === undefined ? null : effortSeconds(rows, ctx.r1);
-  metrics.push(
-    effort === null
-      ? { name: "Effort for the outside person", target: "0 installs, 0 accounts, under 2 minutes", result: "request 1 not answered", status: "blocked" }
-      : {
-          name: "Effort for the outside person",
-          target: "0 installs, 0 accounts, under 2 minutes",
-          result: `${Math.round(effort)} s from link_opened to answer_sent (automated run; the stopwatch test is #20)`,
-          status: effort < 120 ? "met" : "missed",
-        },
-  );
-
-  const tests = ["m1", "m2", "m3"].filter(ran);
-  const caught = Object.keys(ctx.caught).length;
-  metrics.push({
-    name: "Misdeliveries caught",
-    target: "3 of 3",
-    result: tests.length ? `${caught} of 3` : "M1 to M3 not run",
-    status: !tests.length ? "blocked" : caught === 3 ? "met" : "missed",
-  });
-
-  const coverage = [ctx.r1, ctx.r2].flatMap((id) => (id === undefined ? [] : [requestCoverage(id, rows)]));
-  const best = bestCoverage(coverage);
-  for (const c of coverage) console.log(coverageLines(c).join("\n"));
-  metrics.push({
-    name: "Audit coverage",
-    target: `${AUDIT_EVENTS.length} of ${AUDIT_EVENTS.length}`,
-    result: best ? `${best.covered} of ${AUDIT_EVENTS.length} on request ${best.requestId}` : "no request sent",
-    status: !best ? "blocked" : best.covered === AUDIT_EVENTS.length ? "met" : "missed",
-  });
-  return metrics;
 }
 
-const ctx: Ctx = { since: new Date(), caught: {} };
+async function measure(ctx: Ctx, results: StepResult[]): Promise<Metric[]> {
+  const rows = results[0].status === "pass" ? await rowsSince(ctx) : [];
+  const coverage = [ctx.r1, ctx.r2].flatMap((id) => (id === undefined ? [] : [requestCoverage(id, rows)]));
+  for (const c of coverage) console.log(coverageLines(c).join("\n"));
+  return [
+    validationMetric(await validate(filedReferences(rows))),
+    effortMetric(ctx.r1 === undefined ? null : effortSeconds(rows, ctx.r1)),
+    misdeliveryMetric(results),
+    coverageMetric(coverage.find((c) => c.requestId === ctx.r1)),
+  ];
+}
+
+const ctx: Ctx = { since: new Date() };
 console.log(`pnpm scenario: started ${ctx.since.toISOString()}\n`);
 let results: StepResult[] = [];
 let metrics: Metric[] = [];
@@ -276,7 +255,7 @@ try {
 
 const markdown = metricsMarkdown(metrics, ctx.since);
 await mkdir(METRICS_DIR, { recursive: true });
-await writeFile(path.join(METRICS_DIR, "scenario.json"), JSON.stringify({ at: ctx.since, ctx, steps: results, metrics }, null, 2));
+await writeFile(path.join(METRICS_DIR, "scenario.json"), JSON.stringify({ at: ctx.since, requests: { r1: ctx.r1, m1: ctx.m1, r2: ctx.r2 }, steps: results, metrics }, null, 2));
 await writeFile(path.join(METRICS_DIR, "metrics.md"), markdown);
 console.log(`\n${markdown}\nWritten to ${path.join(METRICS_DIR, "metrics.md")} and scenario.json.`);
 process.exit(results.every((r) => r.status === "pass") && metrics.every((m) => m.status === "met") ? 0 : 1);

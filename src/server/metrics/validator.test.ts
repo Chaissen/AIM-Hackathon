@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 
-import { metricsMarkdown } from "./report";
-import { summarizeOutput, totalErrors } from "./validator";
+import { FhirError } from "@/server/fhir/client";
+
+import { ensureValidatorJar, exportResources, summarizeOutput, totalErrors, VALIDATOR_URL } from "./validator";
 
 const FILE = "http://hl7.org/fhir/StructureDefinition/operationoutcome-file";
 
@@ -55,24 +60,35 @@ test("a single OperationOutcome gives one result", () => {
   assert.deepEqual(summarizeOutput({ resourceType: "Patient" }), []);
 });
 
-test("the metrics table names each metric with its target, result, and status", () => {
-  const md = metricsMarkdown(
-    [
-      { name: "FHIR validation", target: "0 errors", result: "0 errors in 7 resources", status: "met" },
-      { name: "Audit coverage", target: "6 of 6", result: "no request sent", status: "blocked" },
-    ],
-    new Date("2026-10-30T09:15:42Z"),
-  );
-  assert.equal(
-    md,
-    [
-      "Metric results from `pnpm scenario` on 2026-10-30 09:15 UTC.",
-      "",
-      "| Metric | Target | Result | Status |",
-      "|---|---|---|---|",
-      "| FHIR validation | 0 errors | 0 errors in 7 resources | met |",
-      "| Audit coverage | 6 of 6 | no request sent | not measured |",
-      "",
-    ].join("\n"),
-  );
+test("the validator download is pinned to a release, not to latest", () => {
+  assert.match(VALIDATOR_URL, /\/releases\/download\/\d+\.\d+\.\d+\/validator_cli\.jar$/);
+});
+
+test("a jar is used only when its SHA-256 matches the pin", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "ordy-validator-"));
+  try {
+    const jar = path.join(dir, "validator_cli.jar");
+    await writeFile(jar, "pinned bytes");
+    const pinned = createHash("sha256").update("pinned bytes").digest("hex");
+    const silent = () => {};
+    assert.equal(await ensureValidatorJar(jar, pinned, silent), jar);
+    await writeFile(jar, "other bytes");
+    await assert.rejects(ensureValidatorJar(jar, pinned, silent), /not the pinned HL7 validator/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("an export fails with the resources the FHIR server does not have", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "ordy-export-"));
+  try {
+    const fetchResource = async (ref: string) => {
+      if (ref === "Task/ordy-request-1") throw new FhirError(404, null);
+      return { resourceType: ref.split("/")[0], id: ref.split("/")[1] };
+    };
+    assert.deepEqual(await exportResources(["Observation/1"], dir, fetchResource), [path.join(dir, "Observation-1.json")]);
+    await assert.rejects(exportResources(["Observation/1", "Task/ordy-request-1"], dir, fetchResource), /1 of 2 filed resources are not on the FHIR server \(Task\/ordy-request-1\)/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

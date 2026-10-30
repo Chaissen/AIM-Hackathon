@@ -4,29 +4,63 @@ import { auditEvent, type auditLog } from "@/server/db/schema";
 
 export type AuditRow = typeof auditLog.$inferSelect;
 export type AuditEventName = AuditRow["event"];
-export type AuditField = "who" | "what" | "when";
 export type MisdeliveryKind = "address_mismatch" | "wrong_person" | "patient_mismatch";
 
 export const AUDIT_EVENTS: readonly AuditEventName[] = auditEvent.enumValues;
 
-// Who: the actor and its kind. What: the outcome. When: a valid timestamp.
-export function missingFields(row: AuditRow): AuditField[] {
-  const missing: AuditField[] = [];
+type FieldKind = "text" | "number" | "boolean" | "list";
+type DetailFields = Record<string, FieldKind>;
+
+// The "What" of each event: the detail fields that `recordAudit()` writes (docs/ARCHITECTURE.md, "Audit log").
+export const WHAT: Record<Exclude<AuditEventName, "misdelivery_caught">, DetailFields> = {
+  request_sent: { docType: "text", channel: "text", address: "text" },
+  link_opened: { state: "text" },
+  identity_checked: { checks: "list" },
+  answer_sent: { sha256: "text", size: "number" },
+  answer_filed: { resources: "list", provenance: "text" },
+};
+// A misdelivery names its kind in `outcome`, and the detail fields depend on the kind.
+export const MISDELIVERY_WHAT: Record<MisdeliveryKind, DetailFields> = {
+  address_mismatch: { domain: "text", expectedDomain: "text" },
+  wrong_person: { checks: "list" },
+  patient_mismatch: { sha256: "text", size: "number", nameMatches: "boolean", birthDateMatches: "boolean" },
+};
+
+const hasKind = (value: unknown, kind: FieldKind) =>
+  kind === "text"
+    ? typeof value === "string" && value.trim() !== ""
+    : kind === "number"
+      ? typeof value === "number" && Number.isFinite(value)
+      : kind === "boolean"
+        ? typeof value === "boolean"
+        : Array.isArray(value) && value.length > 0;
+
+// What an entry lacks: `who` (actor and its kind), `when` (a valid timestamp), `outcome`, or a `detail.<field>` of its "What".
+export function missingFields(row: AuditRow): string[] {
+  const missing: string[] = [];
   if (!row.actor?.trim() || !row.actorKind) missing.push("who");
-  if (!row.outcome?.trim()) missing.push("what");
   if (!(row.at instanceof Date) || Number.isNaN(row.at.getTime())) missing.push("when");
+  if (!row.outcome?.trim()) missing.push("outcome");
+  const fields =
+    row.event === "misdelivery_caught" ? MISDELIVERY_WHAT[row.outcome as MisdeliveryKind] : WHAT[row.event as keyof typeof WHAT];
+  if (!fields) {
+    if (row.outcome?.trim()) missing.push("outcome");
+    return missing;
+  }
+  const detail = row.detail ?? {};
+  for (const [field, kind] of Object.entries(fields)) if (!hasKind(detail[field], kind)) missing.push(`detail.${field}`);
   return missing;
 }
 
 export type EventCoverage = {
   event: AuditEventName;
   entries: number;
-  // Entries with who, what, and when.
+  // Entries with who, what (the outcome and the detail fields), and when.
   complete: number;
   // The first complete entry, or the first entry when none is complete.
   example?: AuditRow;
   // What the example lacks. Empty when the event is covered.
-  missing: AuditField[];
+  missing: string[];
 };
 
 export type RequestCoverage = {
@@ -47,7 +81,7 @@ export function requestCoverage(requestId: number, rows: AuditRow[]): RequestCov
       entries: entries.length,
       complete: complete.length,
       example,
-      missing: example ? missingFields(example) : ["who", "what", "when"],
+      missing: example ? missingFields(example) : [],
     };
   });
   return { requestId, events, covered: events.filter((e) => e.complete > 0).length };
@@ -66,20 +100,24 @@ export function bestCoverage(coverage: RequestCoverage[]): RequestCoverage | und
 
 const byTime = (a: AuditRow, b: AuditRow) => a.at.getTime() - b.at.getTime() || a.id - b.id;
 
-// Effort for the outside person: from the last `link_opened` before the first `answer_sent` to that `answer_sent`.
-// Taking the last opening skips earlier openings by someone else, such as the colleague in M2.
+// Effort for the outside person: from opening the link to sending the answer that was filed.
+// The start is the last `link_opened` before the first `answer_sent`, which skips earlier openings by someone else,
+// such as the colleague in M2. The end is the last `answer_sent` before the first `answer_filed`: `answer_sent` is
+// written before the patient check, so a rejected upload such as M3 does not stop the clock. Null until an answer is filed.
 export function effortSeconds(rows: AuditRow[], requestId: number): number | null {
   const own = rows.filter((r) => r.requestId === requestId).sort(byTime);
-  const sent = own.find((r) => r.event === "answer_sent");
-  if (!sent) return null;
-  const opened = own.filter((r) => r.event === "link_opened" && byTime(r, sent) < 0).at(-1);
-  if (!opened) return null;
+  const filed = own.find((r) => r.event === "answer_filed");
+  const first = own.find((r) => r.event === "answer_sent");
+  if (!filed || !first) return null;
+  const sent = own.filter((r) => r.event === "answer_sent" && byTime(r, filed) < 0).at(-1);
+  const opened = own.filter((r) => r.event === "link_opened" && byTime(r, first) < 0).at(-1);
+  if (!sent || !opened) return null;
   return (sent.at.getTime() - opened.at.getTime()) / 1000;
 }
 
-// The kind sits in `outcome`; `detail.kind` is accepted as well.
+// The kind sits in `outcome`, as `recordAudit()` writes it.
 export function isMisdelivery(row: AuditRow, kind: MisdeliveryKind): boolean {
-  return row.event === "misdelivery_caught" && (row.outcome === kind || row.detail?.kind === kind);
+  return row.event === "misdelivery_caught" && row.outcome === kind;
 }
 
 export function misdeliveryCaught(rows: AuditRow[], requestId: number, kind: MisdeliveryKind, since?: Date): AuditRow | undefined {

@@ -217,7 +217,18 @@ The request service keeps three Postgres tables, defined with Drizzle in `src/se
 | `answer_filed` | The request service | FHIR resource ids and the Provenance id |
 | `misdelivery_caught` | Whoever triggered it | `address_mismatch`, `wrong_person`, or `patient_mismatch` |
 
-Every entry has a UTC timestamp in `at`. The `outcome` column holds the short result: `pass`, `hold`, or `fail` for `identity_checked`, and the kind for `misdelivery_caught`. `answer_filed` lists the filed resources in `detail.resources` as `Type/id` and the Provenance in `detail.provenance`; `pnpm validate` reads them. The widget and `GET /audit` show the entries.
+Every entry has a UTC timestamp in `at`. The `outcome` column holds the short result: `pass`, `hold`, or `fail` for `identity_checked`, and the kind for `misdelivery_caught`. The What sits in `detail`, with these fields, which `pnpm audit:check` requires:
+
+| Event | `detail` fields |
+|---|---|
+| `request_sent` | `docType`, `channel`, `address` |
+| `link_opened` | `state` |
+| `identity_checked` | `checks`, one entry per check with its result and reason |
+| `answer_sent` | `sha256`, `size` |
+| `answer_filed` | `resources` (every filed resource as `Type/id`, which `pnpm validate` reads), `provenance` |
+| `misdelivery_caught` | `address_mismatch`: `domain`, `expectedDomain`. `wrong_person`: `checks`. `patient_mismatch`: `sha256`, `size`, `nameMatches`, `birthDateMatches`. |
+
+The widget and `GET /audit` show the entries.
 
 ## Configuration
 
