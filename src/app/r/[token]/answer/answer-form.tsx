@@ -93,8 +93,8 @@ export function AnswerForm({ token, requester, clinic }: { token: string; reques
         void send();
       }}
     >
-      <section className="grid gap-3 rounded-xl border bg-card p-6">
-        <h2 className="font-semibold">1. Add the document</h2>
+      <section className="grid gap-4 border border-border bg-card p-6 sm:p-8">
+        <h2 className="text-lg">1. Add the document</h2>
         <label
           htmlFor="file"
           onDragOver={(e) => {
@@ -108,30 +108,30 @@ export function AnswerForm({ token, requester, clinic }: { token: string; reques
             setFile(e.dataTransfer.files[0] ?? null);
           }}
           className={cn(
-            "grid cursor-pointer justify-items-center gap-2 rounded-lg border-2 border-dashed p-6 text-center text-sm",
-            drag ? "border-primary bg-primary/5" : "bg-muted/40",
+            "grid cursor-pointer justify-items-center gap-2 border border-dashed p-6 text-center text-sm transition-colors",
+            drag ? "border-ring bg-rose-surface/60" : "border-strong bg-surface hover:border-ring",
           )}
         >
           <FileUp className="size-6 text-muted-foreground" />
-          <span className="font-medium">{file ? file.name : "Drop the file here or click to choose"}</span>
+          <span className="font-medium text-loud">{file ? file.name : "Drop the file here or click to choose"}</span>
           <span className="text-muted-foreground">Markdown or text, as your system exports it</span>
           <input ref={input} id="file" type="file" accept=".md,.txt,text/markdown,text/plain" className="sr-only" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
         </label>
       </section>
 
-      <section className="grid gap-4 rounded-xl border bg-card p-6">
-        <div className="grid gap-1">
-          <h2 className="font-semibold">2. Confirm the patient</h2>
+      <section className="grid gap-5 border border-border bg-card p-6 sm:p-8">
+        <div className="grid gap-1.5">
+          <h2 className="text-lg">2. Confirm the patient</h2>
           <p className="text-sm text-muted-foreground">As written in your document. We check that it is about the right person.</p>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="grid gap-2">
             <Label htmlFor="patient-name">Patient name</Label>
-            <Input id="patient-name" value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" />
+            <Input id="patient-name" className="h-11" value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" />
           </div>
           <div className="grid gap-2">
             <Label htmlFor="patient-birth-date">Birth date</Label>
-            <Input id="patient-birth-date" type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} />
+            <Input id="patient-birth-date" className="h-11" type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} />
           </div>
         </div>
       </section>
@@ -148,13 +148,17 @@ export function AnswerForm({ token, requester, clinic }: { token: string; reques
                   ))}
                 </ul>
               )}
-              {problem.loginAgain && <a href={`/r/${encodeURIComponent(token)}`}>Log in again</a>}
+              {problem.loginAgain && (
+                <a href={`/r/${encodeURIComponent(token)}`} className="font-medium">
+                  Log in again
+                </a>
+              )}
             </AlertDescription>
           )}
         </Alert>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
           <Lock className="size-3.5" /> Sent encrypted
         </span>

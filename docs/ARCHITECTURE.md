@@ -79,7 +79,21 @@ The request service stores each request with one state. The FHIR Task for the re
 | Dr. Hofer clicks **Cancel** | `cancel` | any open state | `cancelled` |
 | 7 days pass | `expire` | any open state | `expired` |
 
-The open states are `awaiting_confirmation`, `sent`, `identity_held`, `verified`, and `answer_held`. Any other pair of state and event is refused. `accepts(state, event)` reads the same table, and `REQUESTER_EVENTS` lists the four events Dr. Hofer triggers: `send_anyway`, `accept`, `reject`, and `cancel`. The widget imports both in the browser, so `lifecycle.ts` must not import server code at runtime.
+The open states are `awaiting_confirmation`, `sent`, `identity_held`, `verified`, and `answer_held`. Any other pair of state and event is refused. `accepts(state, event)` reads the same table, and `REQUESTER_EVENTS` lists the four events Dr. Hofer triggers: `send_anyway`, `accept`, `reject`, and `cancel`. The widget imports `accepts` in the browser, so `lifecycle.ts` must not import server code at runtime.
+
+The widget names each state and sorts it into one of four buckets with `STATUS` in `src/lib/request-status.ts`. The overview counts, the tabs of the Requests view, the sidebar badge, and the attention pill all read that table. `bucketOf()` derives the bucket from the lifecycle table instead of a hand-written list. An open state that accepts `send_anyway` or `accept` needs Dr. Hofer, any other open state waits, `filed` is received, and every other state is closed.
+
+| State | Label in the widget | Bucket |
+|---|---|---|
+| `awaiting_confirmation` | Check address | attention |
+| `sent` | Waiting for reply | waiting |
+| `identity_held` | Confirm sender | attention |
+| `verified` | Sender confirmed | waiting |
+| `answer_held` | Review answer | attention |
+| `filed` | Received | received |
+| `cancelled` | Cancelled | closed |
+| `expired` | Expired | closed |
+| `locked` | Locked | closed |
 
 **Accept** and **Reject** on `answer_held` go through the answer flow: Accept files the held answer, and the request becomes `filed` only if the FHIR server took it ([The answer](#the-answer)). Moving to `filed` without that would claim a filing that never happened.
 
@@ -104,7 +118,7 @@ The link token and the 7 days start when the request goes out. **Send anyway** (
 - A mismatch waits in `awaiting_confirmation`, and `misdelivery_caught` records `address_mismatch` with both domains.
 - An address the eHVD could not confirm waits too, but with no audit entry: nothing was caught, and nothing went out. If Dr. Hofer sends it anyway, `request_sent` with `sentAnyway` and no `misdelivery_caught` before it shows that.
 
-`create` returns `addressWarning`, the warning that belongs next to **Send anyway**, or null. `get` and `list` return it while the request waits. A mismatch is rebuilt from its audit entry; for an unconfirmed address they say only that the eHVD could not confirm it. `request.sendAnyway` sends a waiting request, and answers `CONFLICT` for any other state.
+`create` returns `addressWarning`, the warning that belongs next to **Send anyway**, or null. `get` and `list` return `pending` instead, the decision the request waits for ([Decisions](#decisions)). A mismatch is rebuilt from its audit entry. For an unconfirmed address `pending` says only that the eHVD could not confirm it, because the reason is not stored. `request.sendAnyway` sends a waiting request, and answers `CONFLICT` for any other state.
 
 ## Link rules
 
@@ -118,18 +132,86 @@ The link token and the 7 days start when the request goes out. **Send anyway** (
 
 Dr. Hofer sends requests and makes every decision about them in the ordy widget. `pnpm matrix:bootstrap` pins it in her room. There are no chat commands for requests.
 
-The widget uses `matrix-widget-api` to get a Matrix OpenID token from Element after the user approves identity sharing. It takes Element's origin from the `parentUrl` parameter that Element appends to the widget URL, because Element sends no referrer. The widget sends the token as `Authorization: Bearer` with every clinic tRPC call. Patient and audit data come only from `clinic.patients`, `clinic.audit`, and the `request` procedures, all protected by `clinicProcedure`; neither page embeds that data in its initial HTML or React server payload. Tokens and the clinic query cache stay in memory and are discarded on expiry or unmount. The widget includes an **Audit log** tab. The request service checks the token with Synapse (`verifyOpenIdToken` in `src/server/matrix/client.ts`). It accepts only users on its own homeserver, `MATRIX_SERVER_NAME`, which is `klinikum.example` in the demo. The checked Matrix ID is the actor in the audit log.
+The widget uses `matrix-widget-api` to get a Matrix OpenID token from Element after the user approves identity sharing. It takes Element's origin from the `parentUrl` parameter that Element appends to the widget URL, because Element sends no referrer. The widget sends the token as `Authorization: Bearer` with every clinic tRPC call. The request service checks the token with Synapse (`verifyOpenIdToken` in `src/server/matrix/client.ts`). It accepts only users on its own homeserver, `MATRIX_SERVER_NAME`, which is `klinikum.example` in the demo. The checked Matrix ID is the actor in the audit log.
+
+Patient, request, document, directory, and audit data come only from these procedures, all built on `clinicProcedure`:
+
+- `clinic.me`, `clinic.patients`, `clinic.patient`, `clinic.contacts`, and `clinic.audit`
+- `request.create`, `request.get`, `request.list`, `request.preview`, `request.checkRecipient`, `request.sendAnyway`, `request.accept`, `request.reject`, and `request.cancel`
+- `document.forRequest`, `document.filedResources`, and `document.forPatient`
+- `directory.search` and `metrics.overview`
+
+Neither `/widget` nor `/audit` embeds that data in its initial HTML or React server payload. Tokens and the clinic query cache stay in memory and are discarded on expiry or unmount. [Storage](#storage) says who sees what.
+
+### Shell and navigation
+
+`src/app/widget/page.tsx` renders `WidgetApp` (`app.tsx`) inside `ClinicAccess`. `WidgetApp` picks the view from the URL hash, and `WidgetShell` (`shell.tsx`) frames it. The navigation is defined once, in `WidgetNav` (`nav.tsx`):
+
+- the clinic name and a **New request** button
+- **Work**: Overview, Requests with the number of requests that need Dr. Hofer, Patients, and Contacts
+- **Oversight**: Audit log and Metrics, open to every network member, as `clinic.audit` already is
+- **Demo tools**, only outside a production build: a card that opens the recipient's inbox, `/inbox` ([Outside portal](#outside-portal)), in a new tab
+- the display name and Matrix ID of the signed-in member
+
+From 1024px of iframe width, which is Element's top container or the maximised widget, the navigation is a sidebar. It is sticky and scrolls on its own, so it fits the top container's height of about 350px. Below 1024px, in Element's right panel at 360 to about 900px, a sticky top bar takes its place. It holds a menu button, the breadcrumb, a pill with the attention count that links to the **Needs attention** tab, and a **New request** button. The menu button opens `WidgetNav` in a sheet from the left, and any navigation closes it.
+
+Inside a view, the layout follows the width the view really has. `<main>` is a container query root (`@container/main`), so two-column splits and hidden table columns depend on its width, not the window's. That holds in the fixture preview too ([Development](DEVELOPMENT.md#add-a-ui-component)). A toast confirms each action.
+
+### Views and hash routes
+
+Each view has a hash route on `/widget`. `parseWidgetRoute()` in `src/app/widget/widget-route.ts` turns `location.hash` into a `WidgetRoute`, and `widgetHref()` turns a route back into a hash. Anything unknown, such as a bad id or filter, is the overview. Links inside the widget are plain hash links, and every route change scrolls to the top. The views live in `src/app/widget/views/`, and the parts they share, such as the request table and the decision panel, in `src/app/widget/components/`.
+
+| View | Hash route | What it shows | Procedures |
+|---|---|---|---|
+| Overview | `#/` | A greeting with the display name, the counts **Waiting for a reply**, **Needs your attention**, and **Received**, a decision panel for each request that waits for Dr. Hofer, and the five most recently active requests | `clinic.me`, `request.list` |
+| Requests | `#/requests`, or with `?filter=open`, `attention`, `received`, or `closed` | Tabs with a count per filter, and a table with the patient, the document, the person asked, the status, and the last activity | `request.list`, `clinic.patients` |
+| Request | `#/requests/<id>` | See [The request page](#the-request-page). Another member's request reads as not found. | `request.get`, `document.forRequest`, `document.filedResources` |
+| New request | `#/new` | See [New request](#new-request) | `clinic.patients`, `request.checkRecipient`, `request.preview`, `request.create` |
+| Patients | `#/patients` | The patients on HAPI, up to 50, with the birth date and the counts of open and received requests | `clinic.patients`, `request.list` |
+| Patient | `#/patients/<id>` | Name, birth date, and address, **Request a document**, the documents filed for the patient with the newest open, and the caller's requests about the patient | `clinic.patient`, `document.forPatient`, `request.list` |
+| Contacts | `#/contacts` | See [Contacts and the directory](#contacts-and-the-directory) | `clinic.contacts`, `directory.search` |
+| Audit log | `#/audit`, or with `?event=` and an audit event | The whole audit log, filtered by event, with the details as labelled pairs. Only the caller's own requests link to their page. `GET /audit` shows the same table. | `clinic.audit`, `request.list` |
+| Metrics | `#/metrics` | See [Metrics view](#metrics-view) | `metrics.overview` |
+
+The hash leaves Element's widget query parameters, such as `parentUrl`, alone, so a frame reload still connects to Element. Element always loads the pinned URL. So a hash route lasts for the iframe's session. Back, forward, and a frame reload keep it, and reopening the widget starts at the overview. For the same reason, a Matrix notice cannot link into a view. A prefilled New request keeps its draft in memory (`DraftProvider` in `draft.tsx`), so names, addresses, and patient choices never go into the hash. Only the patient id in `#/patients/<id>` does, and it stays in the iframe's history.
+
+`request.list` returns a member's newest 100 requests, so the counts and tables cover those 100.
+
+### Decisions
+
+`request.list` and `request.get` return each request with `pending`, the decision it waits for, or null. `pendingDecision()` in `src/server/requests/pending.ts` reads it from the state, the audit entries, and the held answer's sender and reason. It is pure, so the fixture preview runs it in the browser too. `request.create` still returns `addressWarning`. The overview shows a panel for every request with a `pending` decision, and the request page shows it above the progress steps (`DecisionPanel`).
+
+| `pending.kind` | State | The panel says | Buttons |
+|---|---|---|---|
+| `address` | `awaiting_confirmation` | "The email address looks wrong", with both domains from the `address_mismatch` entry. Without that entry: "The eHVD could not confirm the address, so the request has not been sent." | **Send anyway**, and **Cancel**, which asks for a second click |
+| `identity` | `identity_held` | "Is this the right person?", with the ID Austria name of the held login matching the request's bound person number, the requested name, and the check that held: a partial name, a requested name without words, or the eHVD out of reach | **Accept**, **Reject** |
+| `answer` | `answer_held` | "Check this document before it goes into the record", with the sender and the hold reason. While a `kept_answers` row exists, it adds "The last Accept may have filed the answer. Click Accept again." | **Add to record**, which is **Accept** on a held answer, and **Reject** |
+
+Each button calls the `request` procedure of its event. Afterwards the widget reloads every `request` and `document` query.
 
 | Part of the widget | Effect |
 |---|---|
-| Request form | Creates a request and sends the email or SMS |
+| **Send request** on New request | Creates a request and sends the email or SMS |
 | **Send anyway** | Sends a request despite the address warning |
-| **Accept** | Accepts a held identity, or files a held answer (`acceptAnswer`, see [The answer](#the-answer)) |
+| **Accept**, or **Add to record** on a held answer | Accepts a held identity, or files a held answer (`acceptAnswer`, see [The answer](#the-answer)) |
 | **Reject** | Rejects a held identity, or deletes a held answer (`rejectAnswer`) |
-| **Cancel** | Cancels an open request |
-| Request list | Shows each request with its state and its audit entries |
+| **Cancel**, or **Cancel request** on the request page | Cancels an open request |
 
-The request form has the document type, the patient, the given name, the family name, the organisation, and either an email address or a phone number. The request procedure rejects a request unless it has a patient, a given name, a family name, an organisation, and either an email address or a phone number. Separate given and family name fields avoid guessing which part of "Eva Maria Brandl" is the family name.
+### The request page
+
+The request page shows the title, the status, and who was asked, then **Cancel request** while the state accepts `cancel`, the decision panel, five progress steps, the document, the history, the details, and **Technical details**.
+
+The document comes from `document.forRequest`, which has two sources. A held answer's text is `held_answers.markdown`. A filed answer's text is the Markdown attachment of the FHIR resource that the request's `answer_filed` entry names as `output` ([FHIR](FHIR.md#reading-filed-documents-back)). Both go through `parseDocument()` (`toDocumentView()` in `src/server/documents/view.ts`), so held and filed answers share one view. A lab result shows as a table with a bar for where each value sits in its reference range, and a rehab report as its sections. Only `document.forRequest` returns a held answer's text, and only to the member who sent the request. When the FHIR server cannot be reached, the resource is gone, or its text does not parse, the page says so. An alert counts the uploads the patient check stopped (`misdelivery_caught` with `patient_mismatch`).
+
+The history and the five progress steps (Sent, Opened, Sender confirmed, Answered, Received) come from the request's audit entries, through `historyOf()` and `progressOf()` in `src/lib/request-story.ts`. The details show the patient, the address, the channel, the link's expiry while the link works, the requester, and the message as it went out, which `request.get` returns as `message`. ordy keeps only the link's hash, so the link in that message ends in `/r/…`.
+
+**Technical details** starts closed. It shows each login's identity checks in words, read from the `checks` of its `identity_checked` entry, the document type's release check, and the resources the answer filed. `document.filedResources` fetches from HAPI every resource that the request's `answer_filed` entries reference, read with `filedReferences()` as `pnpm validate` does. The page shows each one as JSON.
+
+### New request
+
+New request has three cards: the patient, the document type, and the person with their organisation and email address or mobile number. The **Examples** menu fills the form with one of `REQUEST_PRESETS` in `src/app/widget/presets.ts`: request 1, request 2, or request 1 with a capital I in the domain for test M1. A contact, a directory entry, and a patient page open the form prefilled too.
+
+The request procedure rejects a request unless it has a patient, a given name, a family name, an organisation, and either an email address or a phone number. Separate given and family name fields avoid guessing which part of "Eva Maria Brandl" is the family name.
 
 | Field | Request 1 | Request 2 |
 |---|---|---|
@@ -139,7 +221,25 @@ The request form has the document type, the patient, the given name, the family 
 | Organisation | Labor Kanalstraße | Reha Waldblick |
 | Contact | `eva.brandl@labor-kanal.example` | `+43 660 000 0101` |
 
-If the address check fails, the widget shows the warning next to **Send anyway** and **Cancel**: "The address domain `labor-kanaI.example` does not match Labor Kanalstraße (`labor-kanal.example`)." If the eHVD cannot confirm the address, for example because it cannot be reached, the request waits the same way, and the widget says "The address did not pass the address check." The reason is in `addressWarning` from `request.create`, such as "The eHVD could not be reached, so the address could not be checked.", but the widget does not show it yet. [eHVD](EHVD.md#the-address-check) has every case.
+While Dr. Hofer types, the form calls `request.checkRecipient` 500 ms after typing stops, and only once the organisation and the contact are filled. It shows whether the eHVD lists the organisation, whether the person is an active member of it, whether the person has answered before (`bindings`), and whether the email domain belongs to the organisation. A domain that does not belong shows as "This email address looks wrong" before sending. The check is advisory and writes nothing, not even an audit entry. The address check inside `request.create` still decides, and it writes `misdelivery_caught` ([eHVD](EHVD.md#how-ordy-uses-the-ehvd-t15)).
+
+The footer shows the email or SMS as it would go out, from `request.preview`. That procedure renders the real template with the member's display name and runs the content check from [Outgoing messages](#outgoing-messages) against the chosen patient. **Send request** stays disabled until every field is filled and the preview names no forbidden data. After `request.create`, a toast confirms the request, or shows `addressWarning` when the request waits, and the widget opens the request's page.
+
+If the address check fails, the panel on the request page says "Labor Kanalstraße uses @labor-kanal.example, but the address is @labor-kanaI.example." next to **Send anyway** and **Cancel**. If the eHVD cannot confirm the address, for example because it cannot be reached, the request waits the same way. The toast after sending then shows the reason from `addressWarning`, such as "The eHVD could not be reached, so the address could not be checked." [eHVD](EHVD.md#the-address-check) has every case.
+
+The organisation is a plain text field. Suggestions from `directory.search` were cut, because the installed Base UI combobox clears free text when the field loses focus.
+
+### Contacts and the directory
+
+Contacts lists the people outside the network that Dr. Hofer asked for documents. `clinic.contacts` groups her requests by given name, family name, and organisation, the key of `bindings`, and takes the channel, address, and document type of the newest request. A person shows as **Verified sender** once `bindings` holds a person number for them at that organisation, which the first filed answer stores, and as **Not verified yet** before. **Request** opens New request prefilled from the newest request.
+
+Below that, the healthcare directory searches the eHVD by name with `directory.search` when Dr. Hofer presses Enter. It is a search box, not a list, because `GdaSearch` needs a surname and the eHVD mock alone has 313 entries. Each result shows the name, the roles and specialties, the organisations it is a member of, whether it is active, and its OID. An active person has a **Request** button. It prefills the name, the first organisation, and a document type, which is a lab result for the lab medicine specialty and a rehab report for a member of a hospital. [eHVD](EHVD.md#how-ordy-uses-the-ehvd-t15) has the search rule.
+
+### Metrics view
+
+Metrics shows the four track metrics as `metrics.overview` computes them from the audit log when the view opens, with the rules that `pnpm scenario` judges by (`src/server/metrics/live.ts`). FHIR validation is the result of the newer of the last `pnpm validate` and `pnpm scenario` runs, which `readLastRuns()` in `src/server/metrics/runs.ts` reads from `out/metrics/validate.json` and `out/metrics/scenario.json`. The procedure never starts the validator. Saved validation results include their completion time, expected file count, and resource references. A missing result fails validation. Older files without this evidence show no validation run. The pending count covers filed resources outside the last complete run's scope, including resources excluded by `--since` or a run on local files. Each tile names its source. Below the tiles come the tests M1 to M3, a "Try it yourself" guide outside a production build, a table of the caller's requests with their effort and audit coverage, and the last `pnpm scenario` results. [Whitepaper](WHITEPAPER.md#how-we-measure-the-metrics) says how the live numbers differ from `pnpm scenario`, which stays the measurement of record.
+
+The prototype in `prototype/ordy-app` has features the widget leaves out. [Its README](../prototype/ordy-app/README.md) lists them with the reasons.
 
 ## Matrix bot
 
@@ -176,8 +276,10 @@ If you did not expect this message, you can ignore it.
 ```
 
 ```
-Klinikum Beispielstadt: Dr. L. Hofer sent you a secure request. Open it with ID Austria: http://localhost:3010/r/<link token> (valid until 5 Nov)
+Klinikum Beispielstadt: Dr. Lena Hofer sent you a secure request. Open it with ID Austria: http://localhost:3010/r/<link token> (valid until 5 Nov)
 ```
+
+`requestEmail()` and `requestSms()` in `src/server/mail/message.ts` render the two texts. The SMS names the requester by the full Matrix display name, as the email does. The widget shows both. `request.preview` renders the message a new request would send and runs the content check below on it, and `request.get` returns the message a request sent as `message`.
 
 `sendRequestEmail` in `src/server/mail/send.ts` renders the email and sends it over SMTP with Nodemailer. The email is plain text with no HTML part. The requester's name is a Matrix display name that the member sets themselves, so it never goes into HTML. The expiry date is the day in the `Europe/Vienna` time zone. `request.create` sends the email when the address check passes, and **Send anyway** sends it with the new link (`sendLink` in `src/server/api/routers/request.ts`). The content check compares it with the patient on the FHIR server: the official name and the birth date, read by `readFhirPatient`, as the patient check reads them. If that record has no given name, no family name, or no full birth date (a year alone, such as `1961`, counts as none), the check cannot find that part, so ordy refuses the email with `IncompletePatient`. A given name of initials only counts as none, because the check skips one-letter words.
 
@@ -219,7 +321,8 @@ On a hit, nothing is sent. `MessageRefused` names only the kinds of data it foun
 | `GET /r/{token}/refused` | Where the login sends a person who failed the identity check: "This request is for someone else. Nothing was shared with you." The same page for every link. |
 | `GET /r/{token}/unavailable` | Where the login sends a person when ID Austria could not be reached: "The login could not be finished" and a **Try again** link. |
 | `GET /sms` | Shows every SMS the request service would have sent, like a phone screen. |
-| `GET /audit` | Audit UI; data requires a verified Matrix clinic identity. Use the widget's **Audit log** tab in Element. |
+| `GET /audit` | Audit UI; data requires a verified Matrix clinic identity. Use the widget's **Audit log** view in Element. |
+| `GET /inbox` | Demo only, and 404 in a production build (`demoToolsEnabled` in `src/lib/demo-tools.ts`). The recipient's inbox shows every email in Mailpit, read through its API by `listInboxEmails()` in `src/server/mail/mailpit.ts`, with an **Open as recipient** button for each portal link, and the SMS screen. It says so when Mailpit cannot be reached, or when `SMTP_USER` is set and Mailpit receives nothing. |
 
 The pages are Next.js routes. `/auth/login` and `/auth/callback` are route handlers, because they need real redirects and cookies. The answer page loads its data and sends the upload through tRPC (`eidProcedure`, the upload as `FormData`).
 
@@ -343,7 +446,17 @@ In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `
 
 `bindings` remembers which ID Austria person number answered as a given person at a given organisation. Its key is `given`, `family`, and `org`, so each person at an organisation has one person number. The first filed answer stores it, with the sender's Practitioner id when the eHVD does not list them. The audit log never holds document text.
 
-`src/server/requests/service.ts` is the only code that writes `requests`: `createRequest`, `sendAnyway`, `applyEvent`, `incrementFailedChecks`, `applyLoginTransition`, `expireDueRequests`, and `saveIdToken`, which the login callback calls for the bound person. After each state change commits, `mirrorTask` PUTs the request's FHIR Task with the status from the lifecycle table ([FHIR](FHIR.md#task)); the filing Bundle writes the `completed` Task itself. The tRPC router `request` (`create`, `get`, `list`, `cancel`, `sendAnyway`, `accept`, `reject`, all `clinicProcedure`) and the portal pages use it. A network member sees and changes only the requests they sent; for anyone else, `get`, `cancel`, `sendAnyway`, `accept`, and `reject` answer "not found", and `list` leaves the request out. `get` and `list` return each request's audit entries, which name the outside person and their person number. `accept`, `reject`, and `cancel` write `request_decided` in the transaction that changes the state; on a held answer, `accept` and `reject` go through the answer flow ([The answer](#the-answer)). `sendAnyway` writes `request_sent`. The widget's **Audit log** tab (`clinic.audit`) still shows the whole log to every network member, for the demo.
+`src/server/requests/service.ts` is the only code that writes `requests`: `createRequest`, `sendAnyway`, `applyEvent`, `incrementFailedChecks`, `applyLoginTransition`, `expireDueRequests`, and `saveIdToken`, which the login callback calls for the bound person. After each state change commits, `mirrorTask` PUTs the request's FHIR Task with the status from the lifecycle table ([FHIR](FHIR.md#task)); the filing Bundle writes the `completed` Task itself. The tRPC router `request` and the portal pages use it. `get` and `list` return each request's audit entries, which name the outside person and their person number, and its `pending` decision. Neither returns `link_hash`, `id_token`, or a held answer's text. `accept`, `reject`, and `cancel` write `request_decided` in the transaction that changes the state; on a held answer, `accept` and `reject` go through the answer flow ([The answer](#the-answer)). `sendAnyway` writes `request_sent`.
+
+Every clinic procedure is built on `clinicProcedure`. A procedure about one request uses `ownRequestProcedure` from `src/server/api/own-request.ts`. It takes the request id, and a network member sees and changes only the requests they sent. For anyone else the request is "not found", so its existence does not leak either.
+
+| Router | Through `ownRequestProcedure` | Through `clinicProcedure` alone | Who sees what |
+|---|---|---|---|
+| `request` | `get`, `sendAnyway`, `accept`, `reject`, `cancel` | `create`, `list`, `preview`, `checkRecipient` | The caller's own requests only. `list` returns their newest 100. `preview` reads the patient from the FHIR server, and `checkRecipient` reads the eHVD and `bindings`. Neither writes anything. |
+| `document` | `forRequest`, `filedResources` | `forPatient` | `forRequest` is the only procedure that returns a held answer's text. `forPatient` shows every network member the documents filed for a patient, as `clinic.patients` shows every patient. |
+| `clinic` | | `me`, `patients`, `patient`, `contacts`, `audit` | Patients for every network member. `contacts` groups the caller's own requests. `audit` shows the whole log, its newest 500 entries, to every network member, for the demo. |
+| `directory` | | `search` | The eHVD for every network member |
+| `metrics` | | `overview` | The four targets over every request, as `clinic.audit` reads the whole log. The per-request table lists only the caller's requests. |
 
 ## Audit log
 
@@ -430,38 +543,43 @@ src/
   app/                        Next.js pages and route handlers
     api/trpc/[trpc]/route.ts  tRPC endpoint
     api/healthz/route.ts      health check for scripts and containers
-    widget/                   request form, request list, and decisions inside Element (T05)
+    widget/                   the widget inside Element: app.tsx, shell.tsx and nav.tsx, the hash routes in widget-route.ts, views/, shared parts in components/, request-form.tsx, presets.ts, and the draft in draft.tsx
     r/[token]/                outside portal: landing page, answer page, and the held, refused, and unavailable pages (T09)
     auth/                     ID Austria login and callback route handlers, expired-login page. The callback runs the identity checks (T08)
     sms/page.tsx              SMS screen, a stub. No task builds the SMS log, because T06 sends email only
     audit/page.tsx            audit UI; authenticated data via clinic.audit
+    inbox/page.tsx            recipient's inbox: the emails in Mailpit and the SMS screen. 404 in a production build
+    styleguide/               every UI component with fixture data, and widget/, the whole widget on fixtures (?fixtures=seeded, empty, or failing). 404 in a production build
   components/ui/              shadcn/ui components, added with `pnpm dlx shadcn@4.22.1 add <name>`
-  components/                 shared UI such as the portal frame
-  lib/                        code shared by server and browser: document types, request input, `cn`
+  components/                 shared UI such as the portal frame and the SMS phone of /sms and /inbox (demo/sms-phone.tsx)
+  lib/                        code shared by server and browser: document types, request input, address parsing and warnings (address-check.ts), the widget's state labels and buckets (request-status.ts), history and progress from audit entries (request-story.ts), identity check texts, the outside person's audit actor, demoToolsEnabled, `cn`
   trpc/                       React client for tRPC (TanStack Query)
   server/
     api/trpc.ts               context and procedures: public, clinic, eid
+    api/own-request.ts        ownRequestProcedure: one request, only for the member who sent it
     api/root.ts               app router and createCaller
-    api/routers/              one router per area
+    api/routers/              one router per area: request, document, clinic, directory, metrics, portal, health
     db/                       Drizzle schema and client
-    requests/                 request lifecycle, link tokens, the request service, mirrorTask for its FHIR Task, and notifyRequest for its notices
+    requests/                 request lifecycle, link tokens, the request service, mirrorTask for its FHIR Task, notifyRequest for its notices, and pendingDecision for the widget
     answers/                  the answer flow: submitAnswer, acceptAnswer, rejectAnswer, fhirFiling, and the ports for the release check and the mappers (T09)
     audit/record.ts           recordAudit() for the six track audit events and request_decided
     fhir/                     FHIR client, the filing (T13), lab and rehab mappers (T12, T14)
-    documents/                parser and patient check (T10, T11), typed records in types.ts, UCUM and vital sign lists, AI fallback (T22), the scenario documents as parsed records for tests
+    documents/                parser and patient check (T10, T11), typed records in types.ts, UCUM and vital sign lists, AI fallback (T22), the scenario documents as parsed records for tests, and reading filed answers back for the widget (filed.ts, view.ts)
     identity/names.ts         name words, subset and shared-word tests from Identity, shared by the patient check and T08
     identity/checks.ts        identity checks at login: level, name, person number, eHVD claim (T08)
     identity/login.ts         what a check result does: state, audit entries, page, notice, and runIdentityChecks for the callback (T08)
     ehvd/oid.ts               OID check shared by the login and pnpm citizen
     ehvd/client.ts            eHVD SOAP client (T15), with soap.ts for the messages and xml.ts for the parser
-    ehvd/address-check.ts     address check before sending (T15)
+    ehvd/address-check.ts     address check before sending (T15), and the advisory recipient check
+    ehvd/search.ts            directory search for the widget, with English code labels in labels.ts
     ehvd/release-check.ts     release check when an answer arrives (T15)
     fhir/filing.ts            one answer as a transaction Bundle with Provenance and Task; fhir/file-answer.ts posts it (T13)
     matrix/client.ts          Matrix client-server API
     matrix/notices.ts         notice texts and notifyRoom for Dr. Hofer's room
-    metrics/                  metrics from audit rows, validator runner, metrics table (T17, T18)
-    mail/message.ts           request email template and the content check (T06)
+    metrics/                  metrics from audit rows, validator runner, metrics table (T17, T18), the live metrics for the widget (live.ts), and the last runs from out/metrics/ (runs.ts)
+    mail/message.ts           request email and SMS templates and the content check (T06)
     mail/send.ts              sendRequestEmail over SMTP: Mailpit, or Gmail to the team inboxes (T06)
+    mail/mailpit.ts           the emails in Mailpit with their portal links, for /inbox
     auth/eid-session.ts       outside person's session cookie and login cookie
     auth/id-austria.ts        OpenID Connect login: discovery, code swap, Keycloak logout, claims for the identity checks
     portal/data.ts            data loaders for the portal, the login, and the SMS page. The SMS log is a stub; T06 sends email only
@@ -488,7 +606,7 @@ track/                        track brief, scenario, patient.json, test document
 1. `./scripts/setup.sh` once. It creates `.env`, starts the containers, registers the Matrix users, migrates the database, loads the patient, and creates Dr. Hofer's room with the widget.
 2. `pnpm dev` starts Next.js on `http://localhost:3010` and the bot.
 3. Open Element at `http://localhost:8081` and log in as `lena.hofer` / `hofer-demo-2026`. The room "Dr. Hofer · Outside documents" is there. Send `!status`.
-4. Mailpit is at `http://localhost:8025`. The SMS screen at `http://localhost:3010/sms` is a stub.
+4. Mailpit is at `http://localhost:8025`. The SMS screen at `http://localhost:3010/sms` is a stub. Outside a production build, `http://localhost:3010/inbox` shows both, with a button that opens each email's link as the recipient.
 
 ## Sources
 

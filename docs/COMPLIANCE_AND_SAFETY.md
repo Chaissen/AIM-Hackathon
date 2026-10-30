@@ -7,7 +7,8 @@ This page sets the team rules for data, messages, identity, and AI, and it holds
 1. No real patient data enters the project. That covers the repository, the databases, Keycloak, Mailpit, logs, screenshots, slides, and the video.
 2. Every person, organisation, phone number, email address, eHVD entry, and document is made up. The eHVD mock uses the real OID structure under `1.2.40.0.34.3.1.99.1` and `1.2.40.0.34.3.2.99.1`, but no entry is copied from the real directory. The scenario's `.example` addresses cannot receive mail, and the phone number is made up.
 3. The request service sends email only to Mailpit, or through Gmail SMTP as ordysoftware@gmail.com only to the team inboxes in `MAIL_TEAM_INBOXES`. It sends SMS only to its own SMS screen. It never sends to any other real address or number.
-4. If anyone suspects real data somewhere, they post `PRIVACY:` in the team chat. We delete it from the working tree, purge it from git history if it was committed, and note the incident in `docs/privacy_log.md`.
+4. The demo page `/inbox` shows every email in Mailpit with its working link, as Mailpit's own page does, to anyone who can reach the request service. A production build answers 404 there.
+5. If anyone suspects real data somewhere, they post `PRIVACY:` in the team chat. We delete it from the working tree, purge it from git history if it was committed, and note the incident in `docs/privacy_log.md`.
 
 ## What an outgoing email or SMS may contain
 
@@ -34,6 +35,7 @@ The check compares whole words. A substring check would block every message, bec
 - Error pages for a failed check say only that the request is for someone else.
 - If Keycloak or the eHVD cannot be reached, the request service holds the request. It never treats a missing answer as a pass.
 - A held identity or a held answer needs Dr. Hofer to click **Accept** in the widget. The audit log records who accepted and when, as `request_decided`.
+- The widget shows a held answer's text only to the network member who sent the request, so they can read it before they accept or reject it. Only `document.forRequest` returns it. It never goes into Matrix or the audit log.
 - Three failed identity checks lock the link.
 
 ## Data we keep

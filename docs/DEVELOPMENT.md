@@ -59,7 +59,7 @@ Check that everything works:
 1. http://localhost:3010 shows three green dots for database, FHIR server, and Matrix.
 2. Open Element at http://localhost:8081, log in as `lena.hofer` / `hofer-demo-2026`, and open "Dr. Hofer · Outside documents".
 3. Send `!status`. The bot answers with the same three checks.
-4. Open the ordy widget and approve Element's identity request. The patient list and **Audit log** tab require this Matrix sign-in. Opening `/widget` or `/audit` directly shows sign-in guidance without patient or audit data.
+4. Open the ordy widget and approve Element's identity request. Every view needs this Matrix sign-in: Overview, Requests, New request, Patients, Contacts, Audit log, and Metrics. From 1024px of width the navigation is a sidebar, and below that it sits behind the menu button. Each view has a hash route, such as `#/requests`, which [Architecture](ARCHITECTURE.md#views-and-hash-routes) lists. Opening `/widget` or `/audit` directly shows sign-in guidance without patient or audit data.
 5. Open http://localhost:8080/realms/idaustria-sim/.well-known/openid-configuration. It shows the issuer `http://localhost:8080/realms/idaustria-sim`. This is the simulated ID Austria. Its test logins, such as `eva.brandl` / `demo-eva`, work from a request link. Keycloak's account page does not work in this realm, on purpose.
 6. Open http://localhost:8095/healthz. It shows `{"status":"ok","entries":313}`. This is the eHVD mock, and [eHVD](EHVD.md#trigger-each-fault) shows how to call it.
 
@@ -68,6 +68,7 @@ Check that everything works:
 | ordy | http://localhost:3010 | |
 | Element | http://localhost:8081 | `lena.hofer` / `hofer-demo-2026` |
 | Mailpit | http://localhost:8025 | |
+| Recipient's inbox: the emails in Mailpit and the SMS screen, with each portal link | http://localhost:3010/inbox | none. Demo only. A production build answers 404. |
 | HAPI FHIR | http://localhost:8090/fhir | |
 | Synapse | http://localhost:8008 | bot: `ordy` / `ordy-demo-2026` |
 | Postgres | `postgres://ordy:ordy@localhost:5433/ordy` | `ordy` / `ordy` |
@@ -117,6 +118,7 @@ Put it in a router under `src/server/api/routers/` and register the router in `s
 | `publicProcedure` | anyone | nothing |
 | `clinicProcedure` | Dr. Hofer and other network members | Matrix OpenID token from the widget (`Authorization: Bearer`), or the bot via `createCaller` |
 | `eidProcedure` | the outside person after the ID Austria login | session cookie `ordy_eid_session`, bound to one request |
+| `ownRequestProcedure` (`src/server/api/own-request.ts`) | the network member who sent the request, for data about one request | as `clinicProcedure`, and the input `{ id }` must name a request they sent. Any other id answers `NOT_FOUND`. The handler gets the row as `ctx.request`. |
 
 ```ts
 // src/server/api/routers/request.ts
@@ -148,13 +150,17 @@ Do not import `server-only` in modules that the bot or the scripts use. It throw
 
 ## Add a UI component
 
-The pages use [shadcn/ui](https://ui.shadcn.com/). The components live in `src/components/ui/` and belong to us, so edit them freely.
+The pages use [shadcn/ui](https://ui.shadcn.com/). Every component in the shadcn 4.22.1 registry is already installed in `src/components/ui/`. They belong to us, so edit them freely. To add one that a later registry gains:
 
 ```bash
-pnpm dlx shadcn@4.22.1 add dialog
+pnpm dlx shadcn@4.22.1 add <name>
 ```
 
-Pin the CLI version, so it fits the 7-day rule. The UI uses the system font and one accent colour, both set in `src/app/globals.css`. Every page shows the disclaimer from [Compliance and safety](COMPLIANCE_AND_SAFETY.md) through `src/app/layout.tsx`.
+Pin the CLI version, so it fits the 7-day rule. `Tooltip` needs a `TooltipProvider` above it, and the sidebar needs a `SidebarProvider`. A `cva` variant object that other files import lives in a `<name>-variants.ts` file next to its component (for example `toggle-variants.ts`), so a component file exports only components and Fast Refresh keeps working.
+
+The visual system follows hex.tech: a paper background with grain, side rails with hatched margins, square hairline components, eggplant text and a rose accent. Every colour, border, radius, shadow and font is a CSS custom property in `src/app/globals.css` (`:root` for light, `.dark` for dark), mapped into Tailwind by `@theme inline`, so a token change restyles every component. The same file holds the textures (`hatch`, `hero-grid`, `dot-grid`, `crop-marks`) and the `eyebrow` label style. The primary button is a solid eggplant fill (`--primary`), not Hex's framed rose button. Fonts come from `next/font/google` in `src/app/layout.tsx`, self-hosted at build time so the browser never calls Google: Archivo (headings, width axis 112% to 125%), Newsreader italic (display accents), Geist (body) and IBM Plex Mono (labels, code). `/styleguide` renders every component and the app's own building blocks with fixture data; it returns 404 in production. Every page shows the disclaimer from [Compliance and safety](COMPLIANCE_AND_SAFETY.md) through `src/app/layout.tsx`.
+
+`/styleguide/widget` renders the whole widget with fixture data at any window size. It needs no Element, Postgres, HAPI, or eHVD. `?fixtures=seeded` (the default), `empty`, or `failing` picks the data. The fixtures live in `src/app/styleguide/widget/fixtures/<router>.ts`, one file for each router the widget calls. Every procedure of those routers needs a fixture, typed with the procedure's real output, so a new query or a changed output fails `pnpm typecheck` until its fixture follows. Like `/styleguide`, it returns 404 in production.
 
 Tailwind's class scan is scoped to `src/` with [`source()`](https://tailwindcss.com/docs/detecting-classes-in-source-files#setting-your-base-path) in `globals.css`. Keep UI source files there so Turbopack does not scan generated container data such as Synapse's private signing key.
 

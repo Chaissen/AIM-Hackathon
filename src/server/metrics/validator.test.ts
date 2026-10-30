@@ -7,7 +7,8 @@ import { test } from "node:test";
 
 import { FhirError } from "@/server/fhir/client";
 
-import { ensureValidatorJar, exportResources, summarizeOutput, totalErrors, VALIDATOR_URL } from "./validator";
+import { totalErrors } from "./report";
+import { ensureValidatorJar, exportResources, summarizeOutput, VALIDATOR_URL } from "./validator";
 
 const FILE = "http://hl7.org/fhir/StructureDefinition/operationoutcome-file";
 

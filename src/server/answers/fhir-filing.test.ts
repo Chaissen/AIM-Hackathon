@@ -4,15 +4,16 @@ import { readFileSync } from "node:fs";
 import { after, test } from "node:test";
 
 import { eq, inArray, like, sql } from "drizzle-orm";
-import type { DiagnosticReport, DocumentReference, Observation, Practitioner, Provenance, Task } from "fhir/r4";
+import type { Bundle, DiagnosticReport, DocumentReference, Observation, Practitioner, Provenance, Task } from "fhir/r4";
 import { UnsecuredJWT } from "jose";
 
 import { eidSession } from "@/server/auth/eid-session";
 import { db } from "@/server/db";
 import { auditLog, bindings, heldAnswers, requests } from "@/server/db/schema";
 import { parseDocument } from "@/server/documents/parse";
-import { capabilities, FhirError, fhirFetch } from "@/server/fhir/client";
+import { capabilities, FhirError, fhirFetch, transaction } from "@/server/fhir/client";
 import type { AnswerFiled } from "@/server/fhir/file-answer";
+import { locationId } from "@/server/fhir/filing";
 import { applyEvent, applyLoginTransition, createRequest, getRequest, saveIdToken, type NewRequest, type RequestRow } from "@/server/requests/service";
 import type { AnswerDeps } from "./deps";
 import { fhirFiling, mapClinical } from "./fhir-filing";
@@ -45,6 +46,19 @@ const STEFAN = { givenName: "Stefan", familyName: "Kern", personNumber: `GH:test
 
 const created: number[] = [];
 const filedResources: string[] = [];
+
+/**
+ * Posts the filing and keeps what the transaction created (201). A conditional create that matched (200) reused a
+ * resource that was there before, such as the identity provider's Organization, which is not this test's to delete.
+ */
+async function postAndRecord(bundle: Bundle): Promise<Bundle> {
+  const response = await transaction(bundle);
+  for (const entry of response.entry ?? []) {
+    const reference = entry.response?.status.startsWith("201") ? locationId(entry.response.location) : undefined;
+    if (reference) filedResources.push(reference);
+  }
+  return response;
+}
 
 after(async () => {
   // Newest first, so nothing still references a resource when it is deleted. A party another answer uses stays.
@@ -100,7 +114,7 @@ const confirmed = async ({ sender, document }: ReleaseCheckInput): Promise<Relea
 });
 
 function deps() {
-  const file = fhirFiling({ mapClinical });
+  const file = fhirFiling({ mapClinical, post: postAndRecord });
   const answers: AnswerToFile[] = [];
   const value: AnswerDeps = {
     db,
@@ -108,9 +122,7 @@ function deps() {
     releaseCheck: confirmed,
     fileAnswer: async (answer) => {
       answers.push(answer);
-      const filed = await file(answer);
-      filedResources.push(...filed.resources.filter((reference) => !filedResources.includes(reference)));
-      return filed;
+      return file(answer);
     },
     notify: async () => {},
   };

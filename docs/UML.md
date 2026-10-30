@@ -1,7 +1,7 @@
 # UML: current use case and relations
 
-Status: the stack is set up, the features in these diagrams are not built yet. These diagrams model the target system from [`track/README.md`](../track/README.md) and [WHITEPAPER.md](WHITEPAPER.md).
-Dashed elements are **proposed**: the register and everything new it brings. Add comments as `> 💬 Name: ...`.
+These diagrams model the target system from [`track/README.md`](../track/README.md) and [WHITEPAPER.md](WHITEPAPER.md). The [README status](../README.md#status) says which parts run.
+Dashed elements are **proposed** and not built: managing register entries (UC13) and the register itself. Add comments as `> 💬 Name: ...`.
 
 ## 1. Use case diagram
 
@@ -53,7 +53,7 @@ flowchart LR
     UC8 --- fhir
 
     classDef planned stroke-dasharray: 5 5
-    class UC2,UC12,UC13 planned
+    class UC13 planned
 ```
 
 UC10 (audit) is included by UC3, UC4, UC5, UC6, UC8 and UC11. The diagram leaves those six edges out to stay readable. They are the six audit steps the jury counts.
@@ -66,7 +66,9 @@ UC10 (audit) is included by UC3, UC4, UC5, UC6, UC8 and UC11. The diagram leaves
 | UC7 Check patient match | – | Patient in the document and form must equal the request's patient → catches **M3** |
 | UC8 File as FHIR | FHIR server | Transaction Bundle: DiagnosticReport + Observations or DocumentReference, plus Provenance |
 | UC11 Handle misdelivery | – | Nothing filed, audit entry, warning in Matrix |
-| UC2 / UC12 / UC13 Register | Dr. Hofer | *Proposed*, see section 4 |
+| UC2 Look up recipient in register | Dr. Hofer, eHVD | Built on the eHVD as the directory search in the widget's Contacts view and the recipient check while she types a new request |
+| UC12 Warn about lookalike address | Dr. Hofer, eHVD | Built as the address check before sending (T15). A domain that differs from the organisation's `mail` domain in the eHVD, such as `labor-kanaI`, waits for **Send anyway** → helps catch **M1** |
+| UC13 Manage register entries | Dr. Hofer | *Proposed*, see section 4 |
 
 ## 2. Domain relations (class diagram)
 
