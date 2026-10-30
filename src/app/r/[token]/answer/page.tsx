@@ -25,7 +25,7 @@ async function Answer({ params }: { params: PageProps<"/r/[token]/answer">["para
   const session = await readEidSession((await cookies()).get(EID_SESSION_COOKIE)?.value);
   if (!session) redirect(`/r/${encodeURIComponent(token)}`);
 
-  const ctx = await findAnswerContext(token, session.requestId);
+  const ctx = await findAnswerContext(token, session);
   if (!ctx) {
     return (
       <PortalFrame>
