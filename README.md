@@ -6,7 +6,7 @@ This is our entry for [Track 2 of the AIM hackathon](https://github.com/AIM-Aust
 
 ## Status
 
-Historical metric evidence on `main` at commit `06abdc9`, 30 October 2026, 03:20 CET. Request 1 with M1 to M3, and the rehab request, run end to end by hand, with one gap in the flow: ordy did not send the email or the SMS yet, so the links came from the `pnpm dev` log. The metric results in [Metrics](#metrics) come from that run. Since then, #4 sends the request email, and the SMS screen shows each SMS with its link.
+Historical metric evidence on `main` at commit `06abdc9`, 30 October 2026, 03:20 CET. Request 1 with M1 to M3, and the rehab request, run end to end by hand, with one gap in the flow: ordy did not send the email or the SMS yet, so the links came from the `pnpm dev` log. The metric results in [Metrics](#metrics) come from that run. Since then, #4 sends the request email, and the SMS screen shows each SMS with its link. A recorded browser run on `main` at `4b79591` passed both requests, M1 to M3, and the Element widget ([End-to-end run](docs/E2E_RUN.md)).
 
 The feature table describes this checkout. The workspace gateway and hostname migration are documented below; the public deployment is a separate action.
 
@@ -184,7 +184,7 @@ We measure the four track metrics on the scenario. `pnpm scenario` is meant to r
 | Metric | Target | How we measure | Result |
 |---|---|---|---|
 | FHIR validation | 0 errors | Run the HL7 validator (`-version 4.0`) on every resource filed during a scenario run and count issues with severity `error` or `fatal`. `pnpm validate` runs the same check on its own. | **0 errors** in the 18 resources of the two filing Bundles, for the lab result and the rehab report (HL7 validator 7.0.3). 16 warnings, all `dom-6`: a resource should have a narrative, a best-practice recommendation. |
-| Effort for the outside person | 0 installs, 0 accounts, under 2 minutes | Someone new answers request 1 with a stopwatch running from opening the email to pressing send. The audit timestamps from `link_opened` to `answer_sent` confirm the time. ID Austria counts as an existing state ID, not as an account with us. | Not measured yet: the stopwatch test with someone new ([protocol](docs/clinical-review/TIMED_TEST_20.md)) is not done. The team's run by hand needed no install and no account with us. |
+| Effort for the outside person | 0 installs, 0 accounts, under 2 minutes | Someone new answers request 1 with a stopwatch running from opening the email to pressing send. The audit timestamps from `link_opened` to `answer_sent` confirm the time. ID Austria counts as an existing state ID, not as an account with us. | Not measured yet: the stopwatch test with someone new ([protocol](docs/clinical-review/TIMED_TEST_20.md)) is not done. The team's run by hand needed no install and no account with us. A scripted browser run took 41.1 s ([End-to-end run](docs/E2E_RUN.md)). |
 | Misdeliveries caught | 3 of 3 | Run M1, M2, and M3 from [`misdelivery.md`](track/scenario/misdelivery.md) with request 1. M2 and M3 run on request 1 itself. M1 sends request 1 to the mistyped address, which makes it a request of its own. Each must show the outcome the test names and a `misdelivery_caught` audit entry. | **3 of 3.** M1: the address warning held the request; after **Send anyway**, `anna.huber` saw only Dr. Hofer and the clinic, was refused at login, and could not answer, and `identity_checked` with `fail` is in the log. M2: `thomas.wagner` was refused at login. M3: Max Beispiel's result was not filed, and Dr. Hofer got a notice in the room. Each wrote `misdelivery_caught`. |
 | Audit coverage | 6 of 6 on request 1 | Check that request 1 has all six event types, each with who, what, and when: `request_sent`, `link_opened`, `identity_checked`, `answer_sent`, `answer_filed`, `misdelivery_caught`. `pnpm audit:check` lists them per request. | **6 of 6** on request 1 (`pnpm audit:check`). In that run the email was not sent yet. Since #4, ordy stores `request_sent` for an email request only after the SMTP server accepted the email. For an SMS request, `request_sent` commits together with the SMS on the SMS screen. |
 
@@ -200,6 +200,7 @@ We measure the four track metrics on the scenario. `pnpm scenario` is meant to r
 | [Identity and misdelivery](docs/IDENTITY.md) | Real ID Austria and eHVD, the Keycloak simulation, the identity checks, and the three misdelivery tests |
 | [FHIR model](docs/FHIR.md) | The resources we file, how they reference each other, and how we validate them |
 | [Demo script](docs/DEMO.md) | Draft click path for the 2-minute video |
+| [End-to-end run](docs/E2E_RUN.md) | A recorded browser run of the whole scenario on 30 October 2026, with the metrics and findings |
 | [Timeline](docs/TIMELINE.md) | Milestones, tasks, owners, and the cut list |
 | [Compliance and safety](docs/COMPLIANCE_AND_SAFETY.md) | Synthetic data, message rules, data we keep, AI rules, and the disclaimer |
 | [UML diagrams](docs/UML.md) | Use cases, domain classes, and component relations |
