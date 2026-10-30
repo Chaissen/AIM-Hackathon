@@ -9,7 +9,7 @@ import type { IsoDate, SafetyRefusal } from "./types";
 
 /**
  * A `key: value` line with its markup stripped. `norm` is the key in lower case, without `(2)` and a final `.`.
- * `header` is true before the first table and before any heading after the first one.
+ * `header` is true inside the header block (`headerBlock()`).
  */
 export type KeyLine = { key: string; norm: string; value: string; header: boolean };
 
@@ -32,6 +32,32 @@ export const HEADER_ONLY_KEYS = new Set([...HEADER_PATIENT_KEYS, ...HEADER_BIRTH
 
 // HTML on, so an HTML block comes back as one token that we read as text, not as escaped text.
 const md = new MarkdownIt({ html: true });
+
+/** A `##` heading that opens the patient's details, such as `## Patient` or `## Patient details`. */
+const PATIENT_HEADING = /^(patient|patient data|patient details|patient information|patient's details)$/;
+export const isPatientHeading = (text: string) => PATIENT_HEADING.test(text.replace(/[*_#:]/g, "").replace(/\s+/g, " ").trim().toLowerCase());
+
+/**
+ * The header block, the same rule in every reader: from the start of the file up to the first table, or up to the
+ * first heading after the `#` title that does not open the patient's details. Headings before the title do not end it,
+ * so a `Name:` line after the title still counts. Feed it every token in order and read `open` after each.
+ */
+export function headerBlock() {
+  let seenTitle = false;
+  let open = true;
+  return {
+    see(token: { type: string; tag: string }, next?: { content: string }) {
+      if (token.type === "table_open") open = false;
+      else if (token.type === "heading_open") {
+        if (!seenTitle && token.tag === "h1") seenTitle = true;
+        else if (seenTitle && !isPatientHeading(next?.content ?? "")) open = false;
+      }
+    },
+    get open() {
+      return open;
+    },
+  };
+}
 const KEY = /^[A-Za-z][A-Za-z' .-]*(?:\s*\([^)]*\))?$/;
 
 function keyValue(keyPart: string, valuePart: string, header: boolean): KeyLine | null {
@@ -68,24 +94,20 @@ export function toKeyLine(line: string, header = true): KeyLine | null {
 /** Every key line outside tables: paragraphs, headings, list items, code blocks, and HTML blocks. */
 export function keyLines(markdown: string): KeyLine[] {
   const lines: KeyLine[] = [];
+  const header = headerBlock();
   let tableDepth = 0;
-  let header = true;
-  let seenHeading = false;
-  for (const t of md.parse(markdown.replace(/^﻿/, "").replace(/\r\n?/g, "\n"), {})) {
-    if (t.type === "table_open") {
-      tableDepth++;
-      header = false;
-    } else if (t.type === "table_close") tableDepth--;
-    else if (t.type === "heading_open") {
-      if (seenHeading) header = false;
-      seenHeading = true;
-    } else if (!tableDepth && ["inline", "fence", "code_block", "html_block"].includes(t.type)) {
+  const tokens = md.parse(markdown.replace(/^﻿/, "").replace(/\r\n?/g, "\n"), {});
+  tokens.forEach((t, i) => {
+    header.see(t, tokens[i + 1]);
+    if (t.type === "table_open") tableDepth++;
+    else if (t.type === "table_close") tableDepth--;
+    else if (!tableDepth && ["inline", "fence", "code_block", "html_block"].includes(t.type)) {
       for (const line of t.content.split("\n")) {
-        const kl = toKeyLine(line, header);
+        const kl = toKeyLine(line, header.open);
         if (kl) lines.push(kl);
       }
     }
-  }
+  });
   return lines;
 }
 

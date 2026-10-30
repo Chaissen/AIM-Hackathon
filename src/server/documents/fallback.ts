@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { parseDateWide, parseStayWide, parseViennaDateTimeWide } from "./dates";
 import { freeText, isLoinc, parseDocument, parsePersonLine, toNumber } from "./parse";
-import { HEADER_ONLY_KEYS, IDENTITY_KEYS, keyLines, patientIdentity, toKeyLine, type KeyLine } from "./patient-lines";
+import { HEADER_ONLY_KEYS, IDENTITY_KEYS, headerBlock, isPatientHeading, keyLines, patientIdentity, toKeyLine, type KeyLine } from "./patient-lines";
 import type { LabResult, LabRow, ParseResult, ParsedDocument, PersonLine, RehabReport, SafetyRefusal } from "./types";
 
 // AI fallback (docs/ARCHITECTURE.md, "AI fallback"; docs/COMPLIANCE_AND_SAFETY.md, "AI rules").
@@ -101,23 +101,21 @@ type Wide = { reading: ModelReading; document: ParsedDocument | null; errors: st
 
 /** The document as markdown-it tokens: the heading, key lines, free text, `##` sections, and tables. */
 function collect(markdown: string) {
-  const out = { title: null as string | null, lines: [] as KeyLine[], free: [] as string[], sections: [] as { heading: string; lines: string[] }[], tables: [] as Table[] };
+  const out = { title: null as string | null, textBeforeTitle: false, lines: [] as KeyLine[], free: [] as string[], sections: [] as { heading: string; lines: string[] }[], tables: [] as Table[] };
   let section: (typeof out.sections)[number] | null = null;
   let table: Table | null = null;
   let row: string[] | null = null;
   let inHead = false;
   let listDepth = 0;
-  let header = true;
+  const header = headerBlock();
   const addText = (line: string) => (section ? section.lines : out.free).push(line);
   const tokens = md.parse(markdown, {});
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
+    header.see(t, tokens[i + 1]);
     if (t.type === "bullet_list_open" || t.type === "ordered_list_open") listDepth++;
     else if (t.type === "bullet_list_close" || t.type === "ordered_list_close") listDepth--;
-    else if (t.type === "table_open") {
-      out.tables.push((table = { header: [], rows: [] }));
-      header = false;
-    }
+    else if (t.type === "table_open") out.tables.push((table = { header: [], rows: [] }));
     else if (t.type === "table_close") table = null;
     else if (t.type === "thead_open") inHead = true;
     else if (t.type === "thead_close") inHead = false;
@@ -129,8 +127,12 @@ function collect(markdown: string) {
     } else if (t.type === "inline" && row) row.push(collapse(t.content));
     else if (t.type === "heading_open") {
       const heading = collapse(tokens[i + 1]?.content ?? "");
-      if (out.title !== null) header = false;
-      if (t.tag === "h1" && out.title === null) out.title = heading;
+      if (t.tag === "h1" && out.title === null) {
+        out.title = heading;
+        out.textBeforeTitle = i > 0;
+      }
+      // `## Patient` in the header block is part of it, not a section.
+      else if (header.open && isPatientHeading(heading)) section = null;
       else if (t.tag === "h2") out.sections.push((section = { heading, lines: [] }));
       // A `###` heading or a second `#` heading stays text, as in the parser.
       else addText(heading);
@@ -139,7 +141,7 @@ function collect(markdown: string) {
       for (const line of t.content.split("\n").map(collapse).filter(Boolean)) addText(line);
     } else if (t.type === "inline" && tokens[i - 1]?.type === "paragraph_open") {
       for (const line of t.content.split("\n").map(collapse).filter(Boolean)) {
-        const kl = listDepth ? null : toKeyLine(line, header);
+        const kl = listDepth ? null : toKeyLine(line, header.open);
         // As in the parser: inside a `##` section only the keys code knows count as fields.
         if (kl && (!section || consumed(kl))) out.lines.push(kl);
         if (!kl || !consumed(kl)) addText(listDepth ? `- ${line}` : line);
@@ -206,6 +208,8 @@ function readWide(markdown: string): Wide {
 
   // The type, from the kind in the heading, as the parser does.
   if (!raw.title) errors.push("The file has no heading.");
+  // The parser takes the first `#` heading wherever it is. Here, text before it gives no record.
+  else if (raw.textBeforeTitle) errors.push("The file has text before its heading.");
   const parts = (raw.title ?? "").split(/\s+[—–-]\s+|\s*[:|]\s*/).map((p) => p.trim()).filter(Boolean);
   const kindAt = parts.findIndex((p) => LAB_KINDS.has(p.toLowerCase()) || REHAB_KINDS.has(p.toLowerCase()));
   const kind = kindAt >= 0 ? parts[kindAt] : (parts[1] ?? "");

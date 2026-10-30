@@ -316,6 +316,57 @@ test("Name and Born below the header block are text, in the parser and in the fa
   assert.ok((await refused(insertAfter(lab, "Date of birth: 12.03.1961", "Born: 03.12.1961"))).includes("several-birth-dates"));
 });
 
+// Round 4, item 1: one header block rule in every reader.
+
+test("a heading before the title does not hide a second patient after it", async () => {
+  for (const before of ["### Ref 123\n\n", "## Order\n\n"]) {
+    const markdown = before + insertAfter(lab, "# Lab report — Labor Kanalstraße\n", "Name: Max Beispiel");
+    const parsed = parseDocument(markdown);
+    assert.ok(!parsed.ok && parsed.safety.includes("several-patients"), before);
+    assert.ok((await refused(markdown)).includes("several-patients"), before);
+  }
+});
+
+test("text before the title gives no record from the fallback", async () => {
+  for (const before of ["### Ref 123\n\n", "Ref 123\n\n"]) {
+    assert.ok((await unreadable(before + lab)).includes("The file has text before its heading."), before);
+  }
+});
+
+// Round 4, item 3: a `## Patient` section belongs to the header block.
+
+test("a Patient section in the header block names the patient, and a second one is refused", async () => {
+  const section = lab.replace("Patient name: Maria Beispiel", "## Patient\n\nName: Maria Beispiel");
+  const doc = (await record(section, goodLab())) as LabResult;
+  assert.deepEqual(doc.patient, { name: "Maria Beispiel", birthDate: "1961-03-12" });
+  assert.equal(doc.conclusion, "All values are within the reference range.");
+
+  const details = lab.replace("Patient name: Maria Beispiel", "## Patient details\n\nName: Maria Beispiel");
+  assert.equal((await record(details, goodLab())).patient.name, "Maria Beispiel");
+
+  const second = insertAfter(section, "Reported: 22.10.2026 11:40\n", "## Patient\n\nName: Max Beispiel\n");
+  assert.ok((await refused(second)).includes("several-patients"));
+});
+
+// Round 4, item 2: a known gap, kept visible (#46).
+
+test("Name below the header block is not a patient line, but it stays visible in the conclusion", async () => {
+  const doc = (await record(`${lab}\n## Notes\n\nName: Max Beispiel\n`, goodLab())) as LabResult;
+  assert.equal(doc.patient.name, "Maria Beispiel");
+  assert.equal(doc.conclusion, "All values are within the reference range. Notes: Name: Max Beispiel");
+});
+
+// Round 4, item 4: sub-headings and code blocks inside a rehab section are that section's text.
+
+test("a sub-heading or code block inside a rehab section becomes that section's text", async () => {
+  const extra = "\n## Notes\n\n### Pain\n\nPain at rest 2 of 10.\n\n```\nscore 2/10\n```\n";
+  const parsed = parseDocument(`${scenario("rehab-report-maria-beispiel.md")}${extra}`);
+  assert.ok(parsed.ok && parsed.document.type === "rehab-report");
+  assert.deepEqual(parsed.document.sections.at(-1), { heading: "Notes", text: "Pain\nPain at rest 2 of 10.\nscore 2/10" });
+  const doc = (await record(`${rehab}${extra}`, goodRehab())) as RehabReport;
+  assert.deepEqual(doc.sections.at(-1), { heading: "Notes", text: "Pain\nPain at rest 2 of 10.\nscore 2/10" });
+});
+
 // Round 3, finding 3: only keys code reads can be a repeated key.
 
 test("two Note lines are text, not a safety refusal", async () => {
