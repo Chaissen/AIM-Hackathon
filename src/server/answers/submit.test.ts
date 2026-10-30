@@ -70,8 +70,7 @@ async function verifiedRequest(person: typeof EVA | typeof STEFAN, docType: NewR
   assert.ok(await applyLoginTransition(db, request.id, { from: "sent", to: "verified", personNumber: person.personNumber }));
   const idToken = idTokenOf(person.personNumber);
   await saveIdToken(db, request.id, idToken);
-  // `idToken` is the session field before T07 moves the token to the request row; parse drops it afterwards.
-  const session: EidSession = eidSession.parse({ requestId: request.id, level: "urn:eidgvat:eid.status.full", idToken: "", ...person });
+  const session: EidSession = eidSession.parse({ requestId: request.id, level: "urn:eidgvat:eid.status.full", ...person });
   return { request, token, session, idToken };
 }
 

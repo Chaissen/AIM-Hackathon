@@ -54,7 +54,7 @@ export const requests = pgTable("requests", {
   failedChecks: integer("failed_checks").notNull().default(0),
   // The bPK of the person who passed the identity check, or who was held and then accepted. Only this person may answer.
   personNumber: text("person_number"),
-  // The ID token of the bound person's login, exactly as received, for the Provenance signature. Set with saveIdToken.
+  // The ID token of the last login, exactly as received, for the Provenance signature (T13).
   idToken: text("id_token"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),

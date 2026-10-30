@@ -113,6 +113,10 @@ export async function findRequestByToken(db: Db, token: string): Promise<Request
   return found ? getRequest(db, found.id) : null;
 }
 
+export async function saveIdToken(db: Db, id: number, idToken: string): Promise<void> {
+  await db.update(requests).set({ idToken }).where(eq(requests.id, id));
+}
+
 /** The requests one network member sent, newest first. */
 export async function listRequests(db: Db, requester: string, limit = 100): Promise<RequestRow[]> {
   await expireDueRequests(db);
@@ -126,14 +130,6 @@ export async function listRequests(db: Db, requester: string, limit = 100): Prom
 
 /** Every lifecycle event but a login's. Only `applyLoginTransition` applies those, so a login always stores the bPK. */
 export type NonLoginEvent = Exclude<RequestEvent, (typeof LOGIN_EVENT)[keyof typeof LOGIN_EVENT]>;
-
-/**
-* Stores the ID token of a login exactly as received, for the Provenance signature of the filing. Call it only for the
- * person the request is bound to, after the identity check passed, so a wrong person's login never replaces it.
- */
-export async function saveIdToken(db: Db | Tx, id: number, idToken: string): Promise<void> {
-  await db.update(requests).set({ idToken }).where(eq(requests.id, id));
-}
 
 /**
  * Applies a lifecycle event and stores the new state: Dr. Hofer's decisions and the answer. A login goes through

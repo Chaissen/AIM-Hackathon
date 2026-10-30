@@ -1,5 +1,5 @@
 {
-  "id": "9dc7a48f-020c-4518-82b2-9172403ae3a7",
+  "id": "5526b018-f58e-4def-9f7d-453e0bc51950",
   "prevId": "9b911def-ecf0-4a99-9fbb-1c6b4ad9a2de",
   "version": "7",
   "dialect": "postgresql",
@@ -123,75 +123,6 @@
           ]
         }
       },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.held_answers": {
-      "name": "held_answers",
-      "schema": "",
-      "columns": {
-        "request_id": {
-          "name": "request_id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "markdown": {
-          "name": "markdown",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sha256": {
-          "name": "sha256",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sender": {
-          "name": "sender",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "id_token": {
-          "name": "id_token",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sent_at": {
-          "name": "sent_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "held_answers_request_id_requests_id_fk": {
-          "name": "held_answers_request_id_requests_id_fk",
-          "tableFrom": "held_answers",
-          "tableTo": "requests",
-          "columnsFrom": [
-            "request_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},

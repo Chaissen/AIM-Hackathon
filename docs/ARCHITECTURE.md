@@ -176,8 +176,9 @@ Before sending, the request service compares the words of the message with the p
 | Route | What it does |
 |---|---|
 | `GET /r/{token}` | Writes `link_opened`. Shows the requesting doctor and clinic and a **Log in with ID Austria** button. |
-| `GET /auth/login` | Redirects to Keycloak with `state`, `nonce`, PKCE, and `prompt=login`. |
-| `GET /auth/callback` | Swaps the code for tokens, verifies the ID token, runs the identity checks, and writes `identity_checked`. |
+| `POST /auth/login` | The landing page's form posts here. Redirects to Keycloak with `state`, `nonce`, PKCE, and `prompt=login`. |
+| `GET /auth/callback` | Swaps the code for tokens, verifies the ID token, ends the Keycloak session, runs the identity checks, and sends the person to the page for the result. Stores the ID token on the request and sets the session only for the person the request is bound to. |
+| `GET /auth/failed` | Says the login has expired and asks the person to open the link again. |
 | `GET /r/{token}/answer` | Shows the patient, the requested document, the upload field, and fields for the patient's name and birth date. Only while the request is `verified`, and only for the person whose person number the request stores. For that person, a held request shows "Thank you, your document arrived" and a filed one "Thank you, your document is filed". Without a session for this link it goes back to `GET /r/{token}`. Anyone else gets "This link does not work". |
 | `portal.answer` (tRPC, the answer page's upload) | Writes `answer_sent`, parses the document, runs the patient check and the release check, files the resources, and writes `answer_filed`. See [The answer](#the-answer). |
 | `GET /r/{token}/held` | Where the login sends a held person: "This request needs a check". The same page for every link. |
@@ -188,7 +189,7 @@ Before sending, the request service compares the words of the message with the p
 
 The pages are Next.js routes. `/auth/login` and `/auth/callback` are route handlers, because they need real redirects and cookies. The answer page loads its data and sends the upload through tRPC (`eidProcedure`, the upload as `FormData`).
 
-A signed session cookie (`ordy_eid_session`, see `src/server/auth/eid-session.ts`) holds the request id and, after login, the person number (the bPK, never `sub`). It expires after 30 minutes.
+After the login, a signed session cookie (`ordy_eid_session`, see `src/server/auth/eid-session.ts`) holds the request id, the person number (the bPK, never `sub`), the names, the function level, and the eHVD OID. It expires after 30 minutes. The ID token stays on the server, on the request row. During the login, a second signed cookie, `ordy_eid_login`, carries `state`, `nonce`, and the PKCE verifier to the callback. [The login for T07](IDENTITY.md#the-login-for-t07) has the details.
 
 `portalPath(token, page)` in `src/server/portal/paths.ts` maps each result of `runIdentityChecks` to its page: `answer` to `/r/{token}/answer`, `held` to `/held`, `wrong_person` to `/refused`, `unavailable` to `/unavailable`, and `closed` to `/r/{token}`, which shows "This link does not work". Only the answer page shows the patient and the document type.
 
@@ -270,12 +271,12 @@ Every entry has a UTC timestamp in `at`. The `outcome` column holds the short re
 | `link_opened` | `state` |
 | `identity_checked` | `checks`, one entry per check with its result and reason |
 | `answer_sent` | `sha256`, `size` |
-| `answer_filed` | `output`, `targets`, `provenance`, `task`, `sender`, `author`, `organization`, and `resources` (every resource in the transaction as `Type/id`, which `pnpm validate` reads); `AnswerFiled` in `src/server/fhir/file-answer.ts` |
+| `answer_filed` | `resources` (every filed resource as `Type/id`, which `pnpm validate` reads), `provenance` |
 | `misdelivery_caught` | `address_mismatch`: `domain`, `expectedDomain`. `wrong_person`: `checks`. `patient_mismatch`: `sha256`, `size`, `nameMatches`, `birthDateMatches`. |
 
 The widget and `GET /audit` show the entries.
 
-`recordAudit()` in `src/server/audit/record.ts` writes the entries. Its types fix the outcome and the detail fields for each event and each misdelivery reason, and they hold ids, hashes, and check results only, never document text or the data of a wrong patient. An entry that belongs to a state change goes into the same transaction. `fileAnswer` in `src/server/fhir/file-answer.ts` (T13) still inserts `answer_filed` directly, with the same fields, until it switches to `recordAudit()`.
+`recordAudit()` in `src/server/audit/record.ts` writes the entries. Its types fix the outcome and the detail fields for each event and each misdelivery reason, and they hold ids, hashes, and check results only, never document text or the data of a wrong patient. An entry that belongs to a state change goes into the same transaction. `answer_filed` also names `output`, `targets`, `task`, `sender`, `author`, and `organization` (`AnswerFiled` in `src/server/fhir/file-answer.ts`). `fileAnswer` (T13) still inserts it directly until it switches to `recordAudit()`.
 
 The IP hash is an HMAC-SHA256 with a key derived from `ORDY_SECRET`, cut to 16 hex characters, because a plain hash of an IPv4 address can be reversed by trying all of them. Without a private `ORDY_SECRET`, the entry says `ip unknown` instead. Next.js fills `X-Forwarded-For` from the connection only when the client sent none. Without a proxy in front, the client can set it, so the hash is a hint, not proof.
 
@@ -329,7 +330,7 @@ src/
     api/healthz/route.ts      health check for scripts and containers
     widget/                   request form inside Element. Sending is planned, T05
     r/[token]/                outside portal: landing page, answer page, and the held, refused, and unavailable pages (T09)
-    auth/                     ID Austria login, planned, T07
+    auth/                     ID Austria login and callback route handlers, expired-login page. Identity checks planned, T08
     sms/page.tsx              SMS screen. Reading the SMS log planned, T06
     audit/page.tsx            audit UI; authenticated data via clinic.audit
   components/ui/              shadcn/ui components, added with `pnpm dlx shadcn@4.22.1 add <name>`
@@ -355,10 +356,11 @@ src/
     matrix/client.ts          Matrix client-server API
     matrix/notices.ts         notice texts and notifyRoom for Dr. Hofer's room
     metrics/                  metrics from audit rows, validator runner, metrics table (T17, T18)
-    auth/eid-session.ts       outside person's session cookie
-    portal/data.ts            data loaders for the portal and SMS pages, the SMS log is a stub until T06
+    auth/eid-session.ts       outside person's session cookie and login cookie
+    auth/id-austria.ts        OpenID Connect login: discovery, code swap, Keycloak logout, claims for the identity checks
+    portal/data.ts            data loaders for the portal, the login, and the SMS page. The SMS log is a stub until T06
     portal/answer-page.ts     what the answer page shows for a session: the form, held, filed, or closed
-    portal/paths.ts           portalPath: the page for each login result
+    portal/paths.ts           the portal page for each login result
   bot/                        Matrix bot process and commands
 scripts/
   setup.sh                    one-time setup
