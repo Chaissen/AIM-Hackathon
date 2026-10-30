@@ -32,3 +32,6 @@ export function nameWords(name: string): Set<string> {
 
 /** Every word in `a` is also in `b`. An empty `a` passes, so callers must refuse empty names. */
 export const isSubset = (a: Set<string>, b: Set<string>) => [...a].every((w) => b.has(w));
+
+/** At least one word of `a` is also in `b`. */
+export const shares = (a: Set<string>, b: Set<string>) => [...a].some((w) => b.has(w));

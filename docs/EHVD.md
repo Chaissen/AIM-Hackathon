@@ -243,7 +243,7 @@ Also in the mock:
 - ID Austria's test doctor "Dr. XXXOtto XXXOttakringer" (`1.2.40.0.34.3.2.99.0.11003`) with the roles from the ID Austria example.
 - About 300 generated entries from a fixed seed: a realistic mix of roles and federal states, about 10 percent inactive, fictional streets. They make wildcard searches, the status filter, and fault 6005 behave like the real thing.
 
-Not in the directory: Stefan Kern (discharge management staff are not healthcare professionals), Thomas Wagner, Anna Huber, and the second Eva Brandl.
+Not in the directory: Stefan Kern and Karl Heinz Moser-Wallner (discharge management staff are not healthcare professionals), Sophie Lindner-Pichler (a biomedical scientist who sends results Dr. Eva Brandl validated), Thomas Wagner, Anna Huber, and the second Eva Brandl.
 
 ### Done when
 

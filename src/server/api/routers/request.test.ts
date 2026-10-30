@@ -15,7 +15,19 @@ import { capabilities } from "@/server/fhir/client";
 import { findAnswerContext, findPublicRequest } from "@/server/portal/data";
 import { TransitionError } from "@/server/requests/lifecycle";
 import { LINK_TTL_MS } from "@/server/requests/link-token";
-import { applyEvent, bindPerson, createRequest, findRequestByToken, type NewRequest, sendAnyway } from "@/server/requests/service";
+import { runIdentityChecks } from "@/server/identity/login";
+import type { Notice } from "@/server/matrix/notices";
+import { identityCheckPorts } from "@/server/requests/identity-ports";
+import {
+  applyEvent,
+  applyLoginTransition,
+  createRequest,
+  findRequestByToken,
+  getRequest,
+  incrementFailedChecks,
+  type NewRequest,
+  sendAnyway,
+} from "@/server/requests/service";
 
 // Runs against the Postgres from DATABASE_URL and deletes its rows afterwards. Skipped when Postgres is not running.
 // Request ids still move on, so run `pnpm reset` before a demo.
@@ -51,7 +63,7 @@ const newRequest: NewRequest = {
 };
 
 async function seed() {
-  const result = await createRequest(db, newRequest, { addressCheckPassed: true });
+  const result = await createRequest(db, newRequest, { passed: true });
   created.push(result.request.id);
   return result;
 }
@@ -207,10 +219,18 @@ test("an expired link is refused and the request becomes expired", { skip: noDb 
 });
 
 test("Send anyway sends the request with a new 7-day link and logs request_sent", { skip: noDb }, async () => {
-  const { request, token } = await createRequest(db, newRequest, { addressCheckPassed: false });
+  const { request, token } = await createRequest(db, newRequest, {
+    passed: false,
+    domain: "labor-kanaI.example",
+    expectedDomain: "labor-kanal.example",
+  });
   created.push(request.id);
   assert.equal(request.state, "awaiting_confirmation");
-  assert.deepEqual(await auditOf(request.id), [], "nothing went out yet");
+  assert.deepEqual(
+    (await auditOf(request.id)).map((a) => [a.event, a.outcome, a.detail]),
+    [["misdelivery_caught", "address_mismatch", { domain: "labor-kanaI.example", expectedDomain: "labor-kanal.example" }]],
+    "nothing went out yet",
+  );
 
   // Dr. Hofer decides later; the 7 days start only when the request goes out.
   await db.update(requests).set({ expiresAt: new Date(Date.now() + 60_000) }).where(eq(requests.id, request.id));
@@ -222,7 +242,10 @@ test("Send anyway sends the request with a new 7-day link and logs request_sent"
   assert.equal((await findRequestByToken(db, sent.token))?.id, request.id);
   assert.deepEqual(
     (await auditOf(request.id)).map((a) => [a.event, a.actor]),
-    [["request_sent", hofer]],
+    [
+      ["misdelivery_caught", hofer],
+      ["request_sent", hofer],
+    ],
   );
   await assert.rejects(sendAnyway(db, request.id, { kind: "network_member", id: hofer }), TransitionError);
 });
@@ -239,20 +262,46 @@ test("a failed write in the same transaction rolls the state change back", { ski
   assert.equal(row.state, "sent");
 });
 
-test("the third failed identity check locks the link", { skip: noDb }, async () => {
+test("a sent request locks only once the third failed identity check is counted", { skip: noDb }, async () => {
   const { request, token } = await seed();
-  const states = [];
-  for (let i = 0; i < 3; i++) states.push((await applyEvent(db, request.id, "identity_fail"))?.state);
-  assert.deepEqual(states, ["sent", "sent", "locked"]);
-  const [row] = await db.select().from(requests).where(eq(requests.id, request.id));
-  assert.equal(row.failedChecks, 3);
+  assert.equal(await incrementFailedChecks(db, request.id), 1);
+  assert.equal(await incrementFailedChecks(db, request.id), 2);
+  assert.equal(await applyLoginTransition(db, request.id, { from: "sent", to: "locked" }), false, "not before the third");
+  assert.equal(await incrementFailedChecks(db, request.id), 3);
+  assert.equal(await applyLoginTransition(db, request.id, { from: "sent", to: "locked" }), true);
+  assert.equal((await getRequest(db, request.id))?.state, "locked");
   assert.equal(await findPublicRequest(token, { ip: null }), null);
+});
+
+test("failed checks after the identity check are counted but change no state", { skip: noDb }, async () => {
+  const { request } = await seed();
+  assert.equal(await applyLoginTransition(db, request.id, { from: "sent", to: "verified", personNumber: "GH:eva" }), true);
+  for (let i = 1; i <= 3; i++) assert.equal(await incrementFailedChecks(db, request.id), i);
+  assert.equal(await applyLoginTransition(db, request.id, { from: "sent", to: "locked" }), false);
+  assert.equal((await getRequest(db, request.id))?.state, "verified");
+});
+
+test("a request is bound to one person and never rebound", { skip: noDb }, async () => {
+  const { request } = await seed();
+  assert.equal(await applyLoginTransition(db, request.id, { from: "sent", to: "verified", personNumber: "GH:eva" }), true);
+  assert.equal(await applyLoginTransition(db, request.id, { from: "sent", to: "verified", personNumber: "GH:eva2" }), false);
+  assert.equal(await applyLoginTransition(db, request.id, { from: "sent", to: "identity_held", personNumber: "GH:eva2" }), false);
+  assert.equal((await getRequest(db, request.id))?.personNumber, "GH:eva");
+});
+
+test("a login cannot change an expired request", { skip: noDb }, async () => {
+  const { request } = await seed();
+  await db.update(requests).set({ expiresAt: new Date(Date.now() - 1_000) }).where(eq(requests.id, request.id));
+  assert.equal(await applyLoginTransition(db, request.id, { from: "sent", to: "verified", personNumber: "GH:eva" }), false);
+  const row = await getRequest(db, request.id);
+  assert.equal(row?.state, "expired");
+  assert.equal(row?.personNumber, null);
 });
 
 test("after the identity check only the bound person gets the patient from FHIR", { skip: noFhir }, async () => {
   const { request, token } = await seed();
   const eva = { requestId: request.id, personNumber: "GH:eva" };
-  await applyEvent(db, request.id, "identity_pass", (tx) => bindPerson(tx, request.id, eva.personNumber));
+  await applyLoginTransition(db, request.id, { from: "sent", to: "verified", personNumber: eva.personNumber });
   const ctx = await findAnswerContext(token, eva);
   assert.deepEqual(ctx, {
     requester: "Dr. Lena Hofer",
@@ -265,8 +314,54 @@ test("after the identity check only the bound person gets the patient from FHIR"
   assert.equal(await findAnswerContext(token, { ...eva, personNumber: "GH:thomas" }), null, "a session of someone else");
 });
 
+test("Accept keeps the held person, who then gets the patient", { skip: noFhir }, async () => {
+  const { request, token } = await seed();
+  const petra = { requestId: request.id, personNumber: "GH:petra" };
+  await applyLoginTransition(db, request.id, { from: "sent", to: "identity_held", personNumber: petra.personNumber });
+  assert.equal(await findAnswerContext(token, petra), null, "not before Dr. Hofer accepts");
+  assert.equal((await applyEvent(db, request.id, "accept"))?.state, "verified");
+  assert.equal((await findAnswerContext(token, petra))?.patient.name, "Maria Beispiel");
+});
+
 test("a verified request bound to nobody shows no patient", { skip: noDb }, async () => {
   const { request, token } = await seed();
   await applyEvent(db, request.id, "identity_pass");
   assert.equal(await findAnswerContext(token, { requestId: request.id, personNumber: "GH:eva" }), null);
+});
+
+test("the identity checks run on the request service ports", { skip: noDb }, async () => {
+  const { request } = await seed();
+  const notices: Notice[] = [];
+  const ports = identityCheckPorts(db, async (_id, notice) => {
+    notices.push(notice);
+  });
+  const login = (givenName: string, familyName: string, personNumber: string) => ({
+    ok: true as const,
+    login: { givenName, familyName, personNumber, level: "urn:eidgvat:eid.status.full", gdaOid: null },
+  });
+
+  const eva = await runIdentityChecks(ports, (await getRequest(db, request.id))!, "Dr. Eva Brandl", login("Eva", "Brandl", "GH:eva"));
+  assert.equal(eva.page, "answer");
+  assert.equal(eva.applied, true);
+
+  const thomas = await runIdentityChecks(ports, (await getRequest(db, request.id))!, "Dr. Eva Brandl", login("Thomas", "Wagner", "GH:thomas"));
+  assert.equal(thomas.page, "wrong_person");
+  assert.equal(thomas.failedChecks, 1);
+
+  const row = await getRequest(db, request.id);
+  assert.equal(row?.state, "verified");
+  assert.equal(row?.personNumber, "GH:eva");
+  assert.deepEqual(
+    (await auditOf(request.id)).map((a) => [a.event, a.outcome]),
+    [
+      ["request_sent", "sent"],
+      ["identity_checked", "pass"],
+      ["identity_checked", "fail"],
+      ["misdelivery_caught", "wrong_person"],
+    ],
+  );
+  assert.deepEqual(
+    notices.map((n) => n.kind),
+    ["wrong-person"],
+  );
 });
