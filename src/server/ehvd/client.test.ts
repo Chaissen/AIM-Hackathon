@@ -108,6 +108,7 @@ async function answering(answer: (response: ServerResponse) => void) {
   const { port } = server.address() as { port: number };
   return { client: createEhvdClient({ url: `http://127.0.0.1:${port}/` }), close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
 }
+const GDA = `<gda><id><id>1.2.40.0.34.3.2.99.1.2</id></id><status><ehvdstatus>Aktiv</ehvdstatus><elgastatus>Aktiv</elgastatus></status><surname>Brandl</surname></gda>`;
 const soap = (body: string) =>
   `<?xml version="1.0" encoding="UTF-8"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body>${body}</s:Body></s:Envelope>`;
 
@@ -116,9 +117,11 @@ test("answers that are not the SOAP the WSDL describes are bad responses, never 
     ["HTTP 500 with an HTML page", (r) => r.writeHead(500, { "content-type": "text/html" }).end("<html><body>Error</body></html>"), "bad_response"],
     ["HTTP 400 without a fault", (r) => r.writeHead(400).end(soap(`<GdaIndexResponseList xmlns="eHVD"/>`)), "bad_response"],
     ["an answer over 4 MiB", (r) => r.writeHead(200).end(soap(`<GdaIndexResponseList xmlns="eHVD">${" ".repeat(5 * 1024 * 1024)}</GdaIndexResponseList>`)), "bad_response"],
-    ["bytes that are not UTF-8", (r) => r.writeHead(200).end(Buffer.from([0x3c, 0xff, 0xfe, 0x3e])), "bad_response"],
+    // Valid SOAP but for one Latin-1 byte, so only the strict decoder refuses it.
+    ["bytes that are not UTF-8", (r) => r.writeHead(200).end(Buffer.from(soap(`<GdaIndexResponseList xmlns="eHVD">${GDA.replace("Brandl", "Br\xe4ndl")}</GdaIndexResponseList>`), "latin1")), "bad_response"],
     ["a gda in no namespace", (r) => r.writeHead(200).end(soap(`<GdaIndexResponseList xmlns="eHVD"><gda xmlns=""><surname>Brandl</surname></gda></GdaIndexResponseList>`)), "bad_response"],
-    ["a redirect", (r) => r.writeHead(302, { location: "http://127.0.0.1:9/" }).end(), "unreachable"],
+    // To a server with a valid hit, so following it would be a pass.
+    ["a redirect", (r) => r.writeHead(307, { location: mock.url }).end(), "unreachable"],
   ];
   for (const [label, answer, kind] of cases) {
     const server = await answering(answer);
@@ -156,7 +159,11 @@ test("a fault without the number in soap:Detail gets it from the handbook's mess
 
 test("values that break the field rules are never sent", async () => {
   const cases: [Parameters<EhvdClient["gdaSearch"]>[0], string][] = [
-    [{ surname: "Br*", maxResults: 10 }, "surname"], // ordy never searches with a wildcard
+    // A wildcard only at the start or end, with two letters A to Z besides it.
+    [{ surname: "B*", maxResults: 10 }, "surname"],
+    [{ surname: "Br*andl", maxResults: 10 }, "surname"],
+    [{ surname: "**", maxResults: 10 }, "surname"],
+    [{ firstname: "*Ö*", surname: "Brandl", maxResults: 10 }, "firstname"],
     [{ surname: "Brandl & Co", maxResults: 10 }, "surname"],
     [{ surname: " Brandl", maxResults: 10 }, "surname"],
     [{ surname: "Brandl", maxResults: 201 }, "maxResults"],

@@ -48,3 +48,14 @@ test("an address the eHVD cannot confirm is never a pass", async () => {
   assert.deepEqual(unreachable, { result: "unchecked", reason: "ehvd_unreachable" });
   assert.equal(addressWarning(unreachable, "Labor Kanalstraße"), "The eHVD could not be reached, so the address could not be checked.");
 });
+
+test("an eHVD that answers with an error is not called unreachable", async () => {
+  const getGdaOnly = await startEhvdMock({ EHVD_ALLOWLIST: "127.0.0.0/8 GetGDA" });
+  try {
+    const check = await checkAddress(email("eva.brandl@labor-kanal.example"), createEhvdClient({ url: getGdaOnly.url }));
+    assert.deepEqual(check, { result: "unchecked", reason: "ehvd_error" });
+    assert.equal(addressWarning(check, "Labor Kanalstraße"), "The eHVD answered with an error, so the address could not be checked.");
+  } finally {
+    await getGdaOnly.close();
+  }
+});
