@@ -2,7 +2,7 @@
 // Pure functions, so `pnpm scenario` and the tests share the rules for "met".
 import path from "node:path";
 
-import { AUDIT_EVENTS, type RequestCoverage } from "./audit";
+import { TRACK_EVENTS, type RequestCoverage } from "./audit";
 import { totalErrors, type FileResult } from "./validator";
 
 export type MetricStatus = "met" | "missed" | "blocked";
@@ -84,11 +84,11 @@ export function misdeliveryMetric(steps: StepResult[]): Metric {
 
 // Audit coverage counts request 1: it is the request on which every event type happens, M2 and M3 included.
 export function coverageMetric(request1: RequestCoverage | undefined): Metric {
-  const base = { name: "Audit coverage", target: `${AUDIT_EVENTS.length} of ${AUDIT_EVENTS.length} on request 1` };
+  const base = { name: "Audit coverage", target: `${TRACK_EVENTS.length} of ${TRACK_EVENTS.length} on request 1` };
   if (!request1) return { ...base, result: "request 1 not sent", status: "blocked" };
   return {
     ...base,
-    result: `${request1.covered} of ${AUDIT_EVENTS.length} on request ${request1.requestId}`,
-    status: request1.covered === AUDIT_EVENTS.length ? "met" : "missed",
+    result: `${request1.covered} of ${TRACK_EVENTS.length} on request ${request1.requestId}`,
+    status: request1.covered === TRACK_EVENTS.length ? "met" : "missed",
   };
 }

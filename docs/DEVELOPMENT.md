@@ -36,7 +36,7 @@ cd AIM-Hackathon
 4. registers the Matrix users `@lena.hofer` (Dr. Hofer) and `@ordy` (the bot)
 5. runs the database migrations (`pnpm db:migrate`)
 6. loads Maria Beispiel from `track/scenario/patient.json` into HAPI (`pnpm fhir:seed`)
-7. creates the room `#outside-documents:klinikum.example`, joins Dr. Hofer and the bot, and pins the widget (`pnpm matrix:bootstrap`). Its URL includes the widget ID and its registration sets `waitForIframeLoad: false`, so Element waits for the widget API to be ready before negotiating capabilities
+7. creates the room `#outside-documents:klinikum.example`, joins Dr. Hofer and the bot, sets her display name to "Dr. Lena Hofer", and pins the widget (`pnpm matrix:bootstrap`). Its URL includes the widget ID and its registration sets `waitForIframeLoad: false`, so Element waits for the widget API to be ready before negotiating capabilities
 
 When upgrading an existing installation, run `pnpm matrix:bootstrap` and reload Element to update the pinned widget's authentication handshake.
 
@@ -59,7 +59,7 @@ Check that everything works:
 2. Open Element at http://localhost:8081, log in as `lena.hofer` / `hofer-demo-2026`, and open "Dr. Hofer · Outside documents".
 3. Send `!status`. The bot answers with the same three checks.
 4. Open the ordy widget and approve Element's identity request. The patient list and **Audit log** tab require this Matrix sign-in. Opening `/widget` or `/audit` directly shows sign-in guidance without patient or audit data.
-5. Open http://localhost:8080/realms/idaustria-sim/.well-known/openid-configuration. It shows the issuer `http://localhost:8080/realms/idaustria-sim`. This is the simulated ID Austria. Its test logins, such as `eva.brandl` / `demo-eva`, work once the answer portal (T07) exists. Keycloak's account page does not work in this realm, on purpose.
+5. Open http://localhost:8080/realms/idaustria-sim/.well-known/openid-configuration. It shows the issuer `http://localhost:8080/realms/idaustria-sim`. This is the simulated ID Austria. Its test logins, such as `eva.brandl` / `demo-eva`, work from a request link. Keycloak's account page does not work in this realm, on purpose.
 6. Open http://localhost:8095/healthz. It shows `{"status":"ok","entries":313}`. This is the eHVD mock, and [eHVD](EHVD.md#trigger-each-fault) shows how to call it.
 
 | Service | URL | Login |
@@ -84,13 +84,13 @@ Test citizens for the ID Austria login: `eva.brandl` / `demo-eva`, `stefan.kern`
 | `pnpm build`, then `pnpm start` | Production build, then both processes without reload |
 | `pnpm typecheck` | Generates the Next.js route types, then runs `tsc` on ordy and on the eHVD mock |
 | `pnpm lint` | ESLint |
-| `pnpm test` | The `*.test.ts` files under `src/` and `services/`, with Node's test runner through tsx. The mail tests send request 1's email to Mailpit and read it back. They are skipped when Mailpit is not running or `SMTP_USER` is set. |
+| `pnpm test` | The `*.test.ts` files under `src/` and `services/`, with Node's test runner through tsx. The request tests use the Postgres and FHIR server at the default addresses from `src/env.ts`, because `pnpm test` does not read `.env`. They delete their rows afterwards and are skipped when the servers are not running. Request ids still move on, so run `pnpm reset` before a demo. The mail tests send request 1's email to Mailpit and read it back. They are skipped when Mailpit is not running or `SMTP_USER` is set. |
 | `pnpm reset` | Empties Postgres, HAPI, and Mailpit, and reloads the patient. Matrix users and the room stay. Run it before every demo. |
 | `pnpm db:generate --name <name>` | Writes a SQL migration to `drizzle/` from the schema |
 | `pnpm db:migrate` | Applies pending migrations |
 | `pnpm db:studio` | Opens Drizzle Studio to browse the database |
 | `pnpm fhir:seed` | Puts `Patient/maria-beispiel` on HAPI |
-| `pnpm matrix:bootstrap` | Creates the room if needed, joins Dr. Hofer and the bot, and pins the widget |
+| `pnpm matrix:bootstrap` | Creates the room if needed, joins Dr. Hofer and the bot, sets her display name, and pins the widget |
 | `pnpm citizen --given Peter --family Muster --birthdate 1970-01-01` | Adds a test citizen to the simulated ID Austria and prints the username, password, bPK, and eHVD OID. [Identity and misdelivery](IDENTITY.md#add-a-test-citizen) lists the options. |
 | `pnpm validate` | Runs the HL7 validator on every resource named in an `answer_filed` entry and counts the errors. `--since <time>` takes only the entries from that time on. `pnpm validate <file or folder>` checks hand-made resources instead. Needs Java. [FHIR](FHIR.md#validation) has the details. |
 | `pnpm audit:check` | Lists the six audit event types per request, each with who, what, and when. `--request <id>` checks one request. |
@@ -219,7 +219,7 @@ sha256sum tools/validator_cli.jar
 java -jar tools/validator_cli.jar some-resource.json -version 4.0
 ```
 
-A jar with another hash, such as one from `releases/latest`, makes `pnpm validate` stop; delete it and run again. To update the validator, change the version, URL, and hash in `validator.ts` and here. It checks LOINC codes against tx.fhir.org, so it needs internet access. `pnpm validate` runs it on every filed resource, and `pnpm validate <file>` on a hand-made one. The first run takes a few minutes, because the validator downloads the FHIR packages to `~/.fhir`.
+A jar with another hash, such as one from `releases/latest`, makes `pnpm validate` stop; delete it and run again. To update the validator, change the version, URL, and hash in `validator.ts` and here, and check the vital sign list in `src/server/documents/vital-signs.ts` against the new version ([FHIR](FHIR.md#validation)). It checks LOINC codes against tx.fhir.org, so it needs internet access. `pnpm validate` runs it on every filed resource, and `pnpm validate <file>` on a hand-made one. The first run takes a few minutes, because the validator downloads the FHIR packages to `~/.fhir`.
 
 ## Clean slate
 

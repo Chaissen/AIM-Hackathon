@@ -17,6 +17,8 @@ This page lists the FHIR R4 resources the request service files, how they refere
 
 We file all resources of one answer in one [transaction Bundle](https://hl7.org/fhir/R4/http.html#transaction), so an answer is filed completely or not at all.
 
+`src/server/fhir/mappers.ts` builds the Observations, the DiagnosticReport, and the DocumentReference from the parsed document, each with a `urn:uuid:` fullUrl. The filing (T13) passes in the Patient, Practitioner, and Organization references and wraps the entries into the transaction Bundle.
+
 ## How the resources reference each other
 
 ```
@@ -63,15 +65,15 @@ The report and the people who handle it are different. Dr. Leitner wrote the reh
 | Table column `Test` | `Observation.code.text` |
 | Table column `LOINC code` | `Observation.code.coding`, system `http://loinc.org`, without `display` |
 | Table column `Result` | `Observation.valueQuantity.value` |
-| Table column `Unit` | `Observation.valueQuantity` `unit`, `system` `http://unitsofmeasure.org`, and `code` in UCUM |
+| Table column `Unit` | `Observation.valueQuantity` `unit`, `system` `http://unitsofmeasure.org`, and `code` in UCUM. A unit the parser cannot code keeps only `unit`. |
 | Table column `Reference range` | `Observation.referenceRange` `low`, `high`, and `text` |
 | Computed from value and range | `Observation.interpretation`: `N`, `H`, or `L` from `http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation` |
 | Free text such as `All values are within the reference range.` | `DiagnosticReport.conclusion` |
 | `Validated by: Dr. Eva Brandl, lab physician` | `DiagnosticReport.resultsInterpreter` and `Observation.performer`, both the Practitioner |
 | Heading `# Labor Kanalstraße: lab report` | `DiagnosticReport.performer`, the Organization |
-| The whole file | `DiagnosticReport.presentedForm`, `contentType` `text/markdown`, data in base64 |
+| The whole file | `DiagnosticReport.presentedForm`, `contentType` `text/markdown; charset=utf-8`, data in base64 |
 
-The DiagnosticReport has `status` `final`, `category` `LAB` from `http://terminology.hl7.org/CodeSystem/v2-0074`, and `code` LOINC `11502-2` (Laboratory report) with the document title in `code.text`. Each Observation has `status` `final` and `category` `laboratory` from `http://terminology.hl7.org/CodeSystem/observation-category`.
+The DiagnosticReport has `status` `final`, `category` `LAB` from `http://terminology.hl7.org/CodeSystem/v2-0074`, and `code` LOINC `11502-2` (Laboratory report) with the document title in `code.text`. Each Observation has `status` `final` and `category` `laboratory` from `http://terminology.hl7.org/CodeSystem/observation-category`. A vital sign in the table, such as sO2 on a blood gas report, also gets `category` `vital-signs` and, if the document uses a related code, the profile's own LOINC code as a second coding (`src/server/documents/vital-signs.ts`).
 
 ### The scenario values
 
@@ -82,7 +84,9 @@ The DiagnosticReport has `status` `final`, `category` `LAB` from `http://termino
 | Platelets | 777-3 | Platelets [#/volume] in Blood by Automated count | 245 | `10*9/L` | 150 to 400 |
 | Fibrinogen | 3255-7 | Fibrinogen [Mass/volume] in Platelet poor plasma by Coagulation assay | 3.1 | `g/L` | 2.0 to 4.0 |
 
-The document writes the platelet unit as `10^9/L`, which is not valid UCUM. The parser replaces `^` with `*`, so the mapper gets `10*9/L`. INR has no unit, so its `valueQuantity` and its range carry only values.
+The document writes the platelet unit as `10^9/L`, which is not valid UCUM. The parser codes it as `10*9/L` (`ucum.ts`). INR has no unit, so its `valueQuantity` and its range carry only values.
+
+JSON numbers have no trailing zeros, so INR `1.0` is filed as `1` and the fibrinogen bounds as `2` and `4`. The attached document and `referenceRange.text` keep the values as written.
 
 For Max Beispiel's result, INR 2.6 and aPTT 44 are above the range and get `H`. That result is never filed for Maria, because the patient check stops it first.
 
@@ -120,7 +124,7 @@ The `urn:uuid:` references point at other entries of the transaction Bundle, and
 | `Reason: rehabilitation after a total hip replacement...` | `DocumentReference.description` |
 | `Written by: Dr. Johanna Leitner, medical director, Reha Waldblick` | `DocumentReference.author`, the Practitioner and the Organization. Provenance agent `author`. |
 | `Sent by: Stefan Kern, discharge management` | Provenance agent `informant` |
-| The whole file | `DocumentReference.content.attachment`, `contentType` `text/markdown`, data in base64, `title` from the heading |
+| The whole file | `DocumentReference.content.attachment`, `contentType` `text/markdown; charset=utf-8`, data in base64, `title` from the heading |
 
 The DocumentReference has `status` `current`, `docStatus` `final`, and `date` set to the filing time.
 
@@ -156,7 +160,7 @@ Every POST in the Bundle is a conditional create (`ifNoneExist`), so the same an
 When `fileAnswer()` throws, the answer may or may not be on the server. HAPI may have rejected the transaction (a `FhirError` with its status, nothing filed), or it may have committed while the response was lost (the 15-second timeout, the network) or the audit insert failed afterwards. Either way nothing is audited. The retry files nothing new, gets back the ids of what the first attempt filed, and writes `answer_filed`, under these rules:
 
 - **Retry the stored `Filing`.** The caller keeps the `Filing` that `buildFilingBundle()` returned, which is plain JSON and can be stored in Postgres, and passes exactly it to `fileAnswer()` again. A Bundle built anew is only safe from the same stored inputs: eHVD OIDs, the `practitionerId` from `bindings`, the parsed rows, and `acceptedByRequester`. Never retry with a fresh eHVD lookup or a fresh parse. If attempt 1 had no OID for the organisation and the retry has one, the retry creates a second Organization while the DiagnosticReport and the Provenance match the old ones. If a new parse, such as the AI fallback, reads one row more, `result-5` becomes an Observation nothing references.
-- **One answer at a time (T04, T09).** While a kept answer's filing outcome is unknown, the request accepts no new upload. Another upload has another hash and is another answer, so it would be filed next to the first: two DiagnosticReports and two Provenances for one request. Only after the kept answer is filed, or HAPI rejected it with a `FhirError`, may the request take a new upload.
+- **One answer at a time (T09).** While a kept answer's filing outcome is unknown, the request accepts no new upload. Another upload has another hash and is another answer, so it would be filed next to the first: two DiagnosticReports and two Provenances for one request. Only after the kept answer is filed, or HAPI rejected it with a `FhirError`, may the request take a new upload.
 - **Reset both stores together.** The answer key and the Task id `ordy-request-<id>` use the Postgres request id. If Postgres is emptied without HAPI, for example by dropping its volume, request 1 with the same scenario file gets the same key and silently matches the old run's resources, including the old Provenance with the old ID token, and the old Task. Empty both with `pnpm reset`.
 
 ## Provenance
@@ -221,7 +225,7 @@ The ID token is the proof of the identity check. Anyone can verify its signature
 | `restriction.period.end` | The link expiry |
 | `output` | The DiagnosticReport or the DocumentReference, once filed, with `type.text` "Lab result" or "Rehab discharge report" |
 
-The Task id is `ordy-request-<request id>`, and every write is a `PUT`, so the same Task follows the request from sent to filed. The filing Bundle PUTs it with status `completed` and the output. Its status comes from `taskStatus()` in `src/server/requests/lifecycle.ts`, the table in [Architecture](ARCHITECTURE.md#request-lifecycle). For the other state changes, `syncTask()` in `src/server/fhir/file-answer.ts` PUTs it; until the outside person has a Practitioner, `owner` is a reference with only `display`. Wiring `syncTask()` into the state changes belongs to the request core (T04).
+The Task id is `ordy-request-<request id>`, and every write is a `PUT`, so the same Task follows the request from sent to filed. The filing Bundle PUTs it with status `completed` and the output. Its status comes from `taskStatus()` in `src/server/requests/lifecycle.ts`, the table in [Architecture](ARCHITECTURE.md#request-lifecycle). For the other state changes, `syncTask()` in `src/server/fhir/file-answer.ts` PUTs it; until the outside person has a Practitioner, `owner` is a reference with only `display`. Wiring `syncTask()` into the request service's state changes is left for T09 (#13).
 
 The Task stays on the clinic's FHIR server. It is the only place outside the request service database where the request appears with its document type.
 
@@ -246,16 +250,20 @@ The request service puts `track/scenario/patient.json` on the server with `PUT P
 3. It runs the validator on all files at once, as the scenario README says: `java -jar validator_cli.jar <files> -version 4.0`, with `-locale en-US` so the messages are in English.
 4. It counts the issues with severity `error` or `fatal`. The target is 0. Warnings do not count. Every file must have a result. It prints each error, writes the raw validator result to `out/metrics/validator-output.json` and the counts to `out/metrics/validate.json`, and exits with 1 on any error or missing result, or with a short message when the validator cannot run (no Java, a jar with another hash).
 
-`pnpm validate path/to/file.json path/to/folder` validates hand-made resources instead, without Postgres or HAPI. `pnpm scenario` runs the same check on the resources filed during its run.
+`pnpm validate path/to/file.json path/to/folder` validates hand-made resources instead, without Postgres or HAPI. `pnpm scenario` runs the same check on the resources filed during its run. After a change to the parser or the mappers, validate their output this way: write the resources for the three scenario documents (fixtures in `src/server/documents/scenario-fixtures.ts`), and the Bundle `buildFilingBundle()` makes of them, to JSON files with a short `pnpm exec tsx` script. The target for the mapper's resources is 0 errors and only the `dom-6` warning.
 
 The validator needs Java 17 or newer. `pnpm validate` downloads the pinned version 7.0.3 to `tools/validator_cli.jar` if it is missing and checks its SHA-256 before every run ([Development](DEVELOPMENT.md#hl7-validator)). The first run downloads the FHIR packages to `~/.fhir` and takes a few minutes; later runs take under a minute. The validator checks LOINC codes against tx.fhir.org, so it needs internet access.
 
 Traps we know about:
 
 - `10^9/L` is not valid UCUM. Use `10*9/L`.
+- The validator rejects a unit that is not UCUM, such as `µmol/L` or `IU/L`, and some lab spellings mean something else in UCUM: `G/L` is gauss per litre, not giga per litre, and `mU/L`, `U/mL`, or `kU/L` are enzyme units, while lab reports often mean international or arbitrary units (TSH, tumour markers, IgE). The parser codes only the units on its list in `src/server/documents/ucum.ts`, after fixing the usual spellings. Any other unit stays text in `unit`, without `system` and `code`.
 - A `dateTime` with a time needs a time zone. `Europe/Vienna` is `+02:00` until 25 October 2026 and `+01:00` after that. The sample times are `+02:00`, and the filing times are `+01:00`.
 - An `instant`, such as `issued` and `recorded`, needs seconds and a time zone.
 - A Quantity with a `code` needs a `system` (invariant `qty-3`).
+- R4 makes an Observation with a vital sign code, such as sO2 `2708-6`, temperature `8310-5`, or weight `29463-7`, conform to a vital signs profile, and the validator also counts related codes such as `2713-6`. The profile wants `category` `vital-signs`, its own code, and a UCUM unit it allows. `src/server/documents/vital-signs.ts` copies the validator's list of codes (7.0.3); check it when the validator is updated. The parser refuses a vital sign with any other unit, a blood pressure row (blood pressure needs systolic and diastolic as components of one Observation), the vital signs panel, and mixed venous, central venous, or capillary sO2, because the oxygen profile's code `2708-6` means arterial blood. sO2 in blood without a site, such as calculated `2713-6`, stays under the profile.
+- FHIR JSON allows no empty strings (`ele-1`). The mappers leave an element out when it is empty or only spaces, such as an empty cell, and leave out `referenceRange` when a row has neither bounds nor range text.
+- The validator rejects a LOINC code it does not know. The parser checks the LOINC check digit, which catches most typos.
 - The validator reports a `display` that differs from LOINC's. We leave `display` out and put the document's label into `code.text`, because jury documents may carry codes we have not looked up.
 - A resource without narrative gets a warning (`dom-6`), not an error. Only the Provenance gets a narrative.
 

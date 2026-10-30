@@ -8,7 +8,7 @@ import { asc } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import { auditLog } from "@/server/db/schema";
-import { AUDIT_EVENTS, auditCoverage, bestCoverage, coverageLines, requestCoverage } from "@/server/metrics/audit";
+import { TRACK_EVENTS, auditCoverage, bestCoverage, coverageLines, requestCoverage } from "@/server/metrics/audit";
 import { METRICS_DIR } from "@/server/metrics/report";
 
 const { values } = parseArgs({ options: { request: { type: "string" } } });
@@ -35,5 +35,5 @@ for (const c of coverage) console.log(["", ...coverageLines(c)].join("\n"));
 const best = bestCoverage(coverage)!;
 await mkdir(METRICS_DIR, { recursive: true });
 await writeFile(path.join(METRICS_DIR, "audit.json"), JSON.stringify({ at: new Date(), best: best.requestId, coverage }, null, 2));
-console.log(`\nAudit coverage: ${best.covered} of ${AUDIT_EVENTS.length} on request ${best.requestId} (target 6 of 6).`);
-process.exit(best.covered === AUDIT_EVENTS.length ? 0 : 1);
+console.log(`\nAudit coverage: ${best.covered} of ${TRACK_EVENTS.length} on request ${best.requestId} (target 6 of 6).`);
+process.exit(best.covered === TRACK_EVENTS.length ? 0 : 1);

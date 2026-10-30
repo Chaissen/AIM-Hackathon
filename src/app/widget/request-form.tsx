@@ -1,5 +1,6 @@
 "use client";
 
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Mail, MessageSquare } from "lucide-react";
 import { useState } from "react";
 
@@ -11,6 +12,8 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { DOCUMENT_TYPES, documentTypeKeys, type DocumentType } from "@/lib/document-types";
 import { requestInput } from "@/lib/request-input";
 import { cn } from "@/lib/utils";
+import { useTRPC } from "@/trpc/react";
+import { RequestCard, useRequests } from "./request-card";
 
 export type PatientOption = { id: string; name: string; birthDate: string | null };
 type Channel = "email" | "sms";
@@ -23,6 +26,11 @@ export function RequestForm({ patients }: { patients: PatientOption[] | null }) 
   const [channel, setChannel] = useState<Channel>("email");
   const [form, setForm] = useState({ patient: patients?.[0]?.id ?? "", given: "", family: "", org: "", contact: "" });
   const [touched, setTouched] = useState(false);
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const create = useMutation(
+    trpc.request.create.mutationOptions({ onSettled: () => queryClient.invalidateQueries(trpc.request.list.pathFilter()) }),
+  );
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm({ ...form, [k]: e.target.value });
@@ -41,62 +49,79 @@ export function RequestForm({ patients }: { patients: PatientOption[] | null }) 
   const contactError = err("email") ?? err("phone");
 
   return (
-    <form
-      className="grid gap-5"
-      noValidate
-      onSubmit={(e) => {
-        e.preventDefault();
-        setTouched(true);
-      }}
-    >
-      <fieldset className="grid gap-2">
-        <legend className="mb-2 text-sm font-medium">What do you need?</legend>
-        <RadioGroup
-          value={docType}
-          onValueChange={(v) => {
-            setDocType(v as DocumentType);
-            setChannel(DOCUMENT_TYPES[v as DocumentType].channel);
-          }}
-          className="grid gap-2"
-        >
-          {documentTypeKeys.map((k) => (
-            <Label
-              key={k}
-              htmlFor={`doc-${k}`}
-              className={cn("flex cursor-pointer items-center gap-3 rounded-md border p-3 font-normal", docType === k && "border-primary bg-primary/5")}
-            >
-              <RadioGroupItem id={`doc-${k}`} value={k} />
-              {DOCUMENT_TYPES[k].label}
-            </Label>
-          ))}
-        </RadioGroup>
-      </fieldset>
+    <>
+      <form
+        className="grid gap-5"
+        noValidate
+        onSubmit={(e) => {
+          e.preventDefault();
+          setTouched(true);
+          if (parsed.success) create.mutate(parsed.data);
+        }}
+      >
+        <fieldset className="grid gap-2">
+          <legend className="mb-2 text-sm font-medium">What do you need?</legend>
+          <RadioGroup
+            value={docType}
+            onValueChange={(v) => {
+              setDocType(v as DocumentType);
+              setChannel(DOCUMENT_TYPES[v as DocumentType].channel);
+            }}
+            className="grid gap-2"
+          >
+            {documentTypeKeys.map((k) => (
+              <Label
+                key={k}
+                htmlFor={`doc-${k}`}
+                className={cn("flex cursor-pointer items-center gap-3 rounded-md border p-3 font-normal", docType === k && "border-primary bg-primary/5")}
+              >
+                <RadioGroupItem id={`doc-${k}`} value={k} />
+                {DOCUMENT_TYPES[k].label}
+              </Label>
+            ))}
+          </RadioGroup>
+        </fieldset>
 
-      <div className="grid gap-2">
-        <Label htmlFor="patient">Patient</Label>
-        <PatientSelect patients={patients} value={form.patient} onChange={set("patient")} />
-      </div>
-
-      <fieldset className="grid gap-3">
-        <legend className="mb-1 text-sm font-medium">Who should send it?</legend>
-        <p className="-mt-1 text-xs text-muted-foreground">Only this person can open the request. A colleague cannot answer for them.</p>
-        <div className="grid grid-cols-2 gap-3">
-          <Field id="given" label="First name" value={form.given} onChange={set("given")} error={err("given")} />
-          <Field id="family" label="Last name" value={form.family} onChange={set("family")} error={err("family")} />
+        <div className="grid gap-2">
+          <Label htmlFor="patient">Patient</Label>
+          <PatientSelect patients={patients} value={form.patient} onChange={set("patient")} />
         </div>
-        <Field id="org" label="Organisation" value={form.org} onChange={set("org")} error={err("org")} />
-        <ContactField channel={channel} onChannelChange={setChannel} value={form.contact} onChange={set("contact")} error={contactError} />
-      </fieldset>
 
-      <p className="text-xs text-muted-foreground">
-        The {channel === "email" ? "email" : "SMS"} names you and the clinic. It never names the patient, the birth date, or the document.
-      </p>
+        <fieldset className="grid gap-3">
+          <legend className="mb-1 text-sm font-medium">Who should send it?</legend>
+          <p className="-mt-1 text-xs text-muted-foreground">Only this person can open the request. A colleague cannot answer for them.</p>
+          <div className="grid grid-cols-2 gap-3">
+            <Field id="given" label="First name" value={form.given} onChange={set("given")} error={err("given")} />
+            <Field id="family" label="Last name" value={form.family} onChange={set("family")} error={err("family")} />
+          </div>
+          <Field id="org" label="Organisation" value={form.org} onChange={set("org")} error={err("org")} />
+          <ContactField channel={channel} onChannelChange={setChannel} value={form.contact} onChange={set("contact")} error={contactError} />
+        </fieldset>
 
-      <Button type="submit">Send request</Button>
-      {/* TODO(T04, T05): call the request procedure here. */}
-      {touched && parsed.success && <p className="text-sm text-muted-foreground">Sending from the widget is not connected yet.</p>}
-    </form>
+        <p className="text-xs text-muted-foreground">
+          The {channel === "email" ? "email" : "SMS"} names you and the clinic. It never names the patient, the birth date, or the document.
+        </p>
+
+        <Button type="submit" disabled={create.isPending}>
+          {create.isPending ? "Sending …" : "Send request"}
+        </Button>
+        {create.error && (
+          <Alert variant="destructive">
+            <AlertDescription>{create.error.message}</AlertDescription>
+          </Alert>
+        )}
+      </form>
+      {create.data && <CreatedRequest id={create.data.id} />}
+    </>
   );
+}
+
+function CreatedRequest({ id }: { id: number }) {
+  const { data, error } = useRequests();
+  const request = data?.find((r) => r.id === id);
+  if (request) return <RequestCard request={request} />;
+  if (error) return <p role="alert">Request {id} was created, but it could not be loaded. Open Requests to see it.</p>;
+  return <p className="text-sm text-muted-foreground">Loading request {id} …</p>;
 }
 
 function PatientSelect({
