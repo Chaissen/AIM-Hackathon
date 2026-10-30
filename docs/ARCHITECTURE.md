@@ -54,7 +54,7 @@ The request service stores each request with one state. The FHIR Task for the re
 |---|---|---|
 | `awaiting_confirmation` | The address check failed and Dr. Hofer has not confirmed yet | `draft` |
 | `sent` | The email or SMS went out | `requested` |
-| `identity_held` | The name matched only partly, and Dr. Hofer decides | `on-hold` |
+| `identity_held` | The identity check held: the name matched only partly, the requested name had no words, or the eHVD could not be reached. Dr. Hofer decides. | `on-hold` |
 | `verified` | The identity check passed, and the outside person can answer | `in-progress` |
 | `answer_held` | The answer arrived, but the eHVD could not confirm the role, and Dr. Hofer decides | `on-hold` |
 | `filed` | The answer is on the FHIR server | `completed` |
@@ -68,7 +68,7 @@ The request service stores each request with one state. The FHIR Task for the re
 | Dr. Hofer sends the request form and the address check fails | none | `awaiting_confirmation` |
 | Dr. Hofer clicks **Send anyway** | `awaiting_confirmation` | `sent` |
 | Identity check passes | `sent` | `verified` |
-| Identity check matches the name partly | `sent` | `identity_held` |
+| Identity check holds: partial name, requested name without words, or eHVD unreachable | `sent` | `identity_held` |
 | Identity check fails for the third time | `sent` | `locked` |
 | Dr. Hofer clicks **Accept** | `identity_held` | `verified` |
 | Answer passes the patient check and the role is confirmed | `verified` | `filed` |
@@ -79,13 +79,13 @@ The request service stores each request with one state. The FHIR Task for the re
 | Dr. Hofer clicks **Cancel** | any open state | `cancelled` |
 | 7 days pass | any open state | `expired` |
 
-A failed identity check does not change the state, so the real person can still answer a forwarded link. The failure goes to the audit log and to Dr. Hofer.
+A failed identity check does not change the state, so the real person can still answer a forwarded link. The failure goes to the audit log and to Dr. Hofer. If Keycloak cannot be reached, the check holds without a state change and does not count toward the lock. A login in any state other than `sent` changes no state. A hold stores the held person's bPK in `person_number`, and **Accept** keeps it, so only the accepted person can answer. [Identity checks](IDENTITY.md#identity-checks) has the details.
 
 ## Link rules
 
 - The link token is 32 random bytes, encoded URL-safe. The database stores only its SHA-256 hash.
 - The link is valid for 7 days. It accepts one filed answer.
-- Three failed identity checks lock the link. Dr. Hofer can send a new request.
+- Three failed identity checks lock a link that is still `sent`. Dr. Hofer can send a new request. In the other states the failures are counted and logged, but only `sent` has a transition to `locked`.
 - Until the identity check passes, the page shows only the requesting doctor and clinic.
 
 ## Widget
@@ -124,13 +124,14 @@ The request service posts notices in Dr. Hofer's room as the bot user, with `not
 | When | Notice |
 |---|---|
 | The request goes out | "Request 1 sent to Dr. Eva Brandl (Labor Kanalstraße) by email." |
-| An identity check fails (M1, M2) | "Request 1 was opened by someone who is not Dr. Eva Brandl (ID Austria name: Anna Huber). Nothing was shown or filed. Check the address." |
+| The name check fails (M1, M2) | "Request 1 was opened by someone who is not Dr. Eva Brandl (ID Austria name: Anna Huber). Nothing was shown or filed. Check the address." |
+| Another identity check fails, the name matched | "Request 1 was opened by Eva Brandl, but the identity check failed. The ID Austria login has only basic function, and a request needs full function. Nothing was shown or filed." |
 | The patient check fails (M3) | "The answer to request 1 is about a different patient. Name and birth date do not match Maria Beispiel. Nothing was filed." |
 | The name matches only partly | "Request 1 is on hold. The ID Austria name Petra Brandl matches Dr. Eva Brandl only in part. Accept or reject the person in the widget." |
 | The release check does not pass | "The answer to request 1 is on hold. The eHVD does not list Dr. Eva Brandl as a member of Labor Kanalstraße. Accept or reject the answer in the widget." |
 | The answer is filed | "Lab result for Maria Beispiel from Dr. Eva Brandl is filed. Identity checked with ID Austria. 4 values, all within the reference range." |
 
-The caller writes the reason sentence of a held notice. A filed lab result with values outside the reference range says how many, for example "4 values, 1 outside the reference range." A rehab discharge report has no values, so its filed notice ends after "Identity checked with ID Austria."
+The caller writes the reason sentence of a held notice and of a failed identity check whose name matched. A filed lab result with values outside the reference range says how many, for example "4 values, 1 outside the reference range." A rehab discharge report has no values, so its filed notice ends after "Identity checked with ID Austria."
 
 ## Outgoing messages
 
@@ -195,9 +196,11 @@ The request service keeps three Postgres tables, defined with Drizzle in `src/se
 
 | Table | Columns |
 |---|---|
-| `requests` | `id`, `doc_type`, `patient_id`, `given`, `family`, `org`, `channel`, `address`, `state`, `link_hash`, `failed_checks`, `created_at`, `expires_at`, `matrix_room`, `matrix_event` |
+| `requests` | `id`, `doc_type`, `patient_id`, `given`, `family`, `org`, `channel`, `address`, `state`, `link_hash`, `failed_checks`, `person_number`, `created_at`, `expires_at`, `matrix_room`, `matrix_event` |
 | `bindings` | `given`, `family`, `org`, `person_number`, `practitioner_id`, `first_verified_at` |
 | `audit_log` | `id`, `at`, `event`, `request_id`, `actor_kind`, `actor`, `outcome`, `detail` |
+
+`person_number` in `requests` is the bPK of the person who passed the identity check, or who was held; after **Accept** it names the accepted person. Only that person may answer.
 
 `bindings` remembers which ID Austria person number answered as a given person at a given organisation. The audit log never holds document text.
 
@@ -271,7 +274,9 @@ src/
     db/                       Drizzle schema and client
     fhir/                     FHIR client, mappers planned (T12 to T14)
     documents/                parser and patient check (T10, T11), typed records in types.ts
-    identity/names.ts         name words and subset test from Identity, shared by the patient check and T08
+    identity/names.ts         name words, subset and shared-word tests from Identity, shared by the patient check and T08
+    identity/checks.ts        identity checks at login: level, name, person number, eHVD claim (T08)
+    identity/login.ts         what a check result does: state, audit entries, page, notice, and runIdentityChecks for the callback (T08)
     ehvd/oid.ts               OID check shared by the login and pnpm citizen
     ehvd/                     eHVD SOAP client, planned (T15)
     matrix/client.ts          Matrix client-server API
