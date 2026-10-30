@@ -95,6 +95,7 @@ Test citizens for the ID Austria login: `eva.brandl` / `demo-eva`, `stefan.kern`
 | `pnpm validate` | Runs the HL7 validator on every resource named in an `answer_filed` entry and counts the errors. `--since <time>` takes only the entries from that time on. `pnpm validate <file or folder>` checks hand-made resources instead. Needs Java. [FHIR](FHIR.md#validation) has the details. |
 | `pnpm audit:check` | Lists the six audit event types per request, each with who, what, and when. `--request <id>` checks one request. |
 | `pnpm scenario` | Runs request 1, M1 to M3, and request 2 against the running stack and writes the four metric results to `out/metrics/metrics.md`. `--no-validate` skips the validator. [Whitepaper](WHITEPAPER.md#how-we-measure-the-metrics) has the details. |
+| `pnpm clinical-review:export` | Writes the transaction Bundle ordy would file for each scenario and extra document to `docs/clinical-review/19-fhir/`, without any server. Run it after a change to the parser, the mappers, or the filing, and compare. [Review 19](clinical-review/REVIEW_19_FHIR_DATA.md) has the details. |
 | `./scripts/setup.sh` | Full one-time setup, see above |
 
 Before every push: `pnpm typecheck && pnpm lint && pnpm test && pnpm build`.
