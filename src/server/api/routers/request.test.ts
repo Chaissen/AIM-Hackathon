@@ -70,6 +70,23 @@ async function seed(overrides: Partial<NewRequest> = {}) {
 
 const auditOf = (requestId: number) => db.select().from(auditLog).where(eq(auditLog.requestId, requestId)).orderBy(auditLog.id);
 
+const decisionsOf = async (requestId: number) =>
+  (await auditOf(requestId)).filter((a) => a.event === "request_decided").map((a) => [a.actorKind, a.actor, a.outcome, a.detail]);
+
+async function seedHeld(state: "identity_held" | "answer_held") {
+  const { request } = await seed();
+  const to = state === "identity_held" ? "identity_held" : "verified";
+  assert.equal(await applyLoginTransition(db, request.id, { from: "sent", to, personNumber: "GH:petra" }), true);
+  if (state === "answer_held") assert.equal((await applyEvent(db, request.id, "answer_unconfirmed"))?.state, "answer_held");
+  return request;
+}
+
+async function seedAddressMismatch() {
+  const result = await createRequest(db, newRequest, { passed: false, domain: "labor-kanaI.example", expectedDomain: "labor-kanal.example" });
+  created.push(result.request.id);
+  return result;
+}
+
 after(async () => {
   if (!noDb && created.length) {
     await db.delete(auditLog).where(inArray(auditLog.requestId, created));
@@ -151,22 +168,95 @@ test("get returns the request with its audit entries, and list includes it", { s
   await assert.rejects(clinic.request.get({ id: 2_147_483_647 }), (e) => e instanceof TRPCError && e.code === "NOT_FOUND");
 });
 
-test("a network member sees and cancels only their own requests", { skip: noDb }, async () => {
-  const { request } = await seed();
+test("a network member sees and changes only their own requests", { skip: noDb }, async () => {
+  const held = await seedHeld("identity_held");
+  const { request: unconfirmed } = await seedAddressMismatch();
   const colleague = createCaller(createContext({ kind: "clinic", mxid: mxid("colleague") }));
   const notFound = (e: unknown) => e instanceof TRPCError && e.code === "NOT_FOUND";
-  await assert.rejects(colleague.request.get({ id: request.id }), notFound);
-  await assert.rejects(colleague.request.cancel({ id: request.id }), notFound);
-  assert.equal((await colleague.request.list()).some((r) => r.id === request.id), false);
-  assert.equal((await clinic.request.get({ id: request.id })).state, "sent");
+  await assert.rejects(colleague.request.get({ id: held.id }), notFound);
+  await assert.rejects(colleague.request.accept({ id: held.id }), notFound);
+  await assert.rejects(colleague.request.reject({ id: held.id }), notFound);
+  await assert.rejects(colleague.request.cancel({ id: held.id }), notFound);
+  await assert.rejects(colleague.request.sendAnyway({ id: unconfirmed.id }), notFound);
+  const listed = (await colleague.request.list()).map((r) => r.id);
+  assert.equal(listed.includes(held.id) || listed.includes(unconfirmed.id), false);
+  assert.equal((await clinic.request.get({ id: held.id })).state, "identity_held");
+  assert.equal((await clinic.request.get({ id: unconfirmed.id })).state, "awaiting_confirmation");
+  assert.deepEqual(await decisionsOf(held.id), []);
 });
 
-test("cancel closes an open request and refuses a closed one", { skip: noDb }, async () => {
+test("cancel closes an open request, logs request_decided, and refuses a closed one", { skip: noDb }, async () => {
   const { request } = await seed();
   const cancelled = await clinic.request.cancel({ id: request.id });
   assert.equal(cancelled.state, "cancelled");
   assert.equal(cancelled.taskStatus, "cancelled");
   await assert.rejects(clinic.request.cancel({ id: request.id }), (e) => e instanceof TRPCError && e.code === "CONFLICT");
+  assert.deepEqual(await decisionsOf(request.id), [["network_member", hofer, "cancelled", { from: "sent", to: "cancelled" }]]);
+});
+
+test("Send anyway through the widget sends the request with a new link and logs request_sent", { skip: noDb }, async () => {
+  const { request, token } = await seedAddressMismatch();
+  const before = await getRequest(db, request.id);
+
+  const sent = await clinic.request.sendAnyway({ id: request.id });
+  assert.equal(sent.state, "sent");
+  assert.equal(sent.taskStatus, "requested");
+  assert.equal("linkHash" in sent, false);
+
+  const after = await getRequest(db, request.id);
+  assert.ok(before && after);
+  assert.notEqual(after.linkHash, before.linkHash);
+  assert.equal(await findRequestByToken(db, token), null, "the token from before is gone");
+  assert.deepEqual(
+    (await auditOf(request.id)).map((a) => [a.event, a.actor, a.outcome, a.detail]),
+    [
+      ["misdelivery_caught", hofer, "address_mismatch", { domain: "labor-kanaI.example", expectedDomain: "labor-kanal.example" }],
+      ["request_sent", hofer, "sent", { docType: "lab-result", channel: "email", address: "eva.brandl@labor-kanal.example" }],
+    ],
+  );
+  await assert.rejects(clinic.request.sendAnyway({ id: request.id }), (e) => e instanceof TRPCError && e.code === "CONFLICT");
+});
+
+test("Accept verifies a held identity and logs who accepted", { skip: noDb }, async () => {
+  const request = await seedHeld("identity_held");
+  const accepted = await clinic.request.accept({ id: request.id });
+  assert.equal(accepted.state, "verified");
+  assert.equal(accepted.taskStatus, "in-progress");
+  assert.deepEqual(await decisionsOf(request.id), [["network_member", hofer, "accepted", { from: "identity_held", to: "verified" }]]);
+  await assert.rejects(clinic.request.accept({ id: request.id }), (e) => e instanceof TRPCError && e.code === "CONFLICT");
+});
+
+test("Reject cancels a held identity and a held answer and logs who rejected", { skip: noDb }, async () => {
+  for (const state of ["identity_held", "answer_held"] as const) {
+    const request = await seedHeld(state);
+    const rejected = await clinic.request.reject({ id: request.id });
+    assert.equal(rejected.state, "cancelled", state);
+    assert.deepEqual(await decisionsOf(request.id), [["network_member", hofer, "rejected", { from: state, to: "cancelled" }]], state);
+  }
+});
+
+test("Accept refuses a held answer until filing it is built and leaves the state", { skip: noDb }, async () => {
+  const request = await seedHeld("answer_held");
+  await assert.rejects(
+    clinic.request.accept({ id: request.id }),
+    (e) => e instanceof TRPCError && e.code === "PRECONDITION_FAILED" && e.message === "Filing a held answer is not built yet.",
+  );
+  assert.equal((await getRequest(db, request.id))?.state, "answer_held");
+  assert.deepEqual(await decisionsOf(request.id), []);
+});
+
+test("list returns the audit entries of each request", { skip: noDb }, async () => {
+  const { request: open } = await seed();
+  const { request: cancelled } = await seed();
+  await clinic.request.cancel({ id: cancelled.id });
+
+  const listed = await clinic.request.list();
+  const auditIn = (id: number) => listed.find((r) => r.id === id)?.audit.map((a) => [a.requestId, a.event, a.outcome]);
+  assert.deepEqual(auditIn(open.id), [[open.id, "request_sent", "sent"]]);
+  assert.deepEqual(auditIn(cancelled.id), [
+    [cancelled.id, "request_sent", "sent"],
+    [cancelled.id, "request_decided", "cancelled"],
+  ]);
 });
 
 test("the link shows only the requester and the clinic and writes link_opened", { skip: noDb }, async () => {
@@ -219,12 +309,7 @@ test("an expired link is refused and the request becomes expired", { skip: noDb 
 });
 
 test("Send anyway sends the request with a new 7-day link and logs request_sent", { skip: noDb }, async () => {
-  const { request, token } = await createRequest(db, newRequest, {
-    passed: false,
-    domain: "labor-kanaI.example",
-    expectedDomain: "labor-kanal.example",
-  });
-  created.push(request.id);
+  const { request, token } = await seedAddressMismatch();
   assert.equal(request.state, "awaiting_confirmation");
   assert.deepEqual(
     (await auditOf(request.id)).map((a) => [a.event, a.outcome, a.detail]),

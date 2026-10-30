@@ -79,7 +79,9 @@ The request service stores each request with one state. The FHIR Task for the re
 | Dr. Hofer clicks **Cancel** | `cancel` | any open state | `cancelled` |
 | 7 days pass | `expire` | any open state | `expired` |
 
-The open states are `awaiting_confirmation`, `sent`, `identity_held`, `verified`, and `answer_held`. Any other pair of state and event is refused.
+The open states are `awaiting_confirmation`, `sent`, `identity_held`, `verified`, and `answer_held`. Any other pair of state and event is refused. `accepts(state, event)` reads the same table, and `REQUESTER_EVENTS` lists the four events Dr. Hofer triggers: `send_anyway`, `accept`, `reject`, and `cancel`. The widget imports both in the browser, so `lifecycle.ts` must not import server code at runtime.
+
+Until T09 keeps a held answer, `request.accept` refuses **Accept** on `answer_held` with "Filing a held answer is not built yet." and leaves the state. Moving to `filed` would claim a filing that never happened.
 
 A failed identity check does not change the state, so the real person can still answer a forwarded link. The failure goes to the audit log and to Dr. Hofer. If Keycloak cannot be reached, the check holds without a state change and does not count toward the lock. A login in any state other than `sent` changes no state. A hold stores the held person's bPK in `person_number`, and **Accept** keeps it, so only the accepted person can answer. [Identity checks](IDENTITY.md#identity-checks) has the details.
 
@@ -108,13 +110,13 @@ The link token and the 7 days start when the request goes out. **Send anyway** (
 
 Dr. Hofer sends requests and makes every decision about them in the ordy widget. `pnpm matrix:bootstrap` pins it in her room. There are no chat commands for requests.
 
-The widget uses `matrix-widget-api` to get a Matrix OpenID token from Element after the user approves identity sharing, and sends it as `Authorization: Bearer` with every clinic tRPC call. Patient and audit data come only from `clinic.patients`, `clinic.audit`, and the `request` procedures, all protected by `clinicProcedure`; neither page embeds that data in its initial HTML or React server payload. Tokens and the clinic query cache stay in memory and are discarded on expiry or unmount. The widget includes an **Audit log** tab. The request service checks the token with Synapse (`verifyOpenIdToken` in `src/server/matrix/client.ts`). It accepts only users on its own homeserver, `MATRIX_SERVER_NAME`, which is `klinikum.example` in the demo. The checked Matrix ID is the actor in the audit log.
+The widget uses `matrix-widget-api` to get a Matrix OpenID token from Element after the user approves identity sharing. It takes Element's origin from the `parentUrl` parameter that Element appends to the widget URL, because Element sends no referrer. The widget sends the token as `Authorization: Bearer` with every clinic tRPC call. Patient and audit data come only from `clinic.patients`, `clinic.audit`, and the `request` procedures, all protected by `clinicProcedure`; neither page embeds that data in its initial HTML or React server payload. Tokens and the clinic query cache stay in memory and are discarded on expiry or unmount. The widget includes an **Audit log** tab. The request service checks the token with Synapse (`verifyOpenIdToken` in `src/server/matrix/client.ts`). It accepts only users on its own homeserver, `MATRIX_SERVER_NAME`, which is `klinikum.example` in the demo. The checked Matrix ID is the actor in the audit log.
 
 | Part of the widget | Effect |
 |---|---|
 | Request form | Creates a request and sends the email or SMS |
 | **Send anyway** | Sends a request despite the address warning |
-| **Accept** | Accepts a held identity or a held answer |
+| **Accept** | Accepts a held identity or a held answer. A held answer is refused until T09 keeps it (see [Request lifecycle](#request-lifecycle)) |
 | **Reject** | Rejects a held identity or a held answer |
 | **Cancel** | Cancels an open request |
 | Request list | Shows each request with its state and its audit entries |
@@ -260,7 +262,7 @@ In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `
 
 `bindings` remembers which ID Austria person number answered as a given person at a given organisation. Its key is `given`, `family`, and `org`, so each person at an organisation has one person number. The audit log never holds document text.
 
-`src/server/requests/service.ts` is the only code that writes `requests`: `createRequest`, `sendAnyway`, `applyEvent`, `incrementFailedChecks`, `applyLoginTransition`, `expireDueRequests`, and `saveIdToken`, which the login callback calls for the bound person. The tRPC router `request` (`create`, `get`, `list`, `cancel`, all `clinicProcedure`) and the portal pages use it. A network member sees and changes only the requests they sent; for anyone else, `get` and `cancel` answer "not found", and `list` leaves the request out. `get` returns the request's audit entries, which name the outside person and their person number. The widget's **Audit log** tab (`clinic.audit`) still shows the whole log to every network member, for the demo.
+`src/server/requests/service.ts` is the only code that writes `requests`: `createRequest`, `sendAnyway`, `applyEvent`, `incrementFailedChecks`, `applyLoginTransition`, `expireDueRequests`, and `saveIdToken`, which the login callback calls for the bound person. The tRPC router `request` (`create`, `get`, `list`, `cancel`, `sendAnyway`, `accept`, `reject`, all `clinicProcedure`) and the portal pages use it. A network member sees and changes only the requests they sent; for anyone else, `get`, `cancel`, `sendAnyway`, `accept`, and `reject` answer "not found", and `list` leaves the request out. `get` and `list` return each request's audit entries, which name the outside person and their person number. `accept`, `reject`, and `cancel` write `request_decided` in the transaction that changes the state. `sendAnyway` writes `request_sent`. The widget's **Audit log** tab (`clinic.audit`) still shows the whole log to every network member, for the demo.
 
 ## Audit log
 
@@ -272,8 +274,11 @@ In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `
 | `answer_sent` | The verified person | `received` | SHA-256 and size of the upload |
 | `answer_filed` | The request service | `filed` | FHIR resource ids and the Provenance id |
 | `misdelivery_caught` | Whoever triggered it | `address_mismatch`, `wrong_person`, or `patient_mismatch` | The two domains, the failed checks, or the upload's SHA-256 and which part of the patient did not match |
+| `request_decided` | Dr. Hofer's Matrix ID | `accepted`, `rejected`, or `cancelled` | The state before and after the decision |
 
-Every entry has a UTC timestamp in `at`. The `outcome` column holds the short result: `pass`, `hold`, or `fail` for `identity_checked`, and the kind for `misdelivery_caught`. The What sits in `detail`, with these fields, which `pnpm audit:check` requires:
+The jury counts the first six, the track events from the track README ("Audit coverage"). `request_decided` is ordy's own: it records who accepted, rejected, or cancelled a request and when, as [Compliance and safety](COMPLIANCE_AND_SAFETY.md#identity-rules) requires. `pnpm audit:check` and `pnpm scenario` leave it out, so audit coverage stays 6 of 6. **Send anyway** writes no `request_decided`, because its `request_sent` already names Dr. Hofer.
+
+Every entry has a UTC timestamp in `at`. The `outcome` column holds the short result: `pass`, `hold`, or `fail` for `identity_checked`, the kind for `misdelivery_caught`, and the decision for `request_decided`. The What sits in `detail`, with these fields. `pnpm audit:check` requires them for the six track events:
 
 | Event | `detail` fields |
 |---|---|
@@ -283,6 +288,7 @@ Every entry has a UTC timestamp in `at`. The `outcome` column holds the short re
 | `answer_sent` | `sha256`, `size` |
 | `answer_filed` | `resources` (every filed resource as `Type/id`, which `pnpm validate` reads), `provenance` |
 | `misdelivery_caught` | `address_mismatch`: `domain`, `expectedDomain`. `wrong_person`: `checks`. `patient_mismatch`: `sha256`, `size`, `nameMatches`, `birthDateMatches`. |
+| `request_decided` | `from`, `to`: the request states before and after |
 
 The widget and `GET /audit` show the entries.
 
@@ -340,7 +346,7 @@ src/
   app/                        Next.js pages and route handlers
     api/trpc/[trpc]/route.ts  tRPC endpoint
     api/healthz/route.ts      health check for scripts and containers
-    widget/                   request form inside Element. Sending is planned, T05
+    widget/                   request form, request list, and decisions inside Element (T05)
     r/[token]/                outside portal: landing page and answer form. Answer planned, T09
     auth/                     ID Austria login and callback route handlers, expired-login page. The callback runs the identity checks (T08)
     sms/page.tsx              SMS screen. Reading the SMS log planned, T06
@@ -355,7 +361,7 @@ src/
     api/routers/              one router per area
     db/                       Drizzle schema and client
     requests/                 request lifecycle, link tokens, and the request service
-    audit/record.ts           recordAudit() for the six audit events
+    audit/record.ts           recordAudit() for the six track audit events and request_decided
     fhir/                     FHIR client, lab and rehab mappers (T12, T14)
     documents/                parser and patient check (T10, T11), typed records in types.ts, UCUM and vital sign lists, AI fallback (T22), the scenario documents as parsed records for tests
     identity/names.ts         name words, subset and shared-word tests from Identity, shared by the patient check and T08
