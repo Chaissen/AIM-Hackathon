@@ -207,7 +207,7 @@ The answer page posts `FormData` with the link token, the file, and the patient'
 
 `acceptAnswer` in `src/server/answers/held.ts` files a held answer when Dr. Hofer clicks **Accept** (`accept` on `answer_held`), with the policy `accepted-by-requester` and her Matrix ID as `acceptedBy` in `answer_filed`. The Organization and the responsible person carry the eHVD OIDs the release check found before it held, if any. **Reject** is the `reject` event (`rejectAnswer`). Both take the Matrix ID of the member who clicked, and do nothing unless it is the one who sent the request and the request is `answer_held`. An Accept whose filing outcome is unknown keeps the answer as in step 7: the request stays held, the next Accept files exactly that answer, and Reject waits until it is filed or refused. `applyEvent` deletes the held answer whenever a request leaves `answer_held`, and expiry deletes it too.
 
-The release check and the mappers are passed in (`src/server/answers/ports.ts`, `answerDeps` in `deps.ts`). The filing is `fileAnswer` from T13, through `fhirFiling` in `fhir-filing.ts`. It passes its own `audit`, because `fileAndRecord` writes `answer_filed` in the database transaction that sets the request to `filed`. `fhirFiling` throws `NotFiled` when the Bundle was never sent or HAPI refused it; any other error leaves the outcome open. Until the eHVD client (T15) and the mappers (T12, T14) are wired in, every answer is held, and **Accept** fails without filing anything.
+The release check and the mappers are passed in (`src/server/answers/ports.ts`, `answerDeps` in `deps.ts`). The filing is `fileAnswer` from T13, through `fhirFiling` in `fhir-filing.ts`. It passes its own `audit`, because `fileAndRecord` writes `answer_filed` in the database transaction that sets the request to `filed`. `fhirFiling` throws `NotFiled` when the Bundle was never sent or HAPI refused it; any other error leaves the outcome open. `mapClinical` there runs the lab or the rehab mapper (T12, T14). Until the eHVD client (T15) is wired in, every answer is held, and **Accept** files it.
 
 ## Document parsing
 
@@ -287,7 +287,7 @@ In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `
 
 `bindings` remembers which ID Austria person number answered as a given person at a given organisation. Its key is `given`, `family`, and `org`, so each person at an organisation has one person number. The first filed answer stores it, with the sender's Practitioner id when the eHVD does not list them. The audit log never holds document text.
 
-`src/server/requests/service.ts` is the only code that writes `requests`: `createRequest`, `sendAnyway`, `applyEvent`, `incrementFailedChecks`, `applyLoginTransition`, `expireDueRequests`, and `saveIdToken`, which the login callback calls for the bound person. The tRPC router `request` (`create`, `get`, `list`, `cancel`, all `clinicProcedure`) and the portal pages use it. A network member sees and changes only the requests they sent; for anyone else, `get` and `cancel` answer "not found", and `list` leaves the request out. `get` returns the request's audit entries, which name the outside person and their person number. The widget's **Audit log** tab (`clinic.audit`) still shows the whole log to every network member, for the demo.
+`src/server/requests/service.ts` is the only code that writes `requests`: `createRequest`, `sendAnyway`, `applyEvent`, `incrementFailedChecks`, `applyLoginTransition`, `expireDueRequests`, and `saveIdToken`, which the login callback calls for the bound person. After each state change commits, `mirrorTask` PUTs the request's FHIR Task with the status from the lifecycle table ([FHIR](FHIR.md#task)); the filing Bundle writes the `completed` Task itself. The tRPC router `request` (`create`, `get`, `list`, `cancel`, all `clinicProcedure`) and the portal pages use it. A network member sees and changes only the requests they sent; for anyone else, `get` and `cancel` answer "not found", and `list` leaves the request out. `get` returns the request's audit entries, which name the outside person and their person number. The widget's **Audit log** tab (`clinic.audit`) still shows the whole log to every network member, for the demo.
 
 ## Audit log
 
@@ -380,7 +380,7 @@ src/
     api/root.ts               app router and createCaller
     api/routers/              one router per area
     db/                       Drizzle schema and client
-    requests/                 request lifecycle, link tokens, the request service, and notifyRequest for its notices
+    requests/                 request lifecycle, link tokens, the request service, mirrorTask for its FHIR Task, and notifyRequest for its notices
     answers/                  the answer flow: submitAnswer, acceptAnswer, fhirFiling, and the ports for the release check and the mappers (T09)
     audit/record.ts           recordAudit() for the six audit events
     fhir/                     FHIR client, the filing (T13), lab and rehab mappers (T12, T14)

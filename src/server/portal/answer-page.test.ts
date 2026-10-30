@@ -7,6 +7,7 @@ import { inArray, sql } from "drizzle-orm";
 import { eidSession } from "@/server/auth/eid-session";
 import { db } from "@/server/db";
 import { auditLog, requests } from "@/server/db/schema";
+import { fhirFetch } from "@/server/fhir/client";
 import { applyEvent, applyLoginTransition, createRequest } from "@/server/requests/service";
 import { loadAnswerPage } from "./answer-page";
 
@@ -22,6 +23,8 @@ const EVA = { givenName: "Eva", familyName: "Brandl", personNumber: `GH:test-pag
 const created: number[] = [];
 
 after(async () => {
+  // The request service mirrored each request on its FHIR Task, if HAPI runs.
+  await Promise.all(created.map((id) => fhirFetch(`Task/ordy-request-${id}`, { method: "DELETE" }).catch(() => {})));
   if (!noDb && created.length) {
     await db.delete(auditLog).where(inArray(auditLog.requestId, created));
     await db.delete(requests).where(inArray(requests.id, created));

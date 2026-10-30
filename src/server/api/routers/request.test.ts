@@ -11,7 +11,7 @@ import { createContext } from "@/server/api/trpc";
 import { db } from "@/server/db";
 import { anonymousBrowser } from "@/server/audit/record";
 import { auditLog, requests } from "@/server/db/schema";
-import { capabilities } from "@/server/fhir/client";
+import { capabilities, fhirFetch } from "@/server/fhir/client";
 import { findAnswerContext, findPublicRequest } from "@/server/portal/data";
 import { TransitionError } from "@/server/requests/lifecycle";
 import { LINK_TTL_MS } from "@/server/requests/link-token";
@@ -71,6 +71,8 @@ async function seed(overrides: Partial<NewRequest> = {}) {
 const auditOf = (requestId: number) => db.select().from(auditLog).where(eq(auditLog.requestId, requestId)).orderBy(auditLog.id);
 
 after(async () => {
+  // The request service mirrored each request on its FHIR Task, if HAPI runs.
+  await Promise.all(created.map((id) => fhirFetch(`Task/ordy-request-${id}`, { method: "DELETE" }).catch(() => {})));
   if (!noDb && created.length) {
     await db.delete(auditLog).where(inArray(auditLog.requestId, created));
     await db.delete(requests).where(inArray(requests.id, created));

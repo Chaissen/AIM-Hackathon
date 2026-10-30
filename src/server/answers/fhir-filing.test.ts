@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { after, test } from "node:test";
 
 import { eq, inArray, like, sql } from "drizzle-orm";
-import type { DiagnosticReport, DocumentReference, Practitioner, Provenance, Task } from "fhir/r4";
+import type { DiagnosticReport, DocumentReference, Observation, Practitioner, Provenance, Task } from "fhir/r4";
 import { UnsecuredJWT } from "jose";
 
 import { eidSession } from "@/server/auth/eid-session";
@@ -13,14 +13,14 @@ import { auditLog, bindings, heldAnswers, requests } from "@/server/db/schema";
 import { parseDocument } from "@/server/documents/parse";
 import { capabilities, FhirError, fhirFetch } from "@/server/fhir/client";
 import type { AnswerFiled } from "@/server/fhir/file-answer";
-import { applyLoginTransition, createRequest, getRequest, saveIdToken, type NewRequest, type RequestRow } from "@/server/requests/service";
+import { applyEvent, applyLoginTransition, createRequest, getRequest, saveIdToken, type NewRequest, type RequestRow } from "@/server/requests/service";
 import type { AnswerDeps } from "./deps";
-import { fhirFiling } from "./fhir-filing";
-import { type AnswerToFile, type MapClinical, mapClinicalNotConnected, NotFiled, type ReleaseCheckInput, type ReleaseCheckResult } from "./ports";
+import { fhirFiling, mapClinical } from "./fhir-filing";
+import { type AnswerToFile, NotFiled, type ReleaseCheckInput, type ReleaseCheckResult } from "./ports";
 import { submitAnswer } from "./submit";
 
-// Requests 1 and 2 from the upload to the HAPI server from FHIR_BASE_URL, through the filing (T13). The eHVD and the
-// mappers (#30) are stand-ins until they land. The patient is the demo's Maria Beispiel; everything else is this run's. Deletes its rows and what it filed afterwards. Skipped when Postgres or
+// Requests 1 and 2 from the upload to the HAPI server from FHIR_BASE_URL, through the mappers (T12, T14) and the
+// filing (T13). The eHVD is a stand-in until the release check (#44) lands. The patient is the demo's Maria Beispiel; everything else is this run's. Deletes its rows and what it filed afterwards. Skipped when Postgres or
 // HAPI is not running.
 const unreachable = await Promise.all([db.execute(sql`select 1`), capabilities(AbortSignal.timeout(3000))]).then(
   () => false,
@@ -49,6 +49,7 @@ const filedResources: string[] = [];
 after(async () => {
   // Newest first, so nothing still references a resource when it is deleted. A party another answer uses stays.
   for (const reference of filedResources.reverse()) await fhirFetch(reference, { method: "DELETE" }).catch(() => {});
+  await Promise.all(created.map((id) => fhirFetch(`Task/ordy-request-${id}`, { method: "DELETE" }).catch(() => {})));
   if (!unreachable && created.length) {
     await db.delete(auditLog).where(inArray(auditLog.requestId, created));
     await db.delete(heldAnswers).where(inArray(heldAnswers.requestId, created));
@@ -97,23 +98,6 @@ const confirmed = async ({ sender, document }: ReleaseCheckInput): Promise<Relea
   senderIsResponsible: sender.gdaOid !== null,
 });
 
-/** Stand-in for the mappers (#30): the output alone, with the references the filing hands them. */
-const mapClinical: MapClinical = (document, { patient, practitioner }) => {
-  const fullUrl = `urn:uuid:${randomUUID()}`;
-  if (document.type === "lab-result") {
-    const resource: DiagnosticReport = { resourceType: "DiagnosticReport", status: "final", code: { text: document.kind }, subject: patient, ...(practitioner && { performer: [practitioner] }) };
-    return { output: { fullUrl, resource }, others: [] };
-  }
-  const resource: DocumentReference = {
-    resourceType: "DocumentReference",
-    status: "current",
-    subject: patient,
-    ...(practitioner && { author: [practitioner] }),
-    content: [{ attachment: { contentType: "text/markdown", title: document.kind } }],
-  };
-  return { output: { fullUrl, resource }, others: [] };
-};
-
 function deps() {
   const file = fhirFiling({ mapClinical });
   const answers: AnswerToFile[] = [];
@@ -155,10 +139,15 @@ test("request 1: Dr. Brandl's lab result is filed with her eHVD entry and her lo
 
   const report = await fhirFetch<DiagnosticReport>(detail.output);
   assert.equal(report.subject?.reference, "Patient/maria-beispiel", "the patient comes from the request");
-  assert.equal(report.performer?.[0]?.reference, detail.author);
+  assert.equal(report.performer?.[0]?.reference, detail.organization, "the laboratory performed the tests");
+  assert.equal(report.resultsInterpreter?.[0]?.reference, detail.author, "Dr. Brandl validated them");
+  assert.equal(report.result?.length, 4, "one Observation per result row");
+  const [first] = await Promise.all((report.result ?? []).slice(0, 1).map((ref) => fhirFetch<Observation>(ref.reference ?? "")));
+  assert.equal(first.subject?.reference, "Patient/maria-beispiel");
   assert.equal(oidOf(await fhirFetch<Practitioner>(detail.sender)), `urn:oid:${OID.brandl}`);
   const provenance = await fhirFetch<Provenance>(detail.provenance);
-  assert.deepEqual(provenance.target.map((target) => target.reference), [detail.output]);
+  assert.deepEqual(provenance.target.map((target) => target.reference), detail.targets, "the report and its Observations");
+  assert.equal(detail.targets.length, 5);
   assert.deepEqual(provenance.agent.map((agent) => agent.type?.coding?.[0]?.code), ["author"], "no informant when the sender is the author");
   assert.equal(Buffer.from(provenance.signature?.[0]?.data ?? "", "base64").toString(), answers[0].idToken, "signed with her own login");
   const task = await fhirFetch<Task>(detail.task);
@@ -180,6 +169,8 @@ test("request 2: Stefan Kern sends Dr. Leitner's discharge report", { skip: unre
   assert.deepEqual(outcome, { outcome: "filed" });
   const detail = await filedDetail(request.id);
   assert.match(detail.output, /^DocumentReference\//);
+  const report = await fhirFetch<DocumentReference>(detail.output);
+  assert.equal(report.author?.[0]?.reference, detail.author, "Dr. Leitner is the first author");
   assert.notEqual(detail.author, detail.sender, "Dr. Leitner wrote it, Stefan Kern sent it");
 
   assert.equal(oidOf(await fhirFetch<Practitioner>(detail.author)), `urn:oid:${OID.leitner}`);
@@ -193,6 +184,21 @@ test("request 2: Stefan Kern sends Dr. Leitner's discharge report", { skip: unre
 
   const [binding] = await db.select().from(bindings).where(eq(bindings.personNumber, STEFAN.personNumber));
   assert.equal(`Practitioner/${binding?.practitionerId}`, detail.sender, "his Practitioner is kept for his next answer");
+});
+
+test("the Task follows the request from sent to cancelled", { skip: unreachable }, async () => {
+  const { request, token, session } = await verifiedRequest(EVA, "lab-result", "Labor Kanalstraße");
+  const task = () => fhirFetch<Task>(`Task/ordy-request-${request.id}`);
+  assert.equal((await task()).status, "in-progress", "verified after the login");
+  assert.equal((await task()).owner?.display, "Eva Brandl", "the name Dr. Hofer typed, until a Practitioner exists");
+
+  const { deps: value } = deps();
+  const max = await submitAnswer(value, { token, session, file: doc("lab-result-max-beispiel.md"), form: maria });
+  assert.equal(max.outcome, "patient_mismatch");
+  assert.equal((await task()).businessStatus?.text, "waiting for a new upload after a patient mismatch");
+
+  await applyEvent(db, request.id, "cancel");
+  assert.equal((await task()).status, "cancelled");
 });
 
 /** Request 1's answer without a database: what the filing needs from the request row. */
@@ -222,7 +228,10 @@ test("only a refused or unsent Bundle is NotFiled; a timeout leaves the outcome 
   const timedOut = fhirFiling({ mapClinical, post: () => Promise.reject(new DOMException("The operation timed out", "TimeoutError")) });
   await assert.rejects(timedOut(sampleAnswer()), (error) => error instanceof DOMException);
 
-  const neverSent = fhirFiling({ mapClinical: mapClinicalNotConnected, post: () => assert.fail("nothing is sent") });
+  const unmapped = () => {
+    throw new Error("no mapper");
+  };
+  const neverSent = fhirFiling({ mapClinical: unmapped, post: () => assert.fail("nothing is sent") });
   await assert.rejects(neverSent(sampleAnswer()), NotFiled);
   const noIssuer = fhirFiling({ mapClinical, post: () => assert.fail("nothing is sent") });
   await assert.rejects(noIssuer(sampleAnswer(new UnsecuredJWT({}).setIssuedAt().encode())), NotFiled);

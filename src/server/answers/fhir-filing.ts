@@ -4,10 +4,20 @@ import { decodeJwt } from "jose";
 import { FhirError, transaction } from "@/server/fhir/client";
 import { fileAnswer, type FilingDeps } from "@/server/fhir/file-answer";
 import { buildFilingBundle, ID_AUSTRIA_SIMULATION, prepareParties, type Filing, type Parties } from "@/server/fhir/filing";
+import { mapLabResult, mapRehabReport } from "@/server/fhir/mappers";
 import { type AnswerToFile, type FileAnswer, type MapClinical, NotFiled } from "./ports";
 
 // The answer flow's filing on the FHIR server: the parties and one transaction Bundle with Provenance and Task (T13),
 // around the clinical resources from the mappers (T12, T14). docs/FHIR.md, "Provenance".
+
+/** The clinical resources from the lab mapper (T12) or the rehab mapper (T14). */
+export const mapClinical: MapClinical = (document, context, filedAt) => {
+  if (document.type === "lab-result") {
+    const { diagnosticReport, observations } = mapLabResult(document, context);
+    return { output: diagnosticReport, others: observations };
+  }
+  return { output: mapRehabReport(document, context, filedAt), others: [] };
+};
 
 /** The issuer of the ID token names the identity provider in the Provenance. The token was verified at login. */
 function issuer(idToken: string): string {

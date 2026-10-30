@@ -1,13 +1,12 @@
-import type { Reference } from "fhir/r4";
-
 import type { LabResult, RehabReport } from "@/server/documents/types";
 import type { AnswerFiled } from "@/server/fhir/file-answer";
 import type { AnswerFiling, OrganizationParty, Person } from "@/server/fhir/filing";
+import type { MapContext } from "@/server/fhir/mappers";
 import type { RequestRow } from "@/server/requests/service";
 
-// What the answer flow needs from the eHVD release check (T15, #11), the FHIR mappers (T12, T14, #10), and the filing
-// (T13). They are passed in, so the flow runs and is tested before the first two land. Until then the defaults below
-// hold every answer for Dr. Hofer and never file anything on their own.
+// What the answer flow needs from the eHVD release check (T15), the FHIR mappers (T12, T14), and the filing (T13).
+// They are passed in, so the flow runs and is tested with stand-ins. Until the release check lands, the default below
+// holds every answer for Dr. Hofer.
 
 /** A document the request service can file: a lab result or a rehab discharge report. */
 export type FileableDocument = LabResult | RehabReport;
@@ -94,16 +93,8 @@ export class NotFiled extends Error {}
  */
 export type FileAnswer = (answer: AnswerToFile) => Promise<AnswerFiled>;
 
-/** The references the clinical resources point at: `MapContext` in the FHIR mappers (#10). */
-export type ClinicalContext = { patient: Reference; organization: Reference; practitioner: Reference };
-
 /**
- * The clinical resources of one answer: `mapLabResult` (T12) or `mapRehabReport` (T14) from `src/server/fhir/mappers.ts`
- * (#30), in the shape the filing Bundle takes.
+ * The clinical resources of one answer in the shape the filing Bundle takes. `mapClinical` in `fhir-filing.ts` runs
+ * `mapLabResult` (T12) or `mapRehabReport` (T14) from `src/server/fhir/mappers.ts`.
  */
-export type MapClinical = (document: FileableDocument, context: ClinicalContext, filedAt: Date) => AnswerFiling["clinical"];
-
-/** Until the mappers (#10) land, filing fails, and the request stays as it was. */
-export const mapClinicalNotConnected: MapClinical = () => {
-  throw new Error("The FHIR mappers are not connected yet (T12, T14)");
-};
+export type MapClinical = (document: FileableDocument, context: MapContext, filedAt: Date) => AnswerFiling["clinical"];

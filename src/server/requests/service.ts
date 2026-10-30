@@ -1,4 +1,5 @@
 import { and, desc, eq, inArray, lte, sql } from "drizzle-orm";
+import { PgTransaction } from "drizzle-orm/pg-core";
 
 import type { DocumentType } from "@/lib/document-types";
 import { type AuditActor, type AuditEntry, recordAudit } from "@/server/audit/record";
@@ -7,8 +8,10 @@ import { bindings, heldAnswers, keptAnswers, requests } from "@/server/db/schema
 import type { LoginTransition } from "@/server/identity/login";
 import { initialState, isOpen, MAX_FAILED_CHECKS, OPEN_STATES, type RequestEvent, transition, TransitionError } from "./lifecycle";
 import { hashLinkToken, isLinkToken, LINK_TTL_MS, newLinkToken } from "./link-token";
+import { mirrorTask } from "./task";
 
-// Reads and state changes of requests. Every caller goes through here: the tRPC router, the portal pages, and later the login and filing.
+// Reads and state changes of requests. Every caller goes through here: the tRPC router, the portal pages, the login,
+// and the answer flow. Every state change is mirrored on the request's FHIR Task once it committed (`mirrorTask`).
 
 export type RequestRow = typeof requests.$inferSelect;
 
@@ -63,6 +66,7 @@ export async function createRequest(db: Db, input: NewRequest, addressCheck: Add
     );
     return row;
   });
+  await mirrorTask(request);
   return { request, token };
 }
 
@@ -91,11 +95,14 @@ export async function expireDueRequests(db: Db | Tx, id?: number): Promise<numbe
     // The ID token has done its work once the request is closed: a filed answer carries it in the Provenance.
     .set({ state: "expired", idToken: null })
     .where(and(inArray(requests.state, OPEN_STATES), lte(requests.expiresAt, new Date()), id === undefined ? undefined : eq(requests.id, id)))
-    .returning({ id: requests.id });
+    .returning();
   const ids = expired.map((r) => r.id);
   if (ids.length) {
     await db.delete(heldAnswers).where(inArray(heldAnswers.requestId, ids));
     await db.delete(keptAnswers).where(inArray(keptAnswers.requestId, ids));
+    // Not awaited: this may run inside a transaction that holds row locks. If it rolls back, the next read expires the
+    // request again, and `expired` is final, so an early or repeated PUT tells nothing wrong.
+    for (const row of expired) void mirrorTask(row);
   }
   return ids;
 }
@@ -140,6 +147,7 @@ export type NonLoginEvent = Exclude<RequestEvent, (typeof LOGIN_EVENT)[keyof typ
  * `then` runs in the same transaction with the updated request: write the audit entry that belongs to the change there,
  * so the state and the log never disagree. It may update more columns and return the request it read back. Inside a
  * transaction (`db` is a Tx), the event runs in a savepoint, so a failed event leaves the outer transaction usable.
+ * The Task follows after the commit; inside a transaction, the caller's commit is still to come, so the caller mirrors.
  */
 export async function applyEvent(
   db: Db | Tx,
@@ -147,7 +155,7 @@ export async function applyEvent(
   event: NonLoginEvent,
   then?: (tx: Tx, request: RequestRow) => Promise<RequestRow | void>,
 ): Promise<RequestRow | null> {
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     await expireDueRequests(tx, id);
     const [row] = await tx.select().from(requests).where(eq(requests.id, id)).for("update");
     if (!row) return null;
@@ -167,6 +175,9 @@ export async function applyEvent(
     }
     return result;
   });
+  // The filing Bundle PUTs the Task of a filed request itself, with the output.
+  if (result && result.state !== "filed" && !(db instanceof PgTransaction)) await mirrorTask(result, event);
+  return result;
 }
 
 // The request service side of the identity check ports (docs/IDENTITY.md, "Identity checks"). identity-ports.ts wires them.
@@ -193,19 +204,23 @@ const LOGIN_EVENT = { verified: "identity_pass", identity_held: "identity_hold",
  * changed in between or the lifecycle refuses the change, for example a lock before the third failed check.
  */
 export async function applyLoginTransition(db: Db, id: number, change: LoginTransition): Promise<boolean> {
-  return db.transaction(async (tx) => {
+  const updated = await db.transaction(async (tx) => {
     await expireDueRequests(tx, id);
     const [row] = await tx.select().from(requests).where(eq(requests.id, id)).for("update");
-    if (!row || row.state !== change.from) return false;
+    if (!row || row.state !== change.from) return null;
     // Three counted failures lock a sent request. If the lock after the third one never ran, this login locks it instead.
     const to = row.failedChecks >= MAX_FAILED_CHECKS ? "locked" : change.to;
-    if (transition(row.state, LOGIN_EVENT[to], row.failedChecks) !== to) return false;
-    await tx
+    if (transition(row.state, LOGIN_EVENT[to], row.failedChecks) !== to) return null;
+    const [stored] = await tx
       .update(requests)
       .set({ state: to, ...("personNumber" in change && to === change.to ? { personNumber: change.personNumber } : {}) })
-      .where(eq(requests.id, id));
-    return to === change.to;
+      .where(eq(requests.id, id))
+      .returning();
+    return stored;
   });
+  if (!updated) return false;
+  await mirrorTask(updated);
+  return updated.state === change.to;
 }
 
 /** The bPK bound to this person at this organisation in `bindings`, or null. */

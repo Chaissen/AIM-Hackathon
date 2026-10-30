@@ -10,6 +10,7 @@ import { eidSession, type EidSession } from "@/server/auth/eid-session";
 import { db } from "@/server/db";
 import { auditLog, bindings, heldAnswers, keptAnswers, requests } from "@/server/db/schema";
 import { uploadHash } from "@/server/documents/patient-check";
+import { fhirFetch } from "@/server/fhir/client";
 import type { Notice } from "@/server/matrix/notices";
 import { applyEvent, applyLoginTransition, createRequest, expireDueRequests, getRequest, type NewRequest, saveIdToken } from "@/server/requests/service";
 import type { AnswerDeps } from "./deps";
@@ -41,6 +42,8 @@ const created: number[] = [];
 const run = randomBytes(4).toString("hex");
 
 after(async () => {
+  // The request service mirrored each request on its FHIR Task, if HAPI runs.
+  await Promise.all(created.map((id) => fhirFetch(`Task/ordy-request-${id}`, { method: "DELETE" }).catch(() => {})));
   if (!noDb && created.length) {
     await db.delete(auditLog).where(inArray(auditLog.requestId, created));
     await db.delete(heldAnswers).where(inArray(heldAnswers.requestId, created));
