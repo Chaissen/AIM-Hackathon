@@ -1,5 +1,5 @@
-# ordy infrastructure: Matrix, the workspace gateway, HAPI FHIR, Postgres, Keycloak (simulated ID Austria), and the
-# eHVD mock.
+# ordy infrastructure: Matrix, the workspace gateway, HAPI FHIR, Mailpit, Postgres, Keycloak (simulated ID Austria),
+# and the eHVD mock.
 # The ordy app itself (Next.js + Matrix bot) runs on the host with `pnpm dev`.
 services:
   synapse:
@@ -27,7 +27,6 @@ services:
 
   element:
     image: vectorim/element-web:latest
-    profiles: [legacy-element]
     volumes:
       - ./docker/element/config.json:/app/config.json:ro
     ports:
@@ -41,6 +40,12 @@ services:
       hapi.fhir.fhir_version: R4
       hapi.fhir.allow_external_references: "true"
       hapi.fhir.cors.allowed_origin: "*"
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "8025:8025"
+      - "1025:1025"
 
   postgres:
     image: postgres:17-alpine

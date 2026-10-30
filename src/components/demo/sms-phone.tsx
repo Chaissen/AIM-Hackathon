@@ -1,3 +1,4 @@
+import { connection } from "next/server";
 import { Suspense } from "react";
 
 import { Time } from "@/components/time";
@@ -5,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { listSms } from "@/server/portal/data";
 
 // The phone screen of /sms and /inbox: every SMS the request service would have sent (docs/ARCHITECTURE.md). Server
-// only, because it reads listSms().
+// only, because it reads listSms() at request time.
 
 const isLink = (word: string) => (word.startsWith("http://") || word.startsWith("https://")) && URL.canParse(word);
 
@@ -44,6 +45,7 @@ export function SmsPhone({ className }: { className?: string }) {
 }
 
 async function Messages() {
+  await connection();
   const messages = await listSms();
   if (!messages.length) return <p className="pt-10 text-center text-sm text-muted-foreground">No SMS sent yet.</p>;
   return messages.map((m) => (

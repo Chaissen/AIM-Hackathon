@@ -1,7 +1,7 @@
 import { createServer, type Socket } from "node:net";
 
 // An SMTP server on 127.0.0.1 that keeps every email it receives in memory and delivers none. The mail tests and
-// `pnpm demo:seed` send to it, so neither reaches Gmail. It offers no STARTTLS and no login.
+// `pnpm demo:seed` send to it, so neither reaches Mailpit. It offers no STARTTLS and no login.
 
 export type ReceivedEmail = { sender: string; recipients: string[]; raw: string };
 export type FakeSmtp = { port: number; received: ReceivedEmail[]; close: () => Promise<void> };

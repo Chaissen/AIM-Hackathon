@@ -46,14 +46,14 @@ Apply these steps in the deployment environment after the new app has been revie
    ```
 
 2. Set `WORKSPACE_URL` and the upstream as described above, then restart the existing ordy web and bot processes with the deployment's normal process manager. Do not start a second bot. For a foreground installation, stop its old `pnpm start` process before starting the new one.
-3. Stop the old Element service before starting the gateway:
+3. Stop the old Element container before starting the gateway, then start both:
 
    ```bash
-   docker compose --profile legacy-element stop element
-   docker compose up -d workspace
+   docker compose stop element
+   docker compose up -d workspace element
    ```
 
-   The old Element container may still hold port 8081 even though its service now has an optional profile. `docker compose up` does not stop an existing container merely because its service moved into an optional profile. No Postgres, HAPI, Matrix room, or Matrix user needs to be reset.
+   The old Element container may still hold port 8081. Stopping it frees the port for the gateway, and Compose then recreates Element Web on 8082. No Postgres, HAPI, Matrix room, or Matrix user needs to be reset.
 
 4. Route the workspace hostname to the gateway:
 
@@ -63,20 +63,14 @@ Apply these steps in the deployment environment after the new app has been revie
    | `ordy-matrix.floritzmaier.xyz` | The existing Synapse client-server endpoint, normally host port 8008 |
    | The origin already configured in `PUBLIC_URL` | The existing Next.js app, normally host port 3010 |
 
-   A TLS proxy on the same host can forward `ordy-chat.floritzmaier.xyz` to `http://127.0.0.1:8081`. It can also point directly at Next.js on 3010 if the gateway is unnecessary in that installation. Do not leave the chat hostname pointing at the Element image or its optional port 8082.
+   A TLS proxy on the same host can forward `ordy-chat.floritzmaier.xyz` to `http://127.0.0.1:8081`. It can also point directly at Next.js on 3010 if the gateway is unnecessary in that installation. Do not leave the chat hostname pointing at the Element image or its port 8082.
 
 5. Open `https://ordy-chat.floritzmaier.xyz/`. It must show ordy's sign-in screen and design. Sign in with the existing network account, open **Messages**, and choose the existing room. The old `/#/room/#outside-documents:klinikum.example` link opens that room in Messages after sign-in.
 6. Confirm a clinical view reads its real data and that the outside-person request link still uses the origin in `PUBLIC_URL`. Sign out and confirm that the previous clinical view and message history are no longer visible.
 
-## Keep Element as an optional client
+## Element Web
 
-To use the old client for compatibility checks:
-
-```bash
-docker compose --profile legacy-element up -d element
-```
-
-Open http://localhost:8082. It uses the same Synapse accounts and rooms. The legacy ordy widget remains at `/widget`; it still asks Element for a Matrix OpenID token. The primary workspace needs neither Element nor an iframe.
+Element Web is the chat app the track suggests, and it starts with every `docker compose up`. Open http://localhost:8082. It uses the same Synapse accounts and rooms. The ordy widget at `/widget` is pinned in Dr. Hofer's room and asks Element for a Matrix OpenID token. The workspace on 8081 needs neither Element nor an iframe.
 
 ## Session and chat limits
 

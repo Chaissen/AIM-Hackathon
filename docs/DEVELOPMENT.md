@@ -5,7 +5,7 @@ How to set up, start, reset, and extend ordy. [Architecture](ARCHITECTURE.md) ex
 ## Rules
 
 - **Everything is in English**: code, comments, UI text, bot messages, commit messages, pull requests, and docs. Names from the scenario, such as "Klinikum Beispielstadt" or "Labor Kanalstraße", stay as they are.
-- Everything we write is TypeScript. Only third-party servers (Synapse, HAPI, Keycloak) and the HL7 validator are not.
+- Everything we write is TypeScript. Only third-party servers (Synapse, HAPI, Mailpit, Keycloak) and the HL7 validator are not.
 - Synthetic data only. No secrets in git: use `.env`, and add a placeholder to `.env.example`.
 - New dependencies must have been public for at least 7 days. `minimumReleaseAge` in `pnpm-workspace.yaml` enforces this. Do not lower it.
 - Clinical rules that wait for a clinician's decision are marked "pending clinical sign-off". Their questions are in [`clinical-review/`](clinical-review/README.md). Do not change such a rule before its review file is signed.
@@ -19,7 +19,7 @@ How to set up, start, reset, and extend ordy. [Architecture](ARCHITECTURE.md) ex
 | pnpm | 10 (pinned in `package.json`) | `corepack enable`, then `pnpm -v` |
 | Java | 17 or newer, only for the HL7 validator | `java -version` |
 
-Port 8082 is needed only for optional Element compatibility. These ports must be free: 3010 (ordy), 5433 (Postgres), 8008 (Synapse), 8081 (workspace gateway), 8090 (HAPI), 8080 (Keycloak), 8095 (eHVD mock). Outgoing email needs access to `smtp.gmail.com` port 465.
+These ports must be free: 3010 (ordy), 5433 (Postgres), 8008 (Synapse), 8081 (workspace gateway), 8082 (Element Web), 8090 (HAPI), 8025 and 1025 (Mailpit), 8080 (Keycloak), 8095 (eHVD mock).
 
 ## First-time setup
 
@@ -67,9 +67,9 @@ Check that everything works:
 |---|---|---|
 | ordy workspace through its gateway | http://localhost:8081 | `lena.hofer` / `hofer-demo-2026` |
 | ordy Next.js app, including workspace and outside portal | http://localhost:3010 | the same network account for the workspace |
-| Optional Element compatibility client | http://localhost:8082 | the same Matrix account; enable the `legacy-element` profile |
-| Outside emails: the team inboxes in `MAIL_TEAM_INBOXES`, by default ordysoftware@gmail.com | https://mail.google.com | the team's Google login |
-| Recipient's inbox: a button that opens Gmail for the first team inbox, and the SMS screen with each portal link | http://localhost:3010/inbox | none. Demo only. A production build answers 404. |
+| Element Web, with the ordy widget pinned in Dr. Hofer's room | http://localhost:8082 | the same Matrix account |
+| Mailpit | http://localhost:8025 | |
+| Recipient's inbox: the emails in Mailpit and the SMS screen, with each portal link | http://localhost:3010/inbox | none. Demo only. A production build answers 404. |
 | HAPI FHIR | http://localhost:8090/fhir | |
 | Synapse | http://localhost:8008 | bot: `ordy` / `ordy-demo-2026` |
 | Postgres | `postgres://ordy:ordy@localhost:5433/ordy` | `ordy` / `ordy` |
@@ -78,7 +78,7 @@ Check that everything works:
 
 `WORKSPACE_URL` defaults to `http://localhost:8081`; `PUBLIC_URL` remains the outside-link base at `http://localhost:3010`. The session endpoint permits their exact origins. Change both deliberately when using another host or port. The gateway's `ORDY_WEB_UPSTREAM` defaults to `host.docker.internal:3010` and can name a web service in a production Docker network. [Deployment](DEPLOYMENT.md) gives the hostname and HTTPS settings.
 
-For the optional Element client, run `docker compose --profile legacy-element up -d element` and open http://localhost:8082. The legacy `/widget` still needs Element's identity approval. It is not the primary app.
+Element Web starts with the other containers. Open http://localhost:8082 and log in with the same account. The ordy widget in Dr. Hofer's room asks once for Element's identity approval.
 
 Test citizens for the ID Austria login: `eva.brandl` / `demo-eva`, `stefan.kern` / `demo-stefan`, `thomas.wagner` / `demo-thomas`, `anna.huber` / `demo-anna`, and `eva.brandl2` / `demo-eva2`. [Identity and misdelivery](IDENTITY.md#test-citizens) says whom each one plays. There is no sign-up page. `pnpm citizen` adds more people, such as the two senders of the [extra test documents](#extra-test-documents).
 
@@ -91,8 +91,8 @@ Test citizens for the ID Austria login: `eva.brandl` / `demo-eva`, `stefan.kern`
 | `pnpm build`, then `pnpm start` | Production build, then both processes without reload |
 | `pnpm typecheck` | Generates the Next.js route types, then runs `tsc` on ordy and on the eHVD mock |
 | `pnpm lint` | ESLint |
-| `pnpm test` | The `*.test.ts` files under `src/` and `services/`, with Node's test runner through tsx. The request tests use the Postgres and FHIR server at the default addresses from `src/env.ts`, because `pnpm test` does not read `.env`. They delete their rows afterwards and are skipped when the servers are not running. Request ids still move on, so run `pnpm reset` before a demo. The mail tests send request 1's email to a fake SMTP server on 127.0.0.1 that they start themselves, and read it back. They always run and never reach Gmail. The request tests send no email. |
-| `pnpm reset` | Empties Postgres and HAPI, and reloads the three patients. Matrix users and the room stay. The Gmail inbox keeps its emails, and their links then say "This link does not work". Run it before every demo. |
+| `pnpm test` | The `*.test.ts` files under `src/` and `services/`, with Node's test runner through tsx. The request tests use the Postgres and FHIR server at the default addresses from `src/env.ts`, because `pnpm test` does not read `.env`. They delete their rows afterwards and are skipped when the servers are not running. Request ids still move on, so run `pnpm reset` before a demo. The mail tests send request 1's email to a fake SMTP server on 127.0.0.1 that they start themselves, and read it back. They always run and never reach Mailpit. The request tests send no email. |
+| `pnpm reset` | Empties Postgres, HAPI, and Mailpit, and reloads the three patients. Matrix users and the room stay. Run it before every demo. |
 | `pnpm db:generate --name <name>` | Writes a SQL migration to `drizzle/` from the schema |
 | `pnpm db:migrate` | Applies pending migrations |
 | `pnpm db:studio` | Opens Drizzle Studio to browse the database |
@@ -202,29 +202,6 @@ To add a document, write the file, add its row to the index, and run `pnpm test`
 
 To open answer links on a phone in the same network, set `PUBLIC_URL` to your computer's LAN address, for example `http://192.168.1.20:3010`, restart `pnpm dev`, and run `pnpm matrix:bootstrap` so the widget uses the new address.
 
-## Send email through Gmail
-
-ordy sends every email through Gmail as ordysoftware@gmail.com, on `smtp.gmail.com` port 465 with TLS from the start. `src/env.ts` and `.env.example` have these values as defaults. Only the app password is missing:
-
-1. Get the app password of ordysoftware@gmail.com from the team. Google issues app passwords under Google Account, Security, App passwords, for accounts with 2-Step Verification. The account password does not work over SMTP.
-2. Add it to `.env`, without its spaces. Never put the app password into git, `.env.example`, or the docs.
-
-   ```bash
-   SMTP_PASSWORD=<Gmail app password>
-   ```
-
-3. Restart `pnpm dev`.
-
-Without the app password, every send fails and the log shows `EAUTH`.
-
-ordy delivers every email only to the team inboxes in `MAIL_TEAM_INBOXES`, whatever address the request names. Its `To` header still names the request's address, for example `eva.brandl@labor-kanal.example`. A copy lands in the Sent folder of the account. The default list is ordysoftware@gmail.com itself. To add inboxes, list them comma-separated, for example `MAIL_TEAM_INBOXES=ordysoftware@gmail.com,second@example.com`. An empty `MAIL_TEAM_INBOXES=` fails the check in `src/env.ts`, and ordy stops with a `ZodError` that names `MAIL_TEAM_INBOXES`.
-
-Gmail replaces a sender address that is not the account's own, so `MAIL_FROM` names the account. `setup.sh` reads `.env` with bash, so a value with spaces or `<` needs double quotes, as `MAIL_FROM` has.
-
-An older `.env`, which `setup.sh` copied from an earlier `.env.example`, still points at `SMTP_HOST=localhost` on the old local port and has an empty `MAIL_TEAM_INBOXES=`. Delete every line in it that starts with `SMTP_` or `MAIL`, so the defaults apply, then add `SMTP_PASSWORD`. Run `docker compose up -d --remove-orphans` once to remove the old mail container that `docker-compose.yml` no longer lists.
-
-`pnpm reset` does not empty the Gmail inbox. The links in its older emails then say "This link does not work". `pnpm test` does not read `.env`, and the mail tests send to a fake SMTP server on 127.0.0.1 that they start themselves, so they never reach Gmail.
-
 ## HL7 validator
 
 The validator is not in git. We pin version 7.0.3. `pnpm validate` downloads it to `tools/` when it is missing, and it runs the jar only if its SHA-256 is `57aa43fb40cec5de41def81c927725fd85908eeb71509b7f9313e04d9b8ec79b` (`VALIDATOR_SHA256` in `src/server/metrics/validator.ts`). To download it by hand:
@@ -248,7 +225,7 @@ rm -rf docker/synapse/*
 ./scripts/setup.sh
 ```
 
-This deletes all local data. Workspace and optional Element sessions stop working.
+This deletes all local data. Workspace and Element Web sessions stop working.
 
 ## Troubleshooting
 
@@ -268,4 +245,3 @@ This deletes all local data. Workspace and optional Element sessions stop workin
 | A change under `services/ehvd-mock/` does not show up | The container runs the image built earlier. Run `docker compose up -d --build ehvd`. |
 | Strange Next.js errors after switching branches | Stop `pnpm dev`, delete `.next/`, start again |
 | `pnpm install` refuses a package | It is younger than 7 days. Pick an older version. |
-| The email could not be sent, and the log shows `EAUTH` | `SMTP_PASSWORD` in `.env` is missing or wrong. Add the Gmail app password as [Send email through Gmail](#send-email-through-gmail) describes, then restart `pnpm dev`. |

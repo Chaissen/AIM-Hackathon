@@ -1,7 +1,7 @@
 // pnpm demo:seed [--force]: fills Dr. Hofer's workspace with synthetic requests in every state, through the real code
 // paths (docs/DEMO.md, "A populated workspace"). Run `pnpm fhir:seed` first; `pnpm reset` runs it. It refuses to run
 // while Dr. Hofer has requests, unless --force adds another set. It needs Postgres, HAPI, Synapse, Keycloak, and the
-// eHVD mock, but not the web server or Gmail: the login route handlers run in this process, and it sends no email.
+// eHVD mock, but not the web server or Mailpit: the login route handlers run in this process, and it sends no email.
 //
 // The login route handlers sign their cookies with ORDY_SECRET. Without a private one in .env, this run makes up a
 // random key for its own process. The cookies never leave the process, so no other server needs it.

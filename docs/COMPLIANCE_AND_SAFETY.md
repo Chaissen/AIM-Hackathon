@@ -4,10 +4,10 @@ This page sets the team rules for data, messages, identity, and AI, and it holds
 
 ## Synthetic data only
 
-1. No real patient data enters the project. That covers the repository, the databases, Keycloak, the team's Gmail inboxes, logs, screenshots, slides, and the video.
+1. No real patient data enters the project. That covers the repository, the databases, Keycloak, Mailpit, logs, screenshots, slides, and the video.
 2. Every person, organisation, phone number, email address, eHVD entry, and document is made up. The eHVD mock uses the real OID structure under `1.2.40.0.34.3.1.99.1` and `1.2.40.0.34.3.2.99.1`, but no entry is copied from the real directory. The scenario's `.example` addresses cannot receive mail, and the phone number is made up.
-3. The request service sends email only through Gmail SMTP as ordysoftware@gmail.com, and only to the team inboxes in `MAIL_TEAM_INBOXES`. It sends SMS only to its own SMS screen. It never sends to any other real address or number.
-4. The demo page `/inbox` shows every SMS with its working link to anyone who can reach the request service. It does not show the emails. Its button opens Gmail, which needs the team's Google login. A production build answers 404 there.
+3. The request service sends email only to Mailpit and SMS only to its own SMS screen. It never sends to a real address or number.
+4. The demo pages `/inbox` and `/sms` show every email in Mailpit and every SMS with its working link, as Mailpit's own page does, to anyone who can reach the request service. A production build answers 404 on both.
 5. If anyone suspects real data somewhere, they post `PRIVACY:` in the team chat. We delete it from the working tree, purge it from git history if it was committed, and note the incident in `docs/privacy_log.md`.
 
 ## What an outgoing email or SMS may contain
@@ -64,9 +64,9 @@ Application logs hold request ids, timings, check results, and validator outcome
 
 Workspace calls explicitly select their clinic cookie with `x-ordy-workspace: 1`. Outside-person requests retain the separate ID Austria path, including when both sessions exist in one browser. Joined-room checks apply to every chat read and send. Existing requester ownership and clinical release rules are unchanged.
 
-`pnpm reset` (`scripts/reset.sh`) empties Postgres and HAPI and reloads the three synthetic patients: Maria Beispiel from `track/scenario/patient.json`, and Johann Muster and Petra Probst from `scripts/fixtures/patients/`. It does not empty the Gmail inbox, and the links in older emails then say "This link does not work". We run it before the pitch.
+`pnpm reset` (`scripts/reset.sh`) empties Postgres, HAPI, and Mailpit and reloads the three synthetic patients: Maria Beispiel from `track/scenario/patient.json`, and Johann Muster and Petra Probst from `scripts/fixtures/patients/`. We run it before the pitch.
 
-`pnpm demo:seed` creates only synthetic data: requests about these three patients to the test citizens at `.example` addresses and made-up `+43 660 000 01xx` numbers, with the synthetic documents from `track/scenario/documents/` and `scripts/fixtures/documents/`. It runs the real checks and state changes, the expiry of one request included. It sends no email: each request email passes the content check above, and the seed then keeps it in its own process instead of handing it to Gmail, to read the link. It prints request ids, states, and document types only, and checks the rules above on what it stored before it ends ([Demo](DEMO.md#a-populated-workspace)).
+`pnpm demo:seed` creates only synthetic data: requests about these three patients to the test citizens at `.example` addresses and made-up `+43 660 000 01xx` numbers, with the synthetic documents from `track/scenario/documents/` and `scripts/fixtures/documents/`. It runs the real checks and state changes, the expiry of one request included. It sends no email: each request email passes the content check above, and the seed then keeps it in its own process instead of handing it to Mailpit, to read the link. It prints request ids, states, and document types only, and checks the rules above on what it stored before it ends ([Demo](DEMO.md#a-populated-workspace)).
 
 ## AI rules
 

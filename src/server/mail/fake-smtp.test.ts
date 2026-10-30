@@ -8,8 +8,8 @@ import { sendRequestEmail } from "./send";
 
 test("a request email with a real link token reaches the fake SMTP server and gives back the whole link", async (t) => {
   const smtp = await startFakeSmtp();
-  const saved = { SMTP_HOST: env.SMTP_HOST, SMTP_PORT: env.SMTP_PORT, SMTP_USER: env.SMTP_USER, MAIL_TEAM_INBOXES: env.MAIL_TEAM_INBOXES };
-  Object.assign(env, { SMTP_HOST: "127.0.0.1", SMTP_PORT: smtp.port, SMTP_USER: "", MAIL_TEAM_INBOXES: ["team@ordy.test"] });
+  const saved = { SMTP_HOST: env.SMTP_HOST, SMTP_PORT: env.SMTP_PORT };
+  Object.assign(env, { SMTP_HOST: "127.0.0.1", SMTP_PORT: smtp.port });
   t.after(async () => {
     Object.assign(env, saved);
     await smtp.close();
@@ -27,7 +27,7 @@ test("a request email with a real link token reaches the fake SMTP server and gi
   });
 
   assert.equal(smtp.received.length, 1);
-  assert.deepEqual(smtp.received[0].recipients, ["team@ordy.test"]);
+  assert.deepEqual(smtp.received[0].recipients, ["eva.brandl@labor-kanai.example"]);
   const { headers, body } = parseEmail(smtp.received[0].raw);
   // Nodemailer writes the domain in lowercase, as domains do not depend on case. The seed compares in lowercase too.
   assert.equal(headers.get("to")?.toLowerCase(), "eva.brandl@labor-kanai.example");
