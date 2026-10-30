@@ -60,6 +60,19 @@ test("umlauts are spelled out and other accents dropped, as in the patient check
   }
 });
 
+test("an umlaut with a tone mark is still spelled out", () => {
+  const lyu = { family: "Lǚ", given: ["Wei"], birthDate: "1970-01-01" };
+  assert.deepEqual(check("Dr. Ming Lü", lyu), ["patient-name"]);
+  assert.deepEqual(check("Dr. Ming Lǚ", { ...lyu, family: "Lü" }), ["patient-name"]);
+  assert.deepEqual(check("Dr. Ming Lu", lyu), []);
+});
+
+test("an initial in the patient's name does not refuse the request email", () => {
+  const email = requestEmail({ requester: "Dr. Lena Hofer", clinic: "Klinikum Beispielstadt", link: "http://localhost:3010/r/abc", expiresAt: new Date("2026-11-05T10:00:00Z") });
+  assert.deepEqual(forbiddenContent(email, { ...maria, given: ["Maria", "R.", "A."] }), []);
+  assert.deepEqual(check("Maria R.", { ...maria, given: ["Maria", "R."] }), ["patient-name"]);
+});
+
 test("a combining mark from any block drops out without splitting the word", () => {
   assert.deepEqual(check("Ma\u1ab0ria"), ["patient-name"]);
   assert.deepEqual(check("la\u1ab0b"), ["document-type"]);
