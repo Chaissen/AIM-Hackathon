@@ -44,7 +44,8 @@ The check compares whole words. A substring check would block every message, bec
 | Person number bindings | Postgres `bindings` | Only the person who answered before can answer as that person again | Until the demo reset |
 | Audit log | Postgres `audit_log` | Who did what and when. No document text. | Until the demo reset |
 | Filed answers | HAPI FHIR | The clinical record | Until the demo reset |
-| ID token of the sender | Provenance `signature.data` | Proof of the identity check that anyone can verify later | With the record |
+| Held answers, about the right patient | Postgres `held_answers`: the text, its hash, the sender's name and eHVD OID, their ID token, and the hold reason | Dr. Hofer decides about an answer the eHVD did not confirm | Until she accepts (then it is in HAPI) or rejects it, or the request is cancelled or expires |
+| ID token of the sender | Provenance `signature.data`, and `requests.id_token` for the person the request is bound to | Proof of the identity check that anyone can verify later | With the record, and in `requests` until the demo reset |
 | Uploads for the wrong patient | Nowhere. Only the SHA-256 hash and the reason stay in the audit log. | Max Beispiel's data must not end up in Maria's record or anywhere else | Discarded after the check |
 | Name and person number of someone who failed the check | Audit log | The audit needs to say who tried | Until the demo reset |
 | IP address of whoever opens a link | Audit log, only as an HMAC with a key derived from `ORDY_SECRET`, cut to 16 hex characters. Nothing without a private `ORDY_SECRET`. | Hints which opens came from the same address without storing it. The client can forge the header it comes from, so it is no proof. | Until the demo reset |

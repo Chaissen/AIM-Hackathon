@@ -17,8 +17,6 @@ import type { AnswerToFile, FileableDocument, FilingPerson, Sender } from "./por
 /** The person responsible for the content: `Validated by` for a lab result, `Written by` for a rehab report. */
 export const responsiblePerson = (doc: FileableDocument): PersonLine | null => (doc.type === "lab-result" ? doc.validatedBy : doc.writtenBy);
 
-export const RESPONSIBLE_KEY = { "lab-result": "Validated by", "rehab-report": "Written by" } as const;
-
 /** The responsible person has the sender's name, by the same rule as the name check at login. */
 export const isSender = (person: PersonLine, sender: Sender) =>
   checkName({ given: person.given, family: person.family }, { givenName: sender.givenName, familyName: sender.familyName }).verdict === "pass";

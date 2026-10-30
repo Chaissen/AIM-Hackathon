@@ -1,4 +1,4 @@
-import type { LabResult, PersonLine, RehabReport } from "@/server/documents/types";
+import type { LabResult, RehabReport } from "@/server/documents/types";
 import type { RequestRow } from "@/server/requests/service";
 
 // What the answer flow needs from the eHVD release check (T15, #11) and from the filing (T12 to T14, #10 and #12).
@@ -11,44 +11,34 @@ export type FileableDocument = LabResult | RehabReport;
 /** The sender as ID Austria names them. `gdaOid` is the eHVD OID from `urn:eidgvat:attributes.gda`, if the token had one. */
 export type Sender = { givenName: string; familyName: string; gdaOid: string | null };
 
+/** The input of `checkRelease` in `src/server/ehvd/release-check.ts` (T15, #44). */
 export type ReleaseCheckInput = {
-  docType: FileableDocument["type"];
-  /** The person under `Validated by` (lab result) or `Written by` (rehab report). */
-  responsible: PersonLine;
-  /** True when the responsible person has the sender's name. Then the eHVD OID from the login identifies them. */
-  responsibleIsSender: boolean;
+  document: FileableDocument;
+  /** The organisation the request went to, as Dr. Hofer typed it. */
+  org: string;
   sender: Sender;
-  /** The organisation the request names, as Dr. Hofer typed it. */
-  organisation: string;
-  /** The organisation the document's heading names, for example `Labor Kanalstraße`. */
-  documentOrganisation: string;
 };
 
+/** An eHVD entry. Only its OID matters here; `GdaDescriptor` from the eHVD client (T15) has it. */
+type EhvdEntry = { id: { id: string } };
+
 /**
- * The release check from docs/IDENTITY.md, "Who may release a document". Anything other than a confirmation, an
- * unreachable eHVD included, is `unconfirmed`, and the answer waits for Dr. Hofer.
+ * The result of `checkRelease`: the release check from docs/IDENTITY.md, "Who may release a document". Anything the
+ * eHVD does not confirm, an unreachable eHVD included, is a hold, and the answer waits for Dr. Hofer.
  */
 export type ReleaseCheckResult =
-  | {
-      result: "confirmed";
-      /** The eHVD OIDs of the responsible person and the organisation, for the Practitioner and Organization. */
-      responsibleOid: string;
-      organisationOid: string;
-      /** One sentence for the Provenance narrative, for example "eHVD lists her as an active lab physician at Labor Kanalstraße." */
-      finding: string;
-    }
-  | {
-      result: "unconfirmed";
-      /** The reason sentence of the held notice, for example "The eHVD does not list Dr. Eva Brandl as a member of Labor Kanalstraße." */
-      reason: string;
-    };
+  /** `practitioner` is the responsible person's entry, `organisation` the organisation's. */
+  | { verdict: "pass"; via: "claim" | "search"; practitioner: EhvdEntry; organisation: EhvdEntry }
+  /** `sentence` goes into the held notice, for example "The eHVD does not list Dr. Eva Brandl as a member of Labor Kanalstraße." */
+  | { verdict: "hold"; reason: string; sentence: string };
 
 export type ReleaseCheck = (input: ReleaseCheckInput) => Promise<ReleaseCheckResult>;
 
 /** Until the eHVD client (T15) lands, nobody is confirmed, so every answer is held. Never a pass. */
 export const releaseCheckNotConnected: ReleaseCheck = async () => ({
-  result: "unconfirmed",
-  reason: "The eHVD release check is not connected yet, so ordy could not confirm who released the document.",
+  verdict: "hold",
+  reason: "ehvd_unreachable",
+  sentence: "The eHVD release check is not connected yet, so ordy could not confirm who released the document.",
 });
 
 /** A person for the Practitioner, in the shape of `Person` in the filing (T13). */

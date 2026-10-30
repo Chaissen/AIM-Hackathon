@@ -4,10 +4,11 @@ import type { EidSession } from "@/server/auth/eid-session";
 import { heldAnswers } from "@/server/db/schema";
 import { parseDocument } from "@/server/documents/parse";
 import { checkAnswerPatient, patientMismatch, uploadHash } from "@/server/documents/patient-check";
+import type { PersonLine } from "@/server/documents/types";
 import { TransitionError } from "@/server/requests/lifecycle";
 import { applyEvent, findRequestByToken, type RequestRow } from "@/server/requests/service";
 import type { AnswerDeps } from "./deps";
-import { fileAndRecord, filedNotice, idTokenPersonNumber, isSender, RESPONSIBLE_KEY, requesterPerson, responsiblePerson, senderName } from "./file";
+import { fileAndRecord, filedNotice, idTokenPersonNumber, isSender, requesterPerson, responsiblePerson, senderName } from "./file";
 import type { FileableDocument, ReleaseCheckResult, Sender } from "./ports";
 
 // POST /r/{token}/answer (docs/ARCHITECTURE.md, "Outside portal"): `answer_sent`, parse, patient check, release check,
@@ -60,25 +61,20 @@ function decodeText(bytes: Uint8Array): string | null {
 }
 
 /** The release check never passes by accident: a thrown error, an unreachable eHVD included, holds the answer. */
-async function releaseCheck(deps: AnswerDeps, doc: FileableDocument, sender: Sender, request: RequestRow): Promise<ReleaseCheckResult> {
-  const responsible = responsiblePerson(doc);
-  if (!responsible) {
-    return { result: "unconfirmed", reason: `The ${DOCUMENT_TYPES[doc.type].messageName} names nobody under "${RESPONSIBLE_KEY[doc.type]}".` };
-  }
+async function releaseCheck(deps: AnswerDeps, document: FileableDocument, sender: Sender, request: RequestRow): Promise<ReleaseCheckResult> {
   try {
-    return await deps.releaseCheck({
-      docType: doc.type,
-      responsible,
-      responsibleIsSender: isSender(responsible, sender),
-      sender,
-      organisation: request.org,
-      documentOrganisation: doc.organisation,
-    });
+    return await deps.releaseCheck({ document, org: request.org, sender });
   } catch (error) {
     console.error(`release check for request ${request.id} failed:`, error instanceof Error ? error.message : error);
-    return { result: "unconfirmed", reason: "The eHVD could not be reached to confirm who released the document." };
+    return { verdict: "hold", reason: "ehvd_unreachable", sentence: "The eHVD could not be reached to confirm who released the document." };
   }
 }
+
+/** The Provenance sentence for a passed release check. */
+const releaseFinding = (responsible: PersonLine, org: string, via: "claim" | "search") =>
+  `The eHVD confirms ${[...responsible.titles, responsible.given, responsible.family].filter(Boolean).join(" ")} as responsible for the content at ${org}${
+    via === "claim" ? ", found by the eHVD OID in the ID Austria login" : ", found by name"
+  }.`;
 
 export async function submitAnswer(deps: AnswerDeps, upload: AnswerUpload): Promise<AnswerOutcome> {
   const { db } = deps;
@@ -133,11 +129,12 @@ export async function submitAnswer(deps: AnswerDeps, upload: AnswerUpload): Prom
   const responsible = responsiblePerson(doc);
   const release = await releaseCheck(deps, doc, sender, request);
 
-  if (release.result === "unconfirmed") {
+  if (release.verdict === "hold" || !responsible) {
+    const reason = release.verdict === "hold" ? release.sentence : "The document names nobody responsible for its content.";
     // docs/IDENTITY.md, "Block or hold": the right person answered, so keep the answer and let Dr. Hofer decide.
     try {
       await applyEvent(db, request.id, "answer_unconfirmed", async (tx) => {
-        const held = { markdown, sha256, sender, idToken, reason: release.reason, sentAt };
+        const held = { markdown, sha256, sender, idToken, reason, sentAt };
         await tx
           .insert(heldAnswers)
           .values({ requestId: request.id, ...held })
@@ -147,11 +144,14 @@ export async function submitAnswer(deps: AnswerDeps, upload: AnswerUpload): Prom
       if (error instanceof TransitionError) return CLOSED;
       throw error;
     }
-    await deps.notify(request, { kind: "held", requestId: request.id, hold: "answer", reason: release.reason });
+    await deps.notify(request, { kind: "held", requestId: request.id, hold: "answer", reason });
     return { outcome: "held" };
   }
 
-  const authorIsSender = !responsible || isSender(responsible, sender);
+  // A pass found the responsible person in the eHVD. Through the login's OID that is the sender; by name, it is the
+  // sender only if the names match, as for Dr. Brandl, and otherwise someone else, as Dr. Leitner for Stefan Kern.
+  const authorIsSender = release.via === "claim" || isSender(responsible, sender);
+  const responsibleOid = release.practitioner.id.id;
   let filed: RequestRow | null;
   try {
     filed = await fileAndRecord(deps, request.id, "answer_confirmed", (locked, knownPractitioner) => ({
@@ -160,19 +160,16 @@ export async function submitAnswer(deps: AnswerDeps, upload: AnswerUpload): Prom
       sender: {
         given: sender.givenName,
         family: sender.familyName,
-        ehvdOid: authorIsSender ? release.responsibleOid : sender.gdaOid,
+        ehvdOid: authorIsSender ? responsibleOid : sender.gdaOid,
         practitionerId: knownPractitioner,
-        ...(authorIsSender && responsible ? { titles: responsible.titles } : {}),
+        ...(authorIsSender ? { titles: responsible.titles } : {}),
       },
-      author:
-        authorIsSender || !responsible
-          ? null
-          : { titles: responsible.titles, given: responsible.given, family: responsible.family, ehvdOid: release.responsibleOid },
-      organisation: { name: locked.org, ehvdOid: release.organisationOid },
+      author: authorIsSender ? null : { titles: responsible.titles, given: responsible.given, family: responsible.family, ehvdOid: responsibleOid },
+      organisation: { name: locked.org, ehvdOid: release.organisation.id.id },
       idToken,
       sentAt,
       acceptedByRequester: false,
-      findings: [release.finding],
+      findings: [releaseFinding(responsible, locked.org, release.via)],
     }));
   } catch (error) {
     // The message only: a FHIR error body could echo the document.

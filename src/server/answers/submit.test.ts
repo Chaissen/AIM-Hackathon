@@ -74,12 +74,18 @@ async function verifiedRequest(person: typeof EVA | typeof STEFAN, docType: NewR
   return { request, token, session, idToken };
 }
 
-const confirmed = (input: ReleaseCheckInput): ReleaseCheckResult => ({
-  result: "confirmed",
-  responsibleOid: input.responsibleIsSender ? "1.2.40.0.34.3.2.99.1.2" : "1.2.40.0.34.3.2.99.2.1",
-  organisationOid: "1.2.40.0.34.3.1.99.1.2",
-  finding: "eHVD lists the responsible person as active.",
-});
+/** A pass as `checkRelease` (T15) returns it: through the login's OID for Dr. Brandl, by name for Dr. Leitner. */
+const confirmed = (input: ReleaseCheckInput): ReleaseCheckResult => {
+  const viaClaim = input.sender.gdaOid !== null;
+  return {
+    verdict: "pass",
+    via: viaClaim ? "claim" : "search",
+    practitioner: { id: { id: viaClaim ? "1.2.40.0.34.3.2.99.1.2" : "1.2.40.0.34.3.2.99.2.1" } },
+    organisation: { id: { id: "1.2.40.0.34.3.1.99.1.2" } },
+  };
+};
+
+const hold = (sentence: string) => (): ReleaseCheckResult => ({ verdict: "hold", reason: "not_member", sentence });
 
 /** Stand-ins that record what the flow asked for. */
 function fakes(release: (input: ReleaseCheckInput) => ReleaseCheckResult | Promise<ReleaseCheckResult> = confirmed) {
@@ -123,8 +129,9 @@ test("request 1: Dr. Brandl's lab result is filed with answer_sent and answer_fi
   assert.equal(filedEntry.actor, "ordy");
   assert.deepEqual(filedEntry.detail, { resources: ["DiagnosticReport/1", "Provenance/2", "Practitioner/3"], provenance: "Provenance/2" });
 
-  assert.equal(releaseInputs[0].responsibleIsSender, true);
-  assert.equal(releaseInputs[0].responsible.family, "Brandl");
+  assert.deepEqual(releaseInputs[0].sender, { givenName: "Eva", familyName: "Brandl", gdaOid: EVA.gdaOid });
+  assert.equal(releaseInputs[0].org, request.org);
+  assert.equal(releaseInputs[0].document.type, "lab-result");
   const [answer] = filed;
   assert.equal(answer.author, null, "Dr. Brandl validated it herself, so there is no separate author");
   assert.deepEqual(answer.sender, { given: "Eva", family: "Brandl", ehvdOid: "1.2.40.0.34.3.2.99.1.2", practitionerId: null, titles: ["Dr."] });
@@ -133,6 +140,9 @@ test("request 1: Dr. Brandl's lab result is filed with answer_sent and answer_fi
   assert.equal(answer.idToken, idToken, "her own login signs the Provenance");
   assert.equal(answer.acceptedByRequester, false);
   assert.equal(answer.document.type, "lab-result");
+  assert.deepEqual(answer.findings, [
+    `The eHVD confirms Dr. Eva Brandl as responsible for the content at ${request.org}, found by the eHVD OID in the ID Austria login.`,
+  ]);
 
   assert.deepEqual(notices, [
     { kind: "filed", docType: "lab-result", patient: "Maria Beispiel", sender: "Dr. Eva Brandl", values: { within: 4, outside: 0 } },
@@ -151,7 +161,7 @@ test("request 2: Stefan Kern sends the report Dr. Leitner wrote", { skip: noDb }
 
   assert.deepEqual(await submitAnswer(deps, { token, session, file: REHAB_MARIA, form: maria }), { outcome: "filed" });
 
-  assert.equal(releaseInputs[0].responsibleIsSender, false);
+  assert.equal(releaseInputs[0].sender.gdaOid, null);
   const [answer] = filed;
   assert.deepEqual(answer.author, { titles: ["Dr."], given: "Johanna", family: "Leitner", ehvdOid: "1.2.40.0.34.3.2.99.2.1" });
   assert.deepEqual(answer.sender, { given: "Stefan", family: "Kern", ehvdOid: null, practitionerId: null });
@@ -189,7 +199,7 @@ test("M3: Max Beispiel's result is refused, logged as patient_mismatch, and noth
 test("an answer the eHVD does not confirm is held, and Accept files it", { skip: noDb }, async () => {
   const { request, token, session } = await verifiedRequest(EVA);
   const reason = "The eHVD does not list Dr. Eva Brandl as a member of Labor Kanalstraße.";
-  const { deps, filed, notices } = fakes(() => ({ result: "unconfirmed", reason }));
+  const { deps, filed, notices } = fakes(hold(reason));
 
   assert.deepEqual(await submitAnswer(deps, { token, session, file: LAB_MARIA, form: maria }), { outcome: "held" });
   assert.equal((await getRequest(db, request.id))?.state, "answer_held");
@@ -216,7 +226,7 @@ test("an answer the eHVD does not confirm is held, and Accept files it", { skip:
 
 test("Reject drops a held answer", { skip: noDb }, async () => {
   const { request, token, session } = await verifiedRequest(EVA);
-  const { deps } = fakes(() => ({ result: "unconfirmed", reason: "Not confirmed." }));
+  const { deps } = fakes(hold("Not confirmed."));
   assert.deepEqual(await submitAnswer(deps, { token, session, file: LAB_MARIA, form: maria }), { outcome: "held" });
 
   assert.equal((await rejectAnswer(deps, request.id))?.state, "cancelled");
