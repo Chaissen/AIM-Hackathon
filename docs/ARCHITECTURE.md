@@ -100,7 +100,7 @@ The link token and the 7 days start when the request goes out. **Send anyway** (
 
 - A pass is `sent`.
 - A mismatch waits in `awaiting_confirmation`, and `misdelivery_caught` records `address_mismatch` with both domains.
-- An address the eHVD could not confirm waits too, but with no audit entry: nothing was caught, and nothing went out.
+- An address the eHVD could not confirm waits too, but with no audit entry: nothing was caught, and nothing went out. If Dr. Hofer sends it anyway, `request_sent` with `sentAnyway` and no `misdelivery_caught` before it shows that.
 
 `create` returns `addressWarning`, the text next to **Send anyway**, or null. `get` returns it while the request waits. A mismatch is rebuilt from its audit entry; for an unconfirmed address `get` says only that the eHVD could not confirm it. `request.sendAnyway` sends a waiting request, and answers `CONFLICT` for any other state.
 
@@ -268,13 +268,13 @@ In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `
 
 `bindings` remembers which ID Austria person number answered as a given person at a given organisation. Its key is `given`, `family`, and `org`, so each person at an organisation has one person number. The audit log never holds document text.
 
-`src/server/requests/service.ts` is the only code that writes `requests`: `createRequest`, `sendAnyway`, `applyEvent`, `incrementFailedChecks`, `applyLoginTransition`, `expireDueRequests`, and `saveIdToken`, which the login callback calls for the bound person. The tRPC router `request` (`create`, `get`, `list`, `cancel`, all `clinicProcedure`) and the portal pages use it. A network member sees and changes only the requests they sent; for anyone else, `get` and `cancel` answer "not found", and `list` leaves the request out. `get` returns the request's audit entries, which name the outside person and their person number. The widget's **Audit log** tab (`clinic.audit`) still shows the whole log to every network member, for the demo.
+`src/server/requests/service.ts` is the only code that writes `requests`: `createRequest`, `sendAnyway`, `applyEvent`, `incrementFailedChecks`, `applyLoginTransition`, `expireDueRequests`, and `saveIdToken`, which the login callback calls for the bound person. The tRPC router `request` (`create`, `get`, `list`, `cancel`, `sendAnyway`, all `clinicProcedure`) and the portal pages use it. A network member sees and changes only the requests they sent; for anyone else, `get`, `cancel`, and `sendAnyway` answer "not found", and `list` leaves the request out. `get` returns the request's audit entries, which name the outside person and their person number. The widget's **Audit log** tab (`clinic.audit`) still shows the whole log to every network member, for the demo.
 
 ## Audit log
 
 | Event | Who | Outcome | What |
 |---|---|---|---|
-| `request_sent` | Dr. Hofer's Matrix ID | `sent` | Document type, channel, recipient address |
+| `request_sent` | Dr. Hofer's Matrix ID | `sent` | Document type, channel, recipient address, and whether Dr. Hofer clicked **Send anyway** |
 | `link_opened` | An anonymous browser, named by a keyed hash of its IP address from `X-Forwarded-For` | `shown`, or `refused` when the link no longer works | Request id and its state |
 | `identity_checked` | The ID Austria name and person number, or `ID Austria login` when Keycloak could not be reached | `pass`, `hold`, or `fail` | The reason for each check |
 | `answer_sent` | The verified person | `received` | SHA-256 and size of the upload |
@@ -285,7 +285,7 @@ Every entry has a UTC timestamp in `at`. The `outcome` column holds the short re
 
 | Event | `detail` fields |
 |---|---|
-| `request_sent` | `docType`, `channel`, `address` |
+| `request_sent` | `docType`, `channel`, `address`. Also `sentAnyway`, which `pnpm audit:check` does not require: true after **Send anyway**. Without a `misdelivery_caught` before it, the eHVD had not confirmed the address. |
 | `link_opened` | `state` |
 | `identity_checked` | `checks`, one entry per check with its result and reason |
 | `answer_sent` | `sha256`, `size` |

@@ -25,12 +25,12 @@ export type NewRequest = {
   requesterName: string;
 };
 
-const requestSent = (request: RequestRow, actor: AuditActor): AuditEntry => ({
+const requestSent = (request: RequestRow, actor: AuditActor, sentAnyway: boolean): AuditEntry => ({
   event: "request_sent",
   requestId: request.id,
   actor,
   outcome: "sent",
-  detail: { docType: request.docType, channel: request.channel, address: request.address },
+  detail: { docType: request.docType, channel: request.channel, address: request.address, sentAnyway },
 });
 
 const newExpiry = () => new Date(Date.now() + LINK_TTL_MS);
@@ -55,7 +55,7 @@ export async function createRequest(db: Db, input: NewRequest, addressCheck: Add
   const request = await db.transaction(async (tx) => {
     const [row] = await tx.insert(requests).values({ ...input, state, linkHash: hash, expiresAt: newExpiry() }).returning();
     const actor: AuditActor = { kind: "network_member", id: row.requester };
-    if (addressCheck.passed) await recordAudit(tx, requestSent(row, actor));
+    if (addressCheck.passed) await recordAudit(tx, requestSent(row, actor, false));
     else if ("domain" in addressCheck) {
       await recordAudit(tx, {
         event: "misdelivery_caught",
@@ -78,7 +78,7 @@ export async function sendAnyway(db: Db, id: number, actor: AuditActor) {
   const { token, hash } = newLinkToken();
   const request = await applyEvent(db, id, "send_anyway", async (tx) => {
     const [row] = await tx.update(requests).set({ linkHash: hash, expiresAt: newExpiry() }).where(eq(requests.id, id)).returning();
-    await recordAudit(tx, requestSent(row, actor));
+    await recordAudit(tx, requestSent(row, actor, true));
     return row;
   });
   return request && { request, token };

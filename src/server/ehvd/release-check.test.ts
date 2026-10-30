@@ -98,6 +98,13 @@ test("a hold keeps what the check found, for the filing if Dr. Hofer accepts", a
   assert.deepEqual(check.verdict === "hold" && [check.reason, check.organisation?.id.id, check.practitioner?.id.id], ["not_member", "1.2.40.0.34.3.1.99.1.2", "1.2.40.0.34.3.2.99.1.4"]);
 });
 
+test("a long name is cut in the sentence, never inside a character", async () => {
+  const long = `${"A".repeat(94)}\u{1F600}\u{1F600}`;
+  const document = lab((m) => m.replace("Validated by: Dr. Eva Brandl", `Validated by: Dr. ${long} Brandl`));
+  const check = await run({ document, sender: stefan });
+  assert.ok(check.verdict === "hold" && check.sentence.isWellFormed() && check.sentence.includes("…"), JSON.stringify(check));
+});
+
 test("a name without a given name never passes, not even from the sender with the claim", async () => {
   const document = lab((m) => m.replace("Validated by: Dr. Eva Brandl, lab physician", "Validated by: Dr. Brandl, lab physician"));
   for (const sender of [eva, stefan]) {
@@ -160,6 +167,11 @@ test("a family name too common for one answer adds the first given name, and hol
     { surname: "*Brandl*", maxResults: 200, ehvdstatus: "Inaktiv" },
     { surname: "*Brandl*", maxResults: 200, ehvdstatus: "Inaktiv", firstname: "*Eva*" },
   ]);
+  // A title glued to the given name is not searched as the given name.
+  queries.length = 0;
+  const glued = lab((m) => m.replace("Validated by: Dr. Eva Brandl", "Validated by: Dr.Eva Brandl"));
+  await checkRelease({ document: glued, org: "Labor Kanalstraße", sender: stefan }, common(false));
+  assert.equal(queries[1]?.firstname, "*Eva*");
   assert.deepEqual(held(await checkRelease({ document: lab(), org: "Labor Kanalstraße", sender: stefan }, common(true))), {
     reason: "too_many_matches",
     sentence: "The eHVD lists too many people named Brandl to confirm Dr. Eva Brandl.",
@@ -220,6 +232,10 @@ test("the organisation must be listed once, under the name the request went to",
   // A title is part of an organisation's name: "Med Labor Kanalstraße" is another organisation.
   const titled = await run({ document: lab(), org: "Med Labor Kanalstraße" });
   assert.equal(titled.verdict === "hold" && titled.reason, "organisation_differs");
+  // When the heading's spelling cannot even be searched, the first reason stays.
+  const curly = lab((m) => m.replace("# Labor Kanalstraße:", "# Labor Nirgendwo\u2019:"));
+  const kept = await run({ document: curly, org: "Labor Nirgendwo" });
+  assert.equal(kept.verdict === "hold" && kept.reason, "organisation_not_listed");
   // Typed without ß: the eHVD matches exactly, so the heading's spelling finds the lab.
   const typed = await run({ document: lab(), org: "Labor Kanalstrasse" });
   assert.equal(typed.verdict === "pass" && typed.organisation.id.id, LAB_OID);
@@ -240,6 +256,19 @@ test("the organisation must be the one the request went to, and a rehab clinic m
   assert.equal(check.verdict === "hold" && check.reason, "organisation_not_hospital");
   const elsewhere = await run({ document: lab(), org: "Labor Nirgendwo" });
   assert.equal(elsewhere.verdict === "hold" && elsewhere.reason, "organisation_differs");
+});
+
+test("via the claim, the namesake search must find the sender's own entry, or the check holds", async () => {
+  const empty = editPeople(() => []);
+  const check = await checkRelease({ document: lab(), org: "Labor Kanalstraße", sender: eva }, empty);
+  assert.deepEqual(check.verdict === "hold" && [check.reason, check.practitioner?.id.id], ["ehvd_error", EVA_OID]);
+});
+
+test("a sender with the claim who may not release it is checked like any other sender", async () => {
+  // Eva Brandl-Huber is inactive, but her name contains "Eva Brandl", so her login passes for a request to Eva Brandl.
+  const brandlHuber = { givenName: "Eva", familyName: "Brandl-Huber", gdaOid: "1.2.40.0.34.3.2.99.1.5" };
+  const check = await run({ document: lab(), sender: brandlHuber });
+  assert.deepEqual(check.verdict === "pass" && [check.via, check.practitioner.id.id, check.senderIsResponsible], ["search", EVA_OID, false]);
 });
 
 test("the OID in the login must belong to the person the document names", async () => {
