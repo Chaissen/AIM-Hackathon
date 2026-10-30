@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { parseDate, parseStay, parseViennaDateTime } from "./dates";
+import { parseDate, parseStay, parseViennaDateTime, viennaInstant } from "./dates";
 import { parseDocument, parsePersonLine } from "./parse";
 import type { LabResult, ParsedDocument, RehabReport } from "./types";
 
@@ -114,7 +114,13 @@ test("a document with a key twice is refused, so a second patient cannot slip pa
   const maria = scenario("lab-result-maria-beispiel.md").replace(/\r\n/g, "\n");
   const result = parseDocument(maria.replace("\nSample taken:", "\nPatient: Max Beispiel, born 1 January 1960\nSample taken:"));
   assert.equal(result.ok, false);
-  if (!result.ok) assert.deepEqual(result.errors, ['The file has more than one "Patient:" line.']);
+  if (!result.ok)
+    assert.deepEqual(result.errors, [
+      'The file has more than one "Patient:" line.',
+      "The file names more than one patient.",
+      "The file gives more than one birth date for the patient.",
+    ]);
+  if (!result.ok) assert.deepEqual(result.safety, ["repeated-key", "several-patients", "several-birth-dates"]);
 
   // A known key inside a section counts too.
   const rehab = scenario("rehab-report-maria-beispiel.md").replace(/\r\n/g, "\n");
@@ -127,6 +133,7 @@ test("a lab report needs exactly one result table with rows", () => {
   const second = parseDocument(`${maria}\n| Test | Result |\n|---|---|\n| CRP | 3 |\n`);
   assert.equal(second.ok, false);
   if (!second.ok) assert.deepEqual(second.errors, ["The lab report has more than one table. Put all results in one table."]);
+  if (!second.ok) assert.deepEqual(second.safety, ["several-tables"]);
 
   const empty = parseDocument(
     "# Labor Kanalstraße: lab report\n\nPatient: Maria Beispiel, born 12 March 1961\nSample taken: yesterday\nReported: 22 October 2026, 11:40\n\n| Test | Result | Unit | Reference range | LOINC code |\n|---|---|---|---|---|\n",
@@ -141,6 +148,51 @@ test("a lab row with a result that is not a number is reported with its row", ()
   const result = parseDocument(markdown);
   assert.equal(result.ok, false);
   if (!result.ok) assert.deepEqual(result.errors, ['Row 2 (aPTT): the result "pending" is not a number.']);
+  // A format problem, not a safety refusal: the AI fallback may still read it.
+  if (!result.ok) assert.deepEqual(result.safety, []);
+});
+
+test("a unit the UCUM list does not know stays text only", () => {
+  const markdown = scenario("lab-result-maria-beispiel.md").replace("| 10^9/L |", "| G/L |");
+  const doc = parsed(markdown) as LabResult;
+  assert.equal(doc.rows[2].unitText, "G/L");
+  assert.equal(doc.rows[2].ucum, null);
+});
+
+test("a vital sign needs a unit its FHIR profile allows, and blood pressure cannot be a row", () => {
+  const maria = scenario("lab-result-maria-beispiel.md");
+  const sO2 = (unit: string) => maria.replace("| aPTT | 31 | s | 25 to 37 | 14979-9 |", `| sO2 | 97 | ${unit} | 94 to 98 | 2708-6 |`);
+  assert.equal((parsed(sO2("%")) as LabResult).rows[1].ucum, "%");
+  const ratio = parseDocument(sO2("ratio"));
+  assert.equal(ratio.ok, false);
+  if (!ratio.ok) assert.deepEqual(ratio.errors, ['Row 2 (sO2): "ratio" is not a unit for this vital sign. Use a unit such as %.']);
+
+  const none = parseDocument(sO2(""));
+  assert.equal(none.ok, false);
+  if (!none.ok) assert.deepEqual(none.errors, ["Row 2 (sO2): this vital sign has no unit. Use a unit such as %."]);
+
+  const pressure = parseDocument(maria.replace("| aPTT | 31 | s | 25 to 37 | 14979-9 |", "| Systolic | 120 | mmHg | 90 to 140 | 8480-6 |"));
+  assert.equal(pressure.ok, false);
+  if (!pressure.ok) assert.match(pressure.errors.join(" "), /^Row 2 \(Systolic\): blood pressure needs systolic and diastolic together/);
+
+  // The oxygen profile's code means arterial blood, so a venous or capillary saturation is refused rather than mislabelled.
+  for (const [name, loinc] of [["SvO2", "19224-5"], ["sO2 cap", "2709-4"]]) {
+    const result = parseDocument(maria.replace("| aPTT | 31 | s | 25 to 37 | 14979-9 |", `| ${name} | 70 | % | 65 to 75 | ${loinc} |`));
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.errors.join(" "), new RegExp(`^Row 2 \\(${name}\\): the FHIR profile for oxygen saturation adds the code for arterial blood`));
+  }
+
+  const temperature = (parsed(maria.replace("| aPTT | 31 | s | 25 to 37 | 14979-9 |", "| Temperature | 37.2 | °C | 36 to 37.5 | 8310-5 |")) as LabResult).rows[1];
+  assert.equal(temperature.unitText, "°C");
+  assert.equal(temperature.ucum, "Cel");
+});
+
+test("a row without a test name is called so in its reason", () => {
+  const markdown = scenario("lab-result-maria-beispiel.md").replace("| aPTT | 31 | s | 25 to 37 | 14979-9 |", "|  | 31 | s | 25 to 37 | 14997-9 |");
+  const result = parseDocument(markdown);
+  assert.equal(result.ok, false);
+  // 14997-9 swaps two digits of 14979-9, which the check digit catches.
+  if (!result.ok) assert.deepEqual(result.errors, ['Row 2 (no test name): "14997-9" is not a LOINC code such as 6301-6, or its check digit is wrong.']);
 });
 
 test("dates in Europe/Vienna get the right offset in summer and in winter", () => {
@@ -151,7 +203,11 @@ test("dates in Europe/Vienna get the right offset in summer and in winter", () =
   assert.equal(parseViennaDateTime("1 January 2027, 0:05"), "2027-01-01T00:05:00+01:00");
   assert.equal(parseViennaDateTime("22 October 2026"), null);
   assert.equal(parseViennaDateTime("22 October 2026, 25:00"), null);
+  assert.equal(viennaInstant(new Date("2026-10-29T13:02:12.345Z")), "2026-10-29T14:02:12+01:00");
+  assert.equal(viennaInstant(new Date("2026-10-25T00:59:59Z")), "2026-10-25T02:59:59+02:00");
+  assert.equal(viennaInstant(new Date("2026-10-25T01:00:00Z")), "2026-10-25T02:00:00+01:00");
   assert.equal(parseDate("1 January 1960"), "1960-01-01");
+  assert.equal(parseDate("1 January 0999"), "0999-01-01");
   assert.equal(parseDate("29 February 2025"), null);
   assert.equal(parseDate("12 Mars 1961"), null);
 });
@@ -191,6 +247,8 @@ test("a LOINC code with a wrong check digit is refused", () => {
   // All scenario codes and the report code 11502-2 from docs/FHIR.md have valid check digits.
   for (const file of ["lab-result-maria-beispiel.md", "lab-result-max-beispiel.md"]) assert.equal((parsed(scenario(file)) as LabResult).rows.length, 4);
   assert.ok(parseDocument(scenario("lab-result-maria-beispiel.md").replace("6301-6", "11502-2")).ok);
+  // A leading zero keeps the check digit, but LOINC codes have none: 02160-0 is not 2160-0.
+  for (const code of ["02160-0", "00000-0"]) assert.equal(parseDocument(scenario("lab-result-maria-beispiel.md").replace("6301-6", code)).ok, false, code);
 });
 
 test("a byte order mark at the start does not hide the heading", () => {

@@ -222,13 +222,50 @@ The parser reads headings and tables from markdown-it tokens and splits `Key: va
 
 The document kind picks the mapper. `lab report` goes to the lab mapper and `discharge report` goes to the rehab mapper. The parser reads any other kind as a generic document. The answer flow takes only the kind the request asked for, so it refuses a generic document with the reason, and nothing is kept.
 
-The parser lives in `src/server/documents/`. `parseDocument()` returns a typed `LabResult`, `RehabReport`, or generic document (`types.ts`), or a list of reasons the uploader can act on; it never throws on content and never returns a half-read document. It refuses a document without a heading or a readable `Patient` line, a known key on more than one line with different values (a second `Patient` line could slip past the patient check), a lab report without exactly one result table, a result that is not a number (also `1,245`, which could mean 1245 or 1.245), a LOINC code with a wrong format or check digit, and a missing or unreadable date or stay line that the kind needs. Inside a `##` section only known keys such as `Written by` count, so a sentence with a colon stays text. Outside the sections a line with an unknown key such as `Note:` is a field and free text, so it still reaches the conclusion. A byte order mark at the start is ignored. Person lines split off titles such as `Dr.`, `Dr.in`, or `Prim.` with the same rule as `nameWords`. It converts the unit `10^9/L` to UCUM `10*9/L`, computes `N`, `H`, or `L` from the reference range, and reads a stay that names the month once, twice, or crosses a year. `checkAnswerPatient()` in `patient-check.ts` runs `samePatient()` on the document and on the form. A patient record without a family name or birth date never matches. `uploadHash()` gives the SHA-256 that stays in the audit log when an upload is discarded.
+The parser lives in `src/server/documents/`. `parseDocument()` returns a typed `LabResult`, `RehabReport`, or generic document (`types.ts`), or a list of reasons the uploader can act on; it never throws on content and never returns a half-read document. It refuses a document without a heading or a readable `Patient` line, a known key on more than one line with different values (a second `Patient` line could slip past the patient check), a lab report without exactly one result table, a result that is not a number (also `1,245`, which could mean 1245 or 1.245), a LOINC code with a wrong format or check digit, a vital sign row FHIR cannot file (blood pressure, a vitals panel, venous or capillary sO2) or with a unit its FHIR profile does not allow, and a missing or unreadable date or stay line that the kind needs. It also refuses a file whose lines name more than one patient or birth date in any written form, such as a bold `**Patient:**` line (`patient-lines.ts`). A refused result lists the refusals that stop a misdelivery in `safety` (see the AI fallback below). Inside a `##` section only known keys such as `Written by` count, so a sentence with a colon stays text. Outside the sections a line with an unknown key such as `Note:` is a field and free text, so it still reaches the conclusion. The conclusion of a lab report is all its free text: the lines outside sections, `###` headings, a second `#` heading, code blocks, and each `##` section as `Heading: text`, so a comment such as `## Comment` is not lost. In a rehab report a `###` heading or a code block inside a `##` section becomes part of that section's text in the same way. A byte order mark at the start is ignored. Person lines split off titles such as `Dr.`, `Dr.in`, or `Prim.` with the same rule as `nameWords`. It codes the units on its list in `ucum.ts` in UCUM, for example `10^9/L` as `10*9/L` and `µmol/l` as `umol/L`, and leaves any other unit as text; it computes `N`, `H`, or `L` from the reference range, and reads a stay that names the month once, twice, or crosses a year. `checkAnswerPatient()` in `patient-check.ts` runs `samePatient()` on the document and on the form. A patient record without a family name or birth date never matches. `uploadHash()` gives the SHA-256 that stays in the audit log when an upload is discarded.
 
-`extra.test.ts` runs our extra test documents from `track/scenario/extra/` through the parser and the patient check ([Development](DEVELOPMENT.md#extra-test-documents)). Their index lists the gaps the parser still has: one-sided ranges such as `< 5`, and units that need more than `^` to `*` to become UCUM (`µmol/L`, `µg/dL`, `mIU/L`).
+`extra.test.ts` runs our extra test documents from `track/scenario/extra/` through the parser and the patient check ([Development](DEVELOPMENT.md#extra-test-documents)). Their index lists the gaps the parser still has, such as one-sided ranges like `< 5`.
 
 ### AI fallback (optional, cut first)
 
-If the parser cannot read a document, a language model may extract the same fields as JSON against a fixed schema. Every value and every LOINC code it returns must appear word for word in the document. The patient check stays deterministic. An answer read by the model always waits until Dr. Hofer accepts it in the widget.
+If the parser cannot read a document, the AI fallback may read it. It follows one rule: code decides everything that carries safety or meaning, and the model never chooses a value. The patient check stays deterministic. An answer the fallback reads always waits until Dr. Hofer accepts it in the widget.
+
+`parseWithFallback()` in `src/server/documents/fallback.ts` runs `parseDocument()` first. It goes on only when that fails for its format and a reader is configured. The reader in `anthropic-reader.ts` calls the Anthropic Messages API with structured outputs (`AI_FALLBACK_MODEL`, default `claude-opus-5-5`). It uses no server-side fallback model, so the model named in the README is the only one that reads a document. Without `ANTHROPIC_API_KEY` the fallback is off. Tests inject a stub reader and never call the network.
+
+**Safety refusals never go to the model.** They exist to stop a misdelivery, not because the format is unknown. `parseDocument()` marks them in `safety` on its failure result, and the fallback runs the same checks on formats the parser does not know:
+
+- `repeated-key`: a key that the reader reads as a field on more than one line with different values, such as a second `Patient:` line. Two `Note:` lines are text, not a refusal.
+- `several-tables`: more than one table
+- `several-patients`: lines that name different patients
+- `several-birth-dates`: lines that give the patient different birth dates
+
+`patient-lines.ts` finds the patient lines and birth date lines wherever they are written: plain text, a heading, bold or italic keys, list items, link text, a code block, or HTML, with a colon, a fullwidth colon, or a dash as the separator, with or without a space after it, with curly apostrophes, and with a suffix such as `(2)`. `Patient`, `Patient name`, and similar keys name the patient anywhere in the file. `Name`, `Full name`, `Born`, and the pair `First name` and `Surname` count only in the header block; further down, `Name: Stefan Kern` under `## Contact` is a contact and `Born: in Linz` under `## History` is a sentence. One rule, `headerBlock()`, defines the header block for every reader: it runs from the start of the file up to the first table, or up to the first heading after the `#` title that does not open the patient's details. A `## Patient`, `## Patient data`, or `## Patient details` section belongs to it, so `## Patient` followed by `Name: Maria Beispiel` names the patient, and a second such section with another name is refused. A heading before the title does not end it, so `### Ref 123` before the title cannot push a `Name: Max Beispiel` line out of it. Below the header block, such a line is not counted as a patient line; it stays visible as text, in the conclusion or its section, and the patient check runs on the patient line of the header block. This known gap is listed in #46 with the other forms the scan does not find yet. Birth date keys are `Date of birth`, `Birth date`, `DOB`, and similar; `Mother's date of birth` is not one. The parser runs this scan too, so `**Patient:** Max Beispiel` next to Maria's line is refused there as well. Forms the scan does not find yet, such as a `| Patient | Max Beispiel |` row in a key/value table, are listed in #46 too.
+
+**Code reads the document** with synonyms for keys and column headers (`readWide()`, not exported):
+
+- The patient name is the whole value of the one patient line, cut only before a birth clause such as `, born 12 March 1961` or `, DOB 12.03.1961`. A line with anything else after a comma, such as `Beispiel, Max` or `Maria Beispiel, Max Beispiel`, gives no record, so a name is never cut short to one that passes the patient check. `First name` and `Surname` lines in the header block give the name when there is no patient line. The birth date is the one date that the patient line and the birth date lines give.
+- Text or a heading before the `#` title gives no record. The parser takes the first `#` heading wherever it is, but the fallback does not guess which part of such a file is the document.
+- The type comes from the kind in the heading: `lab report` and similar kinds give a lab result, `discharge report` and similar kinds give a rehab report. A table under any other kind gives no record.
+- Each key field comes only from its own keys, for example `Sample taken`, `Collected`, or `Collection date` for `sampleTaken`. A field found on two lines with different values gives no record.
+- Each lab field comes from the one column whose header names it, for example `Result` or `Value`, never `Previous`. A field with no such column, or with two, gives no record. Every body row becomes a lab row.
+- Ranges such as `0.8 to 1.2`, `0.8 - 1.2`, `25 – 37`, `25 — 37`, or `25 − 37` are read. A written range that cannot be read, such as `< 37` or `25 bis 37`, gives no record, so a value outside it never passes as normal. A result that is not a number, a LOINC code with a wrong check digit, or a vital sign row the parser refuses gives no record either. Units get UCUM codes as in the parser (`rowUnit()` in `parse.ts`).
+- The conclusion is all the free text, built the same way as in the parser, and the sections are the `##` sections.
+- Dates may also be written `12.03.1961`, `1961-03-12`, or `22.10.2026 08:10`.
+
+If code cannot read the file, the model is not called and the uploader gets the reasons.
+
+**The model is a second reader.** It reads the same document on its own and returns the fields that carry meaning (`modelReadingSchema`): type, organisation, kind, patient name and birth date, the key fields, and every lab row as written. Its reading must agree with code's in each of them: the same text, white space aside, and the same birth date. If it agrees, the record is code's record, held. If it does not, nothing is filed from it, and `held.unverified` lists the model's values that differ. The model can stop a record but never change one.
+
+| Outcome | Result | What happens |
+|---|---|---|
+| The parser reads the file | `{ ok: true, document }` | Normal flow, the model is not called |
+| A safety refusal, from the parser or from the fallback | `{ ok: false, errors, safety }` | As without the fallback, the model is not called |
+| No key, or code cannot read the file | `{ ok: false, errors, safety: [] }` | As without the fallback, the model is not called |
+| The model call fails, or its answer does not fit the schema | The parser's `{ ok: false, errors, safety: [] }` | As without the fallback |
+| The model's reading agrees with code's | `{ ok: true, document, held }` | Held for Dr. Hofer with the record |
+| The model's reading differs from code's | `{ ok: false, errors, held }` | Held for Dr. Hofer with the file only. `held.unverified` lists the differing values |
+
+`held.reason` goes into the held notice and names no document content. `held.unverified` quotes the model's values, so it may appear in the widget but never in Matrix or the audit log. Accepting or rejecting a held answer is the widget's job (T05). Wiring the fallback into the upload is part of the answer flow, which calls `parseWithFallback(markdown, anthropicReader())` in place of `parseDocument(markdown)`. The test fixtures in `src/server/documents/fixtures/` are Maria's lab result and rehab report with another heading, other key and column names, dotted dates, and ranges written with `-`.
 
 ## Storage
 
@@ -250,7 +287,7 @@ In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `
 
 `bindings` remembers which ID Austria person number answered as a given person at a given organisation. Its key is `given`, `family`, and `org`, so each person at an organisation has one person number. The first filed answer stores it, with the sender's Practitioner id when the eHVD does not list them. The audit log never holds document text.
 
-`src/server/requests/service.ts` is the only code that writes `requests`: `createRequest`, `sendAnyway`, `applyEvent`, `incrementFailedChecks`, `applyLoginTransition`, `saveIdToken`, and `expireDueRequests`. The tRPC router `request` (`create`, `get`, `list`, `cancel`, all `clinicProcedure`) and the portal pages use it. A network member sees and changes only the requests they sent; for anyone else, `get` and `cancel` answer "not found", and `list` leaves the request out. `get` returns the request's audit entries, which name the outside person and their person number. The widget's **Audit log** tab (`clinic.audit`) still shows the whole log to every network member, for the demo.
+`src/server/requests/service.ts` is the only code that writes `requests`: `createRequest`, `sendAnyway`, `applyEvent`, `incrementFailedChecks`, `applyLoginTransition`, `expireDueRequests`, and `saveIdToken`, which the login callback calls for the bound person. The tRPC router `request` (`create`, `get`, `list`, `cancel`, all `clinicProcedure`) and the portal pages use it. A network member sees and changes only the requests they sent; for anyone else, `get` and `cancel` answer "not found", and `list` leaves the request out. `get` returns the request's audit entries, which name the outside person and their person number. The widget's **Audit log** tab (`clinic.audit`) still shows the whole log to every network member, for the demo.
 
 ## Audit log
 
@@ -258,7 +295,7 @@ In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `
 |---|---|---|---|
 | `request_sent` | Dr. Hofer's Matrix ID | `sent` | Document type, channel, recipient address |
 | `link_opened` | An anonymous browser, named by a keyed hash of its IP address from `X-Forwarded-For` | `shown`, or `refused` when the link no longer works | Request id and its state |
-| `identity_checked` | The ID Austria name and person number | `pass`, `hold`, or `fail` | The reason for each check |
+| `identity_checked` | The ID Austria name and person number, or `ID Austria login` when Keycloak could not be reached | `pass`, `hold`, or `fail` | The reason for each check |
 | `answer_sent` | The verified person | `received` | SHA-256 and size of the upload |
 | `answer_filed` | The request service | `filed` | FHIR resource ids and the Provenance id, `sha256` of the filed upload, and `acceptedBy`, the Matrix ID of the network member who accepted a held answer |
 | `misdelivery_caught` | Whoever triggered it | `address_mismatch`, `wrong_person`, or `patient_mismatch` | The two domains, the failed checks, or the upload's SHA-256 and which part of the patient did not match |
@@ -276,7 +313,7 @@ Every entry has a UTC timestamp in `at`. The `outcome` column holds the short re
 
 The widget and `GET /audit` show the entries.
 
-`recordAudit()` in `src/server/audit/record.ts` writes the entries. Its types fix the outcome and the detail fields for each event and each misdelivery reason, and they hold ids, hashes, and check results only, never document text or the data of a wrong patient. An entry that belongs to a state change goes into the same transaction. `answer_filed` also names `output`, `targets`, `task`, `sender`, `author`, and `organization` (`AnswerFiled` in `src/server/fhir/file-answer.ts`). `fileAnswer` (T13) still inserts it directly until it switches to `recordAudit()`.
+`recordAudit()` in `src/server/audit/record.ts` writes the entries. Its types fix the outcome and the detail fields for each event and each misdelivery reason, and they hold ids, hashes, and check results only, never document text or the data of a wrong patient. An entry that belongs to a state change goes into the same transaction. A login is the exception: `runIdentityChecks` writes its entries through the port before it applies the state change, so `identity_checked` can record a pass whose change was refused, for example by the forced lock. `answer_filed` also names `output`, `targets`, `task`, `sender`, `author`, and `organization` (`AnswerFiled` in `src/server/fhir/file-answer.ts`). `fileAnswer` (T13) still inserts it directly until it switches to `recordAudit()`.
 
 The IP hash is an HMAC-SHA256 with a key derived from `ORDY_SECRET`, cut to 16 hex characters, because a plain hash of an IPv4 address can be reversed by trying all of them. Without a private `ORDY_SECRET`, the entry says `ip unknown` instead. Next.js fills `X-Forwarded-For` from the connection only when the client sent none. Without a proxy in front, the client can set it, so the hash is a hint, not proof.
 
@@ -300,7 +337,8 @@ Configuration is read in `src/env.ts`. Service addresses and demo accounts have 
 | `KEYCLOAK_ADMIN_USER`, `KEYCLOAK_ADMIN_PASSWORD` | `admin`, demo value (`pnpm citizen` only) |
 | `EHVD_URL` | `http://localhost:8095/` (planned, T15) |
 | `SMTP_HOST`, `SMTP_PORT`, `MAILPIT_API_URL` | `localhost`, `1025`, `http://localhost:8025` |
-| `ANTHROPIC_API_KEY` | unset, only for the optional AI fallback |
+| `ANTHROPIC_API_KEY` | unset, only for the optional AI fallback; unset turns it off |
+| `AI_FALLBACK_MODEL` | `claude-opus-5-5` |
 
 The eHVD mock's `EHVD_ALLOWLIST` and `EHVD_SCHEMA_ERRORS` are read only by its container, so they live in `docker-compose.yml` and `.env.example`, not in `src/env.ts`. See [eHVD](EHVD.md#configuration).
 
@@ -330,7 +368,7 @@ src/
     api/healthz/route.ts      health check for scripts and containers
     widget/                   request form inside Element. Sending is planned, T05
     r/[token]/                outside portal: landing page, answer page, and the held, refused, and unavailable pages (T09)
-    auth/                     ID Austria login and callback route handlers, expired-login page. Identity checks planned, T08
+    auth/                     ID Austria login and callback route handlers, expired-login page. The callback runs the identity checks (T08)
     sms/page.tsx              SMS screen. Reading the SMS log planned, T06
     audit/page.tsx            audit UI; authenticated data via clinic.audit
   components/ui/              shadcn/ui components, added with `pnpm dlx shadcn@4.22.1 add <name>`
@@ -345,8 +383,8 @@ src/
     requests/                 request lifecycle, link tokens, the request service, and notifyRequest for its notices
     answers/                  the answer flow: submitAnswer, acceptAnswer, fhirFiling, and the ports for the release check and the mappers (T09)
     audit/record.ts           recordAudit() for the six audit events
-    fhir/                     FHIR client and the filing (T13), mappers planned (T12, T14)
-    documents/                parser and patient check (T10, T11), typed records in types.ts
+    fhir/                     FHIR client, the filing (T13), lab and rehab mappers (T12, T14)
+    documents/                parser and patient check (T10, T11), typed records in types.ts, UCUM and vital sign lists, AI fallback (T22), the scenario documents as parsed records for tests
     identity/names.ts         name words, subset and shared-word tests from Identity, shared by the patient check and T08
     identity/checks.ts        identity checks at login: level, name, person number, eHVD claim (T08)
     identity/login.ts         what a check result does: state, audit entries, page, notice, and runIdentityChecks for the callback (T08)

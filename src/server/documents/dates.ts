@@ -18,7 +18,8 @@ function dayMonth(day: string, monthName: string): { day: number; month: number 
   return month > 0 ? { day: Number(day), month } : null;
 }
 
-const toIso = ({ year, month, day }: DateParts): IsoDate => `${year}-${pad(month)}-${pad(day)}`;
+// FHIR wants four digits for the year, also for a typo such as 0999.
+const toIso = ({ year, month, day }: DateParts): IsoDate => `${String(year).padStart(4, "0")}-${pad(month)}-${pad(day)}`;
 
 /** `12 March 1961` to `1961-03-12`. Null for any other format or an impossible date. */
 export function parseDate(text: string): IsoDate | null {
@@ -99,4 +100,36 @@ export function parseStay(text: string): { start: IsoDate; end: IsoDate } | null
   if (!start || !isRealDate(start)) return null;
   const startIso = toIso(start);
   return startIso <= end ? { start: startIso, end } : null;
+}
+
+// Wider formats for the AI fallback only (docs/ARCHITECTURE.md, "AI fallback"). The parser itself keeps the fixed list above.
+
+/** `12.03.1961` or `1961-03-12` to `12 March 1961`. Null for any other text. */
+function numericToWords(text: string): string | null {
+  const dotted = text.trim().match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  const iso = text.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const [day, month, year] = dotted ? [dotted[1], dotted[2], dotted[3]] : iso ? [iso[3], iso[2], iso[1]] : [];
+  const name = month ? MONTHS[Number(month) - 1] : undefined;
+  return name ? `${Number(day)} ${name} ${year}` : null;
+}
+
+/** `12 March 1961`, `12.03.1961`, or `1961-03-12` to `1961-03-12`. */
+export function parseDateWide(text: string): IsoDate | null {
+  const words = numericToWords(text);
+  return parseDate(text) ?? (words ? parseDate(words) : null);
+}
+
+/** `22 October 2026, 08:10`, `22.10.2026 08:10`, or `2026-10-22, 08:10` to a Vienna `dateTime`. */
+export function parseViennaDateTimeWide(text: string): ViennaDateTime | null {
+  const m = text.trim().match(/^(.+?),?\s+(\d{1,2}:\d{2})$/);
+  const words = m ? (numericToWords(m[1]) ?? m[1]) : null;
+  return parseViennaDateTime(text) ?? (words ? parseViennaDateTime(`${words}, ${m![2]}`) : null);
+}
+
+/** Any stay `parseStay()` reads, or two wide dates joined by ` to ` or ` - `, for example `02.09.2026 - 23.09.2026`. */
+export function parseStayWide(text: string): { start: IsoDate; end: IsoDate } | null {
+  const sides = text.trim().split(/\s+(?:to|-|–)\s+/);
+  const start = sides.length === 2 ? parseDateWide(sides[0]) : null;
+  const end = sides.length === 2 ? parseDateWide(sides[1]) : null;
+  return parseStay(text) ?? (start && end && start <= end ? { start, end } : null);
 }

@@ -29,7 +29,9 @@ const schema = z.object({
   SMTP_PORT: z.coerce.number().int().default(1025),
   MAIL_FROM: z.string().default("ordy · Klinikum Beispielstadt <ordy@klinikum.example>"),
   MAILPIT_API_URL: z.url().default("http://localhost:8025"),
-  ANTHROPIC_API_KEY: z.string().optional(),
+  // AI fallback parser (task T22). Unset ANTHROPIC_API_KEY turns it off.
+  ANTHROPIC_API_KEY: z.preprocess((value) => (value === "" ? undefined : value), z.string().optional()),
+  AI_FALLBACK_MODEL: z.string().default("claude-opus-5-5"),
 });
 
 export const env = schema.parse(process.env);

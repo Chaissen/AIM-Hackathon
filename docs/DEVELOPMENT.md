@@ -198,7 +198,7 @@ sha256sum tools/validator_cli.jar
 java -jar tools/validator_cli.jar some-resource.json -version 4.0
 ```
 
-A jar with another hash, such as one from `releases/latest`, makes `pnpm validate` stop; delete it and run again. To update the validator, change the version, URL, and hash in `validator.ts` and here. It checks LOINC codes against tx.fhir.org, so it needs internet access. `pnpm validate` runs it on every filed resource, and `pnpm validate <file>` on a hand-made one. The first run takes a few minutes, because the validator downloads the FHIR packages to `~/.fhir`.
+A jar with another hash, such as one from `releases/latest`, makes `pnpm validate` stop; delete it and run again. To update the validator, change the version, URL, and hash in `validator.ts` and here, and check the vital sign list in `src/server/documents/vital-signs.ts` against the new version ([FHIR](FHIR.md#validation)). It checks LOINC codes against tx.fhir.org, so it needs internet access. `pnpm validate` runs it on every filed resource, and `pnpm validate <file>` on a hand-made one. The first run takes a few minutes, because the validator downloads the FHIR packages to `~/.fhir`.
 
 ## Clean slate
 
