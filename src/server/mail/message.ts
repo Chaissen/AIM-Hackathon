@@ -28,12 +28,14 @@ export function requestEmail({ requester, clinic, link, expiresAt }: RequestEmai
 export type ContentCategory = "patient-name" | "birth-date" | "document-type";
 type Term = { category: ContentCategory; words: string[] };
 
-// Umlauts are spelled out. The final sigma folds to σ, because lowercasing "ΠΑΥΛΟΣ's" gives σ but "Παύλος" ends in ς.
+// Umlauts are spelled out. Two letters fold because case changes them. Lowercasing "YILMAZ" gives i but "Yılmaz" has ı,
+// and lowercasing "ΠΑΥΛΟΣ's" gives σ but "Παύλος" ends in ς.
 const FOLD = new Map([
   ["ä", "ae"],
   ["ö", "oe"],
   ["ü", "ue"],
   ["ß", "ss"],
+  ["ı", "i"],
   ["ς", "σ"],
 ]);
 const isDigit = (c: string) => c >= "0" && c <= "9";
