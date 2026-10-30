@@ -5,7 +5,7 @@ import { type AuditActor, type AuditEntry, recordAudit } from "@/server/audit/re
 import type { Db, Tx } from "@/server/db";
 import { bindings, requests } from "@/server/db/schema";
 import type { LoginTransition } from "@/server/identity/login";
-import { initialState, MAX_FAILED_CHECKS, OPEN_STATES, type RequestEvent, transition, TransitionError } from "./lifecycle";
+import { initialState, MAX_FAILED_CHECKS, OPEN_STATES, type RequestEvent, type RequestState, transition, TransitionError } from "./lifecycle";
 import { hashLinkToken, isLinkToken, LINK_TTL_MS, newLinkToken } from "./link-token";
 
 // Reads and state changes of requests. Every caller goes through here: the tRPC router, the portal pages, and later the login and filing.
@@ -131,14 +131,15 @@ export type NonLoginEvent = Exclude<RequestEvent, (typeof LOGIN_EVENT)[keyof typ
  * `applyLoginTransition` below. Locks the row, so two events on one request run one after the other.
  * Returns null for an unknown request and throws a TransitionError if the state does not accept the event.
  *
- * `then` runs in the same transaction with the updated request: write the audit entry that belongs to the change there,
- * so the state and the log never disagree. It may update more columns and return the request it read back.
+ * `then` runs in the same transaction with the updated request and the state it changed from: write the audit entry that
+ * belongs to the change there, so the state and the log never disagree. It may update more columns and return the request
+ * it read back. If it throws, the state change rolls back.
  */
 export async function applyEvent(
   db: Db,
   id: number,
   event: NonLoginEvent,
-  then?: (tx: Tx, request: RequestRow) => Promise<RequestRow | void>,
+  then?: (tx: Tx, request: RequestRow, from: RequestState) => Promise<RequestRow | void>,
 ): Promise<RequestRow | null> {
   return db.transaction(async (tx) => {
     await expireDueRequests(tx, id);
@@ -148,7 +149,7 @@ export async function applyEvent(
     if ((Object.values(LOGIN_EVENT) as RequestEvent[]).includes(event)) throw new TransitionError(row.state, event);
     const state = transition(row.state, event, row.failedChecks);
     const [updated] = await tx.update(requests).set({ state }).where(eq(requests.id, id)).returning();
-    return (await then?.(tx, updated)) ?? updated;
+    return (await then?.(tx, updated, row.state)) ?? updated;
   });
 }
 

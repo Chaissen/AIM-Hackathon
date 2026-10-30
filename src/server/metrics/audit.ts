@@ -1,12 +1,19 @@
 // Metrics computed from audit rows: audit coverage, effort, and misdeliveries caught (docs/WHITEPAPER.md, "How we measure the metrics").
 // Pure functions, so the scripts and the tests share them without a database.
-import { auditEvent, type auditLog, type requests } from "@/server/db/schema";
+import type { auditLog, requests } from "@/server/db/schema";
 
 export type AuditRow = typeof auditLog.$inferSelect;
 export type AuditEventName = AuditRow["event"];
 export type MisdeliveryKind = "address_mismatch" | "wrong_person" | "patient_mismatch";
 
-export const AUDIT_EVENTS: readonly AuditEventName[] = auditEvent.enumValues;
+export const TRACK_EVENTS = [
+  "request_sent",
+  "link_opened",
+  "identity_checked",
+  "answer_sent",
+  "answer_filed",
+  "misdelivery_caught",
+] as const satisfies readonly AuditEventName[];
 
 type FieldKind = "text" | "number" | "boolean" | "list";
 type DetailFields = Record<string, FieldKind>;
@@ -18,6 +25,7 @@ export const WHAT: Record<Exclude<AuditEventName, "misdelivery_caught">, DetailF
   identity_checked: { checks: "list" },
   answer_sent: { sha256: "text", size: "number" },
   answer_filed: { resources: "list", provenance: "text" },
+  request_decided: { from: "text", to: "text" },
 };
 // A misdelivery names its kind in `outcome`, and the detail fields depend on the kind.
 export const MISDELIVERY_WHAT: Record<MisdeliveryKind, DetailFields> = {
@@ -72,7 +80,7 @@ export type RequestCoverage = {
 
 export function requestCoverage(requestId: number, rows: AuditRow[]): RequestCoverage {
   const own = rows.filter((r) => r.requestId === requestId);
-  const events = AUDIT_EVENTS.map((event): EventCoverage => {
+  const events = TRACK_EVENTS.map((event): EventCoverage => {
     const entries = own.filter((r) => r.event === event);
     const complete = entries.filter((r) => missingFields(r).length === 0);
     const example = complete[0] ?? entries[0];
@@ -185,7 +193,7 @@ export function filedReferences(rows: AuditRow[]): string[] {
 
 // One line per event type, as `pnpm audit:check` and `pnpm scenario` print them.
 export function coverageLines(c: RequestCoverage): string[] {
-  const lines = [`Request ${c.requestId}: ${c.covered} of ${AUDIT_EVENTS.length} event types with who, what, and when`];
+  const lines = [`Request ${c.requestId}: ${c.covered} of ${TRACK_EVENTS.length} event types with who, what, and when`];
   for (const e of c.events) {
     const ex = e.example;
     const entry = ex ? `${ex.at.toISOString()}  ${ex.actor} (${ex.actorKind})  ${ex.outcome}` : "no entry";
