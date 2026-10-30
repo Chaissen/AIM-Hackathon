@@ -1,7 +1,12 @@
-import { SmsPhone } from "@/components/demo/sms-phone";
+import { notFound } from "next/navigation";
 
-// GET /sms: every SMS the request service would have sent, like a phone screen (docs/ARCHITECTURE.md).
+import { SmsPhone } from "@/components/demo/sms-phone";
+import { demoToolsEnabled } from "@/lib/demo-tools";
+
+// GET /sms: every SMS the request service would have sent, like a phone screen (docs/ARCHITECTURE.md). Each SMS holds
+// its working link, so a production build answers 404 (docs/COMPLIANCE_AND_SAFETY.md).
 export default function SmsScreen() {
+  if (!demoToolsEnabled) notFound();
   return (
     <main className="grid justify-items-center gap-6 px-4 py-10 sm:py-14">
       <div className="grid gap-2 text-center">

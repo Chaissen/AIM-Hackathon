@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Resets the local demo data before a run or the pitch: Postgres (requests, audit log) and HAPI FHIR.
+# Resets the local demo data before a run or the pitch: Postgres (requests, audit log), HAPI FHIR, Mailpit.
 # Matrix users and the room stay. Run `pnpm dev` again afterwards if it was running.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -10,6 +10,9 @@ docker compose exec -T postgres psql -q -U ordy -d ordy -v ON_ERROR_STOP=1 \
 
 echo "Recreating HAPI FHIR (its data lives in the container) ..."
 docker compose up -d --force-recreate hapi >/dev/null
+
+echo "Emptying Mailpit ..."
+curl -fsS -X DELETE http://localhost:8025/api/v1/messages >/dev/null
 
 echo "Waiting for HAPI FHIR ..."
 until curl -fsS http://localhost:8090/fhir/metadata >/dev/null 2>&1; do sleep 3; done

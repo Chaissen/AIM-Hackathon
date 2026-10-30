@@ -63,6 +63,19 @@ export const requests = pgTable("requests", {
   matrixEvent: text("matrix_event"),
 });
 
+// The SMS screen (/sms) stands in for the recipient's phone, as Mailpit stands in for the inbox: one row per SMS the
+// request service would have sent. The body holds the link, so this is the one table with a link token in plain text.
+// A real SMS gateway replaces it. docs/ARCHITECTURE.md, "Outgoing messages".
+export const smsOutbox = pgTable("sms_outbox", {
+  id: serial("id").primaryKey(),
+  requestId: integer("request_id")
+    .notNull()
+    .references(() => requests.id, { onDelete: "cascade" }),
+  to: text("to").notNull(),
+  body: text("body").notNull(),
+  sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 /** The sender of a held answer, as ID Austria named them at login. */
 export type HeldAnswerSender = { givenName: string; familyName: string; gdaOid: string | null };
 
