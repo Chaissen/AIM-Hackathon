@@ -8,7 +8,7 @@ Prototype on synthetic data only. Not a medical device. Not for clinical use. Re
 
 ## Status
 
-Status on `main`, 30 October 2026, 02:30: the scenario does not run end to end yet. ordy stores a request with its link, and the outside person can open the link and log in with the simulated ID Austria. But the widget does not send requests yet, no email or SMS goes out, and the answer cannot be uploaded, so nothing is filed and no metric is measured.
+Status on `main`, 30 October 2026, 02:30: the scenario does not run end to end yet. The request core stores a request with its link, and with that link the outside person can log in with the simulated ID Austria. But no screen creates a request yet: the widget does not call the request core, no email or SMS goes out, and the answer cannot be uploaded. So nothing is filed and no metric is measured.
 
 | Part | State |
 |---|---|
@@ -16,11 +16,11 @@ Status on `main`, 30 October 2026, 02:30: the scenario does not run end to end y
 | Dr. Hofer's room with the pinned ordy widget | Works: Matrix sign-in, patient list from HAPI, audit log tab. The request form checks its input but does not call the request core yet. |
 | Matrix bot | Works: `!help` and `!status` |
 | Simulated ID Austria (Keycloak) | Works: the real ID Austria claim names, five test citizens, `pnpm citizen` for more. |
-| Request core: requests in Postgres with their lifecycle, link tokens, and audit log | Works through the `request.create` procedure, which writes `request_sent`. No email, SMS, or Matrix notice goes out yet. In development, `pnpm dev` prints the link in its log. |
-| Outside portal: landing page, ID Austria login, identity checks at login (level, name, person number, the eHVD entry ID Austria sends), answer page | Works: the landing page shows only the requesting doctor and clinic and writes `link_opened`. The login runs the identity checks and writes `identity_checked`. A wrong person (M1, M2) sees nothing, the audit log records `misdelivery_caught`, and Dr. Hofer gets a Matrix notice. The right person sees the patient and the requested document. |
+| Request core: requests in Postgres with their lifecycle, link tokens, and audit log | Works through the `request.create` procedure, which writes `request_sent`, but no screen calls it yet. No email, SMS, or "request sent" notice goes out yet. In development, `pnpm dev` prints the link of each new request in its log. |
+| Outside portal: landing page, ID Austria login, identity checks at login (level, name, person number, the eHVD entry ID Austria sends), answer page | Works: the landing page shows only the requesting doctor and clinic and writes `link_opened`. The login runs the identity checks and writes `identity_checked`. A wrong person (M1, M2) never sees the patient or the document type, the audit log records `misdelivery_caught`, and Dr. Hofer gets a Matrix notice. The page for a refused, held, or failed login is not built yet, so such a login ends on a 404 page. The right person sees the patient and the requested document type. |
 | eHVD mock, the Austrian eHealth directory of healthcare professionals and organisations | Works: SOAP 1.2 with the real eHVD WSDL and synthetic entries. ordy does not call it yet. |
 | Document parser and patient check | Built and tested on the scenario documents and our [extra test documents](track/scenario/extra/index.md), which also list the parser's known gaps. Not connected to an upload yet. |
-| Answer upload | Not built yet |
+| Answer upload, and the portal pages for a refused, held, or failed login | Not built yet |
 | Sending the request by email or SMS, and the SMS screen's message list | Not built yet |
 | FHIR filing: one transaction Bundle with Provenance, Task, Practitioner, and Organization, and the `answer_filed` audit entry | Built and tested. Not called yet, because the upload and the mappers are missing. |
 | FHIR mappers: Observations and DiagnosticReport for the lab result, DocumentReference for the rehab report | Not built yet |
@@ -105,7 +105,7 @@ Dr. Hofer fills in the request form in the ordy widget inside her Matrix room. T
 | HL7 validator | Reused | Validates every filed resource |
 | Anthropic API, model `claude-opus-5-5` | Reused, optional | Second reader for the AI fallback parser, synthetic documents only |
 
-The main flow uses no AI model. Parsing, the identity checks, and the patient check are deterministic. Only when the parser cannot read a document does the optional AI fallback ask a model (Anthropic, `claude-opus-5-5`, off without `ANTHROPIC_API_KEY`) to read it a second time. Code still reads every value, the model's reading must agree with it, and the model can only stop a record, never choose a value. Every answer it read waits for Dr. Hofer ([AI rules](docs/COMPLIANCE_AND_SAFETY.md#ai-rules)). The fallback is built and tested but not connected to an upload yet.
+The main flow uses no AI model. Parsing, the identity checks, and the patient check are deterministic. Only when the parser cannot read a document does the optional AI fallback step in: a more lenient code reader reads every value, a model (Anthropic, `claude-opus-5-5`, off without `ANTHROPIC_API_KEY`) reads the document independently, and the two readings must agree. The model can only stop a record, never choose a value. Every answer it read waits for Dr. Hofer ([AI rules](docs/COMPLIANCE_AND_SAFETY.md#ai-rules)). The fallback is built and tested but not connected to an upload yet.
 
 Simulated in the demo: ID Austria (Keycloak, without the phone-app confirmation), the eHVD (our mock), email (Mailpit), and SMS (the SMS screen). Each can be replaced by the real service, and every other part we did not build, such as HAPI FHIR or Synapse, by another product of its kind. [Whitepaper](docs/WHITEPAPER.md#what-is-real-and-what-is-simulated) says what each part becomes in production, and [Architecture](docs/ARCHITECTURE.md) has the details.
 
@@ -134,7 +134,7 @@ Short answers to the five questions of the track. They describe our design. Of w
 
 ### 1. How does an outside person prove who they are if they are in no directory?
 
-They log in with ID Austria, the Austrian state electronic ID. It gives ordy their verified name, birth date, and a person number (bPK) that stays the same for our service. ordy compares the name with the name Dr. Hofer typed. Two things back this up. The link went only to the email address or phone number Dr. Hofer gave, so the person has access to that inbox or phone. And for a healthcare professional such as Dr. Brandl, ordy checks the eHVD, the Austrian eHealth directory, which lists her role and organisation. Later, after her first filed answer, ordy stores the person number, so only that exact person can answer as Eva Brandl at Labor Kanalstraße again. Stefan Kern, a discharge manager, is in no directory at all. For him, ID Austria, the name match, the person number, and the phone number are the whole check, and the eHVD check falls on the physician who wrote the report (question 2). Nobody needs an account with us or an entry in the PGK directory.
+They log in with ID Austria, the Austrian state electronic ID. It gives ordy their verified name, birth date, and a person number (bPK) that stays the same for our service. ordy compares the name with the name Dr. Hofer typed. Two things back this up. The link went only to the email address or phone number Dr. Hofer gave, so whoever opens it most likely reached it through that inbox or phone, and a forwarded link still fails the name match. And for a healthcare professional such as Dr. Brandl, ordy checks the eHVD, the Austrian eHealth directory, which lists her role and organisation. Later, after her first filed answer, ordy stores the person number, so only that exact person can answer as Eva Brandl at Labor Kanalstraße again. Stefan Kern, a discharge manager, is in no directory at all. For him, ID Austria, the name match, the person number, and the phone number are the whole check, and the eHVD check falls on the physician who wrote the report (question 2). Nobody needs an account with us or an entry in the PGK directory.
 
 ### 2. Which identity check do you require for each type of document and why?
 
@@ -173,7 +173,7 @@ At the clinic, next to the Matrix server and the FHIR server it already runs. Pa
 
 ## Metrics
 
-We measure the four track metrics on the scenario, on the frozen build. `pnpm scenario` drives request 1, M1 to M3, and request 2 against the running stack and writes the results to `out/metrics/metrics.md`. Today it reports every flow step as blocked, because it cannot drive the flow yet: the widget does not send requests, no email or SMS goes out, and the answer upload is not built. So no metric is measured yet. The stopwatch test with someone new is done by hand. [Whitepaper](docs/WHITEPAPER.md#how-we-measure-the-metrics) has the method in full.
+We measure the four track metrics on the scenario, on the frozen build. `pnpm scenario` is built to drive request 1, M1 to M3, and request 2 against the running stack and to write the results to `out/metrics/metrics.md`. Today it reports every flow step as blocked: `request.create` returns no link and no email or SMS carries one yet, M1 needs the address check, and the answers need the upload ([Status](#status)). So no metric is measured yet. The stopwatch test with someone new is run by hand and is not done yet. [Whitepaper](docs/WHITEPAPER.md#how-we-measure-the-metrics) has the method in full.
 
 | Metric | Target | How we measure | Result |
 |---|---|---|---|
