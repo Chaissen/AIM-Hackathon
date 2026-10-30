@@ -223,7 +223,7 @@ function fileAnswer(docType: DocumentType, parties: Parties, map: (context: MapC
   const prepared = prepareParties(parties, { requestId: 1, uploadSha256: "a".repeat(64) });
   const clinical = map({ patient, organization: prepared.organization, practitioner: prepared.author });
   const request = { id: 1, docType, patient, createdAt: new Date("2026-10-29T12:58:00Z"), expiresAt: new Date("2026-11-05T12:58:00Z") };
-  const { bundle } = buildFilingBundle({ request, parties, prepared, clinical, idToken, sentAt: new Date("2026-10-29T13:02:00Z"), filedAt, acceptedByRequester: false });
+  const { bundle } = buildFilingBundle({ request, parties, prepared, clinical, idToken, sentAt: new Date("2026-10-29T13:02:00Z"), filedAt, acceptedByRequester: false, fhirBaseUrl: "http://localhost:8090/fhir" });
   const entries = bundle.entry ?? [];
   /** The fullUrl of the entry whose resource carries this OID. */
   const byOid = (oid: string) => entries.find((e) => JSON.stringify(e.resource).includes(`urn:oid:${oid}`))?.fullUrl;

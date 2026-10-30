@@ -1,6 +1,7 @@
 import type { Bundle } from "fhir/r4";
 import { decodeJwt } from "jose";
 
+import { env } from "@/env";
 import { FhirError, transaction } from "@/server/fhir/client";
 import { fileAnswer, type FilingDeps } from "@/server/fhir/file-answer";
 import { buildFilingBundle, ID_AUSTRIA_SIMULATION, prepareParties, type Filing, type Parties } from "@/server/fhir/filing";
@@ -49,6 +50,7 @@ export function filingFor(answer: AnswerToFile, mapClinical: MapClinical, filedA
     filedAt,
     acceptedByRequester: answer.acceptedByRequester,
     findings: answer.findings,
+    fhirBaseUrl: env.FHIR_BASE_URL,
   });
 }
 
