@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import { DOCUMENT_TYPES } from "@/lib/document-types";
 import type { ExpectedPatient } from "@/server/documents/patient-check";
 import type { IsoDate } from "@/server/documents/types";
@@ -93,7 +95,7 @@ const isInitial = (word: Word) => word.letters === 1;
 const nameTerms = (name: string) => scan(name).filter((word) => !isInitial(word)).map((word) => word.text);
 
 export const checkablePatient = (patient: ExpectedPatient) =>
-  nameTerms(patient.given.join(" ")).length > 0 && nameTerms(patient.family).length > 0 && Boolean(patient.birthDate);
+  nameTerms(patient.given.join(" ")).length > 0 && nameTerms(patient.family).length > 0 && z.iso.date().safeParse(patient.birthDate).success;
 
 function forbiddenTerms(patient: ExpectedPatient): Term[] {
   return [
