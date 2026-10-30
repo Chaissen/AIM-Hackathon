@@ -1,10 +1,13 @@
-import type { AnswerFiledDetail } from "@/server/audit/record";
+import type { Reference } from "fhir/r4";
+
 import type { LabResult, RehabReport } from "@/server/documents/types";
+import type { AnswerFiled } from "@/server/fhir/file-answer";
+import type { AnswerFiling, OrganizationParty, Person } from "@/server/fhir/filing";
 import type { RequestRow } from "@/server/requests/service";
 
-// What the answer flow needs from the eHVD release check (T15, #11) and from the filing (T12 to T14, #10 and #12).
-// Both are passed in, so the flow runs and is tested before they land. Until then the defaults below hold every answer
-// for Dr. Hofer and never file anything on their own.
+// What the answer flow needs from the eHVD release check (T15, #11), the FHIR mappers (T12, T14, #10), and the filing
+// (T13). They are passed in, so the flow runs and is tested before the first two land. Until then the defaults below
+// hold every answer for Dr. Hofer and never file anything on their own.
 
 /** A document the request service can file: a lab result or a rehab discharge report. */
 export type FileableDocument = LabResult | RehabReport;
@@ -42,27 +45,16 @@ export const releaseCheckNotConnected: ReleaseCheck = async () => ({
   sentence: "The eHVD release check is not connected yet, so ordy could not confirm who released the document.",
 });
 
-/** A person for the Practitioner, in the shape of `Person` in the filing (T13). */
-export type FilingPerson = {
-  given: string;
-  family: string;
-  titles?: string[];
-  /** The eHVD OID, or null when the eHVD does not list the person or was not asked. */
-  ehvdOid: string | null;
-  /** For a person without an eHVD entry: the Practitioner the `bindings` table remembers from an earlier answer. */
-  practitionerId?: string | null;
-};
-
 export type AnswerToFile = {
   request: RequestRow;
   document: FileableDocument;
   /** Dr. Hofer, from the request's display name. */
-  requester: FilingPerson;
+  requester: Person;
   /** The outside person who logged in and sent the answer. */
-  sender: FilingPerson;
+  sender: Person;
   /** The responsible person when it is someone other than the sender, for example Dr. Leitner for Stefan Kern. */
-  author: FilingPerson | null;
-  organisation: { name: string; ehvdOid: string | null };
+  author: Person | null;
+  organisation: OrganizationParty;
   /** The sender's ID token exactly as received, for the Provenance signature. */
   idToken: string;
   /** When the sender pressed send. */
@@ -75,17 +67,34 @@ export type AnswerToFile = {
   findings: string[];
 };
 
-/** The server ids of a filed answer, the `answer_filed` detail. `sender` also goes into the `bindings` table. */
-export type FiledAnswer = Omit<AnswerFiledDetail, "acceptedBy">;
+/** An answer as `kept_answers` stores it, in JSON. */
+export type KeptAnswer = Omit<AnswerToFile, "request" | "sentAt"> & { sentAt: string };
+
+/** The FHIR server has not filed the answer, for certain: the Bundle was never sent, or the server refused it. */
+export class NotFiled extends Error {}
 
 /**
- * Files one answer as one FHIR transaction: all of it or nothing. Throws when the FHIR server refuses it. Filing the
- * same answer again (same request and upload hash) files nothing new and returns the same ids.
- * It writes no audit entry; the answer flow writes `answer_filed` in the transaction that sets the request to `filed`.
+ * Files one answer as one FHIR transaction: all of it or nothing. Filing the same answer again (same request and upload
+ * hash) files nothing new and returns the same ids. `sender` in the result also goes into the `bindings` table.
+ *
+ * Throws NotFiled when the server certainly has nothing. Any other error leaves it open whether the server filed the
+ * answer, for example a timeout (docs/FHIR.md, "Retries").
+ *
+ * It writes no audit entry; the answer flow writes `answer_filed` in the database transaction that sets the request to
+ * `filed`. `fhirFiling` in `fhir-filing.ts` is the real one.
  */
-export type FileAnswer = (answer: AnswerToFile) => Promise<FiledAnswer>;
+export type FileAnswer = (answer: AnswerToFile) => Promise<AnswerFiled>;
 
-/** Until the mappers (#10) and the filing (#12) land, filing fails, and the request stays as it was. */
-export const fileAnswerNotConnected: FileAnswer = async () => {
-  throw new Error("Filing is not connected yet (T12 to T14)");
+/** The references the clinical resources point at: `MapContext` in the FHIR mappers (#10). */
+export type ClinicalContext = { patient: Reference; organization: Reference; practitioner: Reference | null };
+
+/**
+ * The clinical resources of one answer: `mapLabResult` (T12) or `mapRehabReport` (T14) from `src/server/fhir/mappers.ts`
+ * (#30), in the shape the filing Bundle takes.
+ */
+export type MapClinical = (document: FileableDocument, context: ClinicalContext, filedAt: Date) => AnswerFiling["clinical"];
+
+/** Until the mappers (#10) land, filing fails, and the request stays as it was. */
+export const mapClinicalNotConnected: MapClinical = () => {
+  throw new Error("The FHIR mappers are not connected yet (T12, T14)");
 };

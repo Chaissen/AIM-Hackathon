@@ -4,7 +4,7 @@ import { heldAnswers } from "@/server/db/schema";
 import { parseDocument } from "@/server/documents/parse";
 import { applyEvent, getRequest, type RequestRow } from "@/server/requests/service";
 import type { AnswerDeps } from "./deps";
-import { fileAndRecord, filedNotice, isSender, requesterPerson, responsiblePerson, senderName } from "./file";
+import { fileAndRecord, filedNotice, isSender, requesterPerson, responsiblePerson } from "./file";
 
 // Dr. Hofer's decision on a held answer (docs/IDENTITY.md, "Block or hold"). The widget's Accept and Reject (T05, #14)
 // call these. Accepting files the answer with the policy `accepted-by-requester`; rejecting drops it.
@@ -32,6 +32,8 @@ export async function acceptAnswer(deps: AnswerDeps, requestId: number, accepted
   // The parser is deterministic and read this text before, so this only fails after a parser change.
   if (!parsed.ok || parsed.document.type === "other") throw new Error(`The held answer to request ${requestId} cannot be read any more`);
   const doc = parsed.document;
+  // Before filing, so a FHIR read error cannot turn a filed answer into a failed Accept.
+  const patient = await deps.readPatient(request.patientId);
   const responsible = responsiblePerson(doc);
   const authorIsSender = !responsible || isSender(responsible, held.sender);
 
@@ -60,9 +62,8 @@ export async function acceptAnswer(deps: AnswerDeps, requestId: number, accepted
     acceptedBy,
   );
   if (!filed) return null;
-  const patient = await deps.readPatient(filed.patientId);
-  await deps.notify(filed, filedNotice(doc, patient.display, senderName(held.sender, responsible)));
-  return filed;
+  await deps.notify(filed.request, filedNotice(filed, patient.display));
+  return filed.request;
 }
 
 /** Rejects a held answer: the request is `cancelled` and the answer is deleted. Null for an unknown request. */

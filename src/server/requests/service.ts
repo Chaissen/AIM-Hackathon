@@ -3,7 +3,7 @@ import { and, desc, eq, inArray, lte } from "drizzle-orm";
 import type { DocumentType } from "@/lib/document-types";
 import { type AuditActor, type AuditEntry, recordAudit } from "@/server/audit/record";
 import type { Db, Tx } from "@/server/db";
-import { heldAnswers, requests } from "@/server/db/schema";
+import { heldAnswers, keptAnswers, requests } from "@/server/db/schema";
 import { initialState, OPEN_STATES, type RequestEvent, transition } from "./lifecycle";
 import { hashLinkToken, isLinkToken, LINK_TTL_MS, newLinkToken } from "./link-token";
 
@@ -75,7 +75,10 @@ export async function expireDueRequests(db: Db | Tx, id?: number): Promise<numbe
     .where(and(inArray(requests.state, OPEN_STATES), lte(requests.expiresAt, new Date()), id === undefined ? undefined : eq(requests.id, id)))
     .returning({ id: requests.id });
   const ids = expired.map((r) => r.id);
-  if (ids.length) await db.delete(heldAnswers).where(inArray(heldAnswers.requestId, ids));
+  if (ids.length) {
+    await db.delete(heldAnswers).where(inArray(heldAnswers.requestId, ids));
+    await db.delete(keptAnswers).where(inArray(keptAnswers.requestId, ids));
+  }
   return ids;
 }
 
@@ -127,10 +130,11 @@ export async function saveIdToken(db: Db | Tx, id: number, idToken: string): Pro
  * `identity_fail` also counts the failed check, and the third one locks the link.
  *
  * `then` runs in the same transaction with the updated request: write the audit entry that belongs to the change there,
- * so the state and the log never disagree. It may update more columns and return the request it read back.
+ * so the state and the log never disagree. It may update more columns and return the request it read back. Inside a
+ * transaction (`db` is a Tx), the event runs in a savepoint, so a failed event leaves the outer transaction usable.
  */
 export async function applyEvent(
-  db: Db,
+  db: Db | Tx,
   id: number,
   event: RequestEvent,
   then?: (tx: Tx, request: RequestRow) => Promise<RequestRow | void>,
@@ -144,7 +148,9 @@ export async function applyEvent(
     const [updated] = await tx.update(requests).set({ state, failedChecks }).where(eq(requests.id, id)).returning();
     const result = (await then?.(tx, updated)) ?? updated;
     // A held answer lives only while the request is `answer_held`: Accept files it, Reject, Cancel, and expiry drop it.
+    // A kept answer lives only while it is `verified`: filing it ends that, and so do Cancel and expiry.
     if (state !== "answer_held") await tx.delete(heldAnswers).where(eq(heldAnswers.requestId, id));
+    if (state !== "verified") await tx.delete(keptAnswers).where(eq(keptAnswers.requestId, id));
     return result;
   });
 }

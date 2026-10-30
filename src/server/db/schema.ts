@@ -1,6 +1,7 @@
 import { integer, jsonb, pgEnum, pgTable, primaryKey, serial, text, timestamp } from "drizzle-orm/pg-core";
 
 import type { DocumentType } from "@/lib/document-types";
+import type { KeptAnswer } from "@/server/answers/ports";
 import { REQUEST_STATES } from "../requests/lifecycle";
 
 // The six event types the jury counts (track README, "Audit coverage"). See docs/ARCHITECTURE.md, "Audit log".
@@ -81,6 +82,18 @@ export const heldAnswers = pgTable("held_answers", {
   reason: text("reason").notNull(),
   // When the sender pressed send.
   sentAt: timestamp("sent_at", { withTimezone: true }).notNull(),
+});
+
+// An answer whose filing has an unknown outcome: the FHIR server may have filed it while the response was lost. Until
+// it is filed, or the server refuses it, the request takes no other upload, and the next send files exactly this
+// answer again. Lives only while the request is `verified`. docs/FHIR.md, "Retries".
+export const keptAnswers = pgTable("kept_answers", {
+  requestId: integer("request_id")
+    .primaryKey()
+    .references(() => requests.id, { onDelete: "cascade" }),
+  // Everything the Bundle is built from, so the retry needs no new eHVD lookup and no new parse.
+  answer: jsonb("answer").$type<KeptAnswer>().notNull(),
+  failedAt: timestamp("failed_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 // Which ID Austria person number answered as a given person at a given organisation. docs/IDENTITY.md, "Person number binding".

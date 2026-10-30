@@ -45,6 +45,7 @@ The check compares whole words. A substring check would block every message, bec
 | Audit log | Postgres `audit_log` | Who did what and when. No document text. | Until the demo reset |
 | Filed answers | HAPI FHIR | The clinical record | Until the demo reset |
 | Held answers, about the right patient | Postgres `held_answers`: the text, its hash, the sender's name and eHVD OID, their ID token, and the hold reason | Dr. Hofer decides about an answer the eHVD did not confirm | Until she accepts (then it is in HAPI) or rejects it, or the request is cancelled or expires |
+| Answers whose filing outcome is unknown | Postgres `kept_answers`: the parsed document, the parties, the sender's ID token, and the upload hash | After a timeout the FHIR server may have filed it, so a retry must file exactly this answer | Until it is filed or the FHIR server refuses it, or the request is cancelled or expires |
 | ID token of the sender | Provenance `signature.data`, and `requests.id_token` for the person the request is bound to | Proof of the identity check that anyone can verify later | With the record, and in `requests` until the demo reset |
 | Uploads for the wrong patient | Nowhere. Only the SHA-256 hash and the reason stay in the audit log. | Max Beispiel's data must not end up in Maria's record or anywhere else | Discarded after the check |
 | Name and person number of someone who failed the check | Audit log | The audit needs to say who tried | Until the demo reset |

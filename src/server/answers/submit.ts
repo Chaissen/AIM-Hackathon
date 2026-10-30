@@ -1,15 +1,18 @@
+import { eq } from "drizzle-orm";
+
 import { DOCUMENT_TYPES } from "@/lib/document-types";
 import { auditActor, recordAudit } from "@/server/audit/record";
 import type { EidSession } from "@/server/auth/eid-session";
-import { heldAnswers } from "@/server/db/schema";
+import type { Db, Tx } from "@/server/db";
+import { heldAnswers, keptAnswers } from "@/server/db/schema";
 import { parseDocument } from "@/server/documents/parse";
 import { checkAnswerPatient, patientMismatch, uploadHash } from "@/server/documents/patient-check";
 import type { PersonLine } from "@/server/documents/types";
 import { TransitionError } from "@/server/requests/lifecycle";
 import { applyEvent, findRequestByToken, type RequestRow } from "@/server/requests/service";
-import type { AnswerDeps } from "./deps";
-import { fileAndRecord, filedNotice, idTokenPersonNumber, isSender, requesterPerson, responsiblePerson, senderName } from "./file";
-import type { FileableDocument, ReleaseCheckResult, Sender } from "./ports";
+import type { AnswerDeps, RequestedPatient } from "./deps";
+import { type Filed, fileAndRecord, filedNotice, idTokenPersonNumber, isSender, requesterPerson, responsiblePerson } from "./file";
+import { type AnswerToFile, type FileableDocument, NotFiled, type ReleaseCheckResult, type Sender } from "./ports";
 
 // POST /r/{token}/answer (docs/ARCHITECTURE.md, "Outside portal"): `answer_sent`, parse, patient check, release check,
 // then file and `answer_filed`, or hold for Dr. Hofer. The uploader learns only what they can act on.
@@ -31,7 +34,8 @@ export type AnswerUpload = {
  * - `filed`: on the FHIR server. `held`: Dr. Hofer decides first. Both end the answer.
  * - `patient_mismatch`: the document (`part: "document"`) or the typed name and birth date are about someone else.
  * - `unreadable`: reasons the sender can fix, then upload again.
- * - `not_filed`: the FHIR server did not take it. Nothing changed; try again later.
+ * - `not_filed`: not filed yet. The FHIR server refused it, or its outcome is unknown and the answer is kept, so the
+ *   next send files that answer again (docs/FHIR.md, "Retries").
  * - `login_again`: the login is not the one the request is bound to any more.
  * - `closed`: the link does not work for this session (wrong person, wrong request, or no longer `verified`).
  */
@@ -70,6 +74,38 @@ async function releaseCheck(deps: AnswerDeps, document: FileableDocument, sender
   }
 }
 
+/** An earlier answer is kept because its filing outcome is unknown, so it goes first (docs/FHIR.md, "Retries"). */
+class KeptFirst extends Error {}
+
+const hasKeptAnswer = async (db: Db | Tx, requestId: number) =>
+  (await db.select({ requestId: keptAnswers.requestId }).from(keptAnswers).where(eq(keptAnswers.requestId, requestId))).length > 0;
+
+/**
+ * Files with `answer_confirmed`, or files the kept answer again when there is one. `build` is null when the kept
+ * answer is all there is; if it is gone by then, nothing is filed and the sender tries again.
+ */
+async function fileConfirmed(
+  deps: AnswerDeps,
+  request: RequestRow,
+  patient: RequestedPatient,
+  build: ((locked: RequestRow, knownPractitioner: string | null) => Omit<AnswerToFile, "request">) | null,
+): Promise<AnswerOutcome> {
+  const noAnswer = () => {
+    throw new NotFiled("The kept answer was filed or dropped in between");
+  };
+  let filed: Filed | null;
+  try {
+    filed = await fileAndRecord(deps, request.id, "answer_confirmed", build ?? noAnswer);
+  } catch (error) {
+    // The message only: a FHIR error body could echo the document.
+    console.error(`filing the answer to request ${request.id} failed:`, error instanceof Error ? error.message : error);
+    return { outcome: "not_filed" };
+  }
+  if (!filed) return CLOSED;
+  await deps.notify(filed.request, filedNotice(filed, patient.display));
+  return { outcome: "filed" };
+}
+
 /** The Provenance sentence for a passed release check. */
 const releaseFinding = (responsible: PersonLine, org: string, via: "claim" | "search") =>
   `The eHVD confirms ${[...responsible.titles, responsible.given, responsible.family].filter(Boolean).join(" ")} as responsible for the content at ${org}${
@@ -90,6 +126,9 @@ export async function submitAnswer(deps: AnswerDeps, upload: AnswerUpload): Prom
   const size = upload.file.byteLength;
   const actor = auditActor({ kind: "eid", session });
   await recordAudit(db, { event: "answer_sent", requestId: request.id, actor, outcome: "received", detail: { sha256, size } });
+
+  // While an earlier answer may be on the FHIR server, this upload is not read, and the earlier answer is filed again.
+  if (await hasKeptAnswer(db, request.id)) return fileConfirmed(deps, request, await deps.readPatient(request.patientId), null);
 
   if (size > MAX_UPLOAD_BYTES) return unreadable(`The file is larger than ${MAX_UPLOAD_BYTES / 1024} KB. Upload the document as Markdown or text.`);
   const markdown = decodeText(upload.file);
@@ -134,6 +173,8 @@ export async function submitAnswer(deps: AnswerDeps, upload: AnswerUpload): Prom
     // docs/IDENTITY.md, "Block or hold": the right person answered, so keep the answer and let Dr. Hofer decide.
     try {
       await applyEvent(db, request.id, "answer_unconfirmed", async (tx) => {
+        // An upload at the same time may have been kept in between; it goes first.
+        if (await hasKeptAnswer(tx, request.id)) throw new KeptFirst();
         const held = { markdown, sha256, sender, idToken, reason, sentAt };
         await tx
           .insert(heldAnswers)
@@ -142,6 +183,7 @@ export async function submitAnswer(deps: AnswerDeps, upload: AnswerUpload): Prom
       });
     } catch (error) {
       if (error instanceof TransitionError) return CLOSED;
+      if (error instanceof KeptFirst) return { outcome: "not_filed" };
       throw error;
     }
     await deps.notify(request, { kind: "held", requestId: request.id, hold: "answer", reason });
@@ -152,32 +194,22 @@ export async function submitAnswer(deps: AnswerDeps, upload: AnswerUpload): Prom
   // sender only if the names match, as for Dr. Brandl, and otherwise someone else, as Dr. Leitner for Stefan Kern.
   const authorIsSender = release.via === "claim" || isSender(responsible, sender);
   const responsibleOid = release.practitioner.id.id;
-  let filed: RequestRow | null;
-  try {
-    filed = await fileAndRecord(deps, request.id, "answer_confirmed", (locked, knownPractitioner) => ({
-      document: doc,
-      requester: requesterPerson(locked.requesterName),
-      sender: {
-        given: sender.givenName,
-        family: sender.familyName,
-        ehvdOid: authorIsSender ? responsibleOid : sender.gdaOid,
-        practitionerId: knownPractitioner,
-        ...(authorIsSender ? { titles: responsible.titles } : {}),
-      },
-      author: authorIsSender ? null : { titles: responsible.titles, given: responsible.given, family: responsible.family, ehvdOid: responsibleOid },
-      organisation: { name: locked.org, ehvdOid: release.organisation.id.id },
-      idToken,
-      sentAt,
-      uploadSha256: sha256,
-      acceptedByRequester: false,
-      findings: [releaseFinding(responsible, locked.org, release.via)],
-    }));
-  } catch (error) {
-    // The message only: a FHIR error body could echo the document.
-    console.error(`filing the answer to request ${request.id} failed:`, error instanceof Error ? error.message : error);
-    return { outcome: "not_filed" };
-  }
-  if (!filed) return CLOSED;
-  await deps.notify(filed, filedNotice(doc, patient.display, senderName(sender, responsible)));
-  return { outcome: "filed" };
+  return fileConfirmed(deps, request, patient, (locked, knownPractitioner) => ({
+    document: doc,
+    requester: requesterPerson(locked.requesterName),
+    sender: {
+      given: sender.givenName,
+      family: sender.familyName,
+      ehvdOid: authorIsSender ? responsibleOid : sender.gdaOid,
+      practitionerId: knownPractitioner,
+      ...(authorIsSender ? { titles: responsible.titles } : {}),
+    },
+    author: authorIsSender ? null : { titles: responsible.titles, given: responsible.given, family: responsible.family, ehvdOid: responsibleOid },
+    organisation: { name: locked.org, ehvdOid: release.organisation.id.id },
+    idToken,
+    sentAt,
+    uploadSha256: sha256,
+    acceptedByRequester: false,
+    findings: [releaseFinding(responsible, locked.org, release.via)],
+  }));
 }

@@ -7,7 +7,8 @@ import { fhirFetch } from "@/server/fhir/client";
 import type { Notice } from "@/server/matrix/notices";
 import { notifyRequest } from "@/server/requests/notify";
 import type { RequestRow } from "@/server/requests/service";
-import { type FileAnswer, fileAnswerNotConnected, type ReleaseCheck, releaseCheckNotConnected } from "./ports";
+import { fhirFiling } from "./fhir-filing";
+import { type FileAnswer, mapClinicalNotConnected, type ReleaseCheck, releaseCheckNotConnected } from "./ports";
 
 /** The requested patient from the FHIR server: what the patient check compares, and the name for notices. */
 export type RequestedPatient = ExpectedPatient & { display: string };
@@ -32,11 +33,11 @@ export async function readFhirPatient(patientId: string): Promise<RequestedPatie
   return { given, family, birthDate: patient.birthDate ?? "", display: [...given, family].filter(Boolean).join(" ") };
 }
 
-// TODO(T15, #11): pass the eHVD release check. TODO(#10, #12): pass the filing with the mappers.
+// TODO(T15, #44): pass checkRelease. TODO(T12, T14, #30): pass mapLabResult and mapRehabReport.
 export const answerDeps: AnswerDeps = {
   db,
   readPatient: readFhirPatient,
   releaseCheck: releaseCheckNotConnected,
-  fileAnswer: fileAnswerNotConnected,
+  fileAnswer: fhirFiling({ mapClinical: mapClinicalNotConnected }),
   notify: notifyRequest,
 };

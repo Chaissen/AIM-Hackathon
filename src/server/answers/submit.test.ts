@@ -8,12 +8,13 @@ import { UnsecuredJWT } from "jose";
 
 import { eidSession, type EidSession } from "@/server/auth/eid-session";
 import { db } from "@/server/db";
-import { auditLog, bindings, heldAnswers, requests } from "@/server/db/schema";
+import { auditLog, bindings, heldAnswers, keptAnswers, requests } from "@/server/db/schema";
+import { uploadHash } from "@/server/documents/patient-check";
 import type { Notice } from "@/server/matrix/notices";
 import { applyEvent, bindPerson, createRequest, getRequest, type NewRequest, saveIdToken } from "@/server/requests/service";
 import type { AnswerDeps } from "./deps";
 import { acceptAnswer, rejectAnswer } from "./held";
-import type { AnswerToFile, ReleaseCheckInput, ReleaseCheckResult } from "./ports";
+import { type AnswerToFile, NotFiled, type ReleaseCheckInput, type ReleaseCheckResult } from "./ports";
 import { submitAnswer } from "./submit";
 
 // The answer flow against the Postgres from DATABASE_URL, with stand-ins for the FHIR server, the eHVD, and Matrix.
@@ -80,8 +81,9 @@ const confirmed = (input: ReleaseCheckInput): ReleaseCheckResult => {
   return {
     verdict: "pass",
     via: viaClaim ? "claim" : "search",
-    practitioner: { id: { id: viaClaim ? "1.2.40.0.34.3.2.99.1.2" : "1.2.40.0.34.3.2.99.2.1" } },
-    organisation: { id: { id: "1.2.40.0.34.3.1.99.1.2" } },
+    // Dr. Brandl and Labor Kanalstraße, or Dr. Leitner and Reha Waldblick, from docs/EHVD.md.
+    practitioner: { id: { id: viaClaim ? "1.2.40.0.34.3.2.99.1.2" : "1.2.40.0.34.3.2.99.1.3" } },
+    organisation: { id: { id: input.document.type === "lab-result" ? "1.2.40.0.34.3.1.99.1.2" : "1.2.40.0.34.3.1.99.1.3" } },
   };
 };
 
@@ -123,6 +125,7 @@ function fakes(release: (input: ReleaseCheckInput) => ReleaseCheckResult | Promi
 
 const auditOf = (requestId: number) => db.select().from(auditLog).where(eq(auditLog.requestId, requestId)).orderBy(auditLog.id);
 const events = async (requestId: number) => (await auditOf(requestId)).map((e) => `${e.event}:${e.outcome}`);
+const keptOf = async (requestId: number) => (await db.select().from(keptAnswers).where(eq(keptAnswers.requestId, requestId)))[0];
 const bindingOf = async (request: { given: string; family: string; org: string }) =>
   (await db.select().from(bindings).where(and(eq(bindings.given, request.given), eq(bindings.family, request.family), eq(bindings.org, request.org))))[0];
 
@@ -175,7 +178,7 @@ test("request 2: Stefan Kern sends the report Dr. Leitner wrote", { skip: noDb }
 
   assert.equal(releaseInputs[0].sender.gdaOid, null);
   const [answer] = filed;
-  assert.deepEqual(answer.author, { titles: ["Dr."], given: "Johanna", family: "Leitner", ehvdOid: "1.2.40.0.34.3.2.99.2.1" });
+  assert.deepEqual(answer.author, { titles: ["Dr."], given: "Johanna", family: "Leitner", ehvdOid: "1.2.40.0.34.3.2.99.1.3" });
   assert.deepEqual(answer.sender, { given: "Stefan", family: "Kern", ehvdOid: null, practitionerId: null });
   assert.deepEqual(notices, [{ kind: "filed", docType: "rehab-report", patient: "Maria Beispiel", sender: "Stefan Kern" }]);
   assert.equal((await bindingOf(request)).practitionerId, "3", "not in the eHVD, so the binding remembers his Practitioner");
@@ -297,17 +300,60 @@ test("unreadable files and the wrong document type are refused with reasons", { 
   assert.deepEqual((await events(request.id)).filter((e) => e === "answer_sent:received").length, 3, "every upload is logged by its hash");
 });
 
-test("when the FHIR server refuses the answer, nothing changes and the sender can try again", { skip: noDb }, async () => {
+test("when the FHIR server refuses the answer, nothing is kept and the next upload is a new answer", { skip: noDb }, async () => {
   const { request, token, session } = await verifiedRequest(EVA);
-  const { deps } = fakes();
-  const failing: AnswerDeps = { ...deps, fileAnswer: () => Promise.reject(new Error("FHIR request failed with 500")) };
+  const { deps, releaseInputs } = fakes();
+  const refusing: AnswerDeps = { ...deps, fileAnswer: () => Promise.reject(new NotFiled("FHIR request failed with 422")) };
 
-  assert.deepEqual(await submitAnswer(failing, { token, session, file: LAB_MARIA, form: maria }), { outcome: "not_filed" });
+  assert.deepEqual(await submitAnswer(refusing, { token, session, file: LAB_MARIA, form: maria }), { outcome: "not_filed" });
   assert.equal((await getRequest(db, request.id))?.state, "verified");
   assert.deepEqual(await events(request.id), ["request_sent:sent", "answer_sent:received"]);
   assert.equal(await bindingOf(request), undefined);
+  assert.equal(await keptOf(request.id), undefined);
 
   assert.deepEqual(await submitAnswer(deps, { token, session, file: LAB_MARIA, form: maria }), { outcome: "filed" });
+  assert.equal(releaseInputs.length, 2, "a new answer gets its own release check");
+});
+
+test("an answer whose filing outcome is unknown is kept and filed again exactly as it was", { skip: noDb }, async () => {
+  const { request, token, session } = await verifiedRequest(EVA);
+  const { deps, filed, notices, releaseInputs } = fakes();
+  const timingOut: AnswerDeps = { ...deps, fileAnswer: () => Promise.reject(new Error("The operation was aborted due to timeout")) };
+
+  assert.deepEqual(await submitAnswer(timingOut, { token, session, file: LAB_MARIA, form: maria }), { outcome: "not_filed" });
+  assert.equal((await getRequest(db, request.id))?.state, "verified");
+  const kept = await keptOf(request.id);
+  assert.equal(kept?.answer.uploadSha256, uploadHash(LAB_MARIA), "the FHIR server may have it, so it is kept");
+  assert.equal(notices.length, 0);
+
+  // Another file is not read while the kept answer may be on the server: not even Max Beispiel's result trips M3.
+  assert.deepEqual(await submitAnswer(deps, { token, session, file: LAB_MAX, form: maria }), { outcome: "filed" });
+  assert.equal(filed.length, 1);
+  assert.equal(filed[0].uploadSha256, uploadHash(LAB_MARIA));
+  assert.deepEqual(filed[0].organisation, kept?.answer.organisation);
+  assert.equal(filed[0].sentAt.toISOString(), kept?.answer.sentAt);
+  assert.equal(releaseInputs.length, 1, "no new eHVD lookup for the retry");
+  assert.equal((await getRequest(db, request.id))?.state, "filed");
+  assert.equal(await keptOf(request.id), undefined);
+  assert.deepEqual(await events(request.id), ["request_sent:sent", "answer_sent:received", "answer_sent:received", "answer_filed:filed"]);
+  assert.deepEqual(notices.map((n) => n.kind), ["filed"]);
+});
+
+test("a kept answer the FHIR server then refuses is dropped, and Cancel drops one too", { skip: noDb }, async () => {
+  const { request, token, session } = await verifiedRequest(EVA);
+  const { deps } = fakes();
+  const timingOut: AnswerDeps = { ...deps, fileAnswer: () => Promise.reject(new Error("fetch failed")) };
+  const refusing: AnswerDeps = { ...deps, fileAnswer: () => Promise.reject(new NotFiled("FHIR request failed with 422")) };
+
+  await submitAnswer(timingOut, { token, session, file: LAB_MARIA, form: maria });
+  assert.ok(await keptOf(request.id));
+  assert.deepEqual(await submitAnswer(refusing, { token, session, file: LAB_MARIA, form: maria }), { outcome: "not_filed" });
+  assert.equal(await keptOf(request.id), undefined, "the server has nothing, so the next upload may be a new answer");
+
+  await submitAnswer(timingOut, { token, session, file: LAB_MARIA, form: maria });
+  assert.ok(await keptOf(request.id));
+  await applyEvent(db, request.id, "cancel");
+  assert.equal(await keptOf(request.id), undefined);
 });
 
 test("two uploads at the same time file once", { skip: noDb }, async () => {

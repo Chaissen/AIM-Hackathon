@@ -64,7 +64,7 @@ export function AnswerForm({ token, requester, clinic }: { token: string; reques
         case "unreadable":
           return setProblem({ title: "We could not read this document.", details: result.errors });
         case "not_filed":
-          return setProblem({ title: "The document could not be filed right now. Nothing was filed. Try again in a few minutes." });
+          return setProblem({ title: "The document could not be filed right now. Send it again in a few minutes." });
         case "login_again":
           return setProblem({ title: "Your login is no longer valid. Log in again.", loginAgain: true });
       }

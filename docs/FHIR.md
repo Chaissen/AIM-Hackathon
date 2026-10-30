@@ -137,6 +137,8 @@ The filing (T13) lives in `src/server/fhir/`. `filing.ts` is pure and builds the
 3. `buildFilingBundle()` adds the Provenance and the completed Task and returns the Bundle with the references the audit entry needs.
 4. `fileAnswer()` POSTs the Bundle to the server base, reads the server ids from the `transaction-response`, and writes `answer_filed`.
 
+The answer flow (T09) calls it through `fhirFiling` with its own `audit` and writes `answer_filed` in the database transaction that sets the request to `filed`. It keeps an answer whose outcome is unknown in `kept_answers`, which covers the two rules for the caller under [Retries](#retries) ([Architecture](ARCHITECTURE.md#the-answer)).
+
 Order of the entries: Practitioners, Organizations, the DiagnosticReport or DocumentReference, the Observations, the Provenance, the Task.
 
 ### Retries

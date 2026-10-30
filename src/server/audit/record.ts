@@ -6,6 +6,7 @@ import type { Actor } from "@/server/api/trpc";
 import { sessionSecret } from "@/server/auth/session-secret";
 import type { Db, Tx } from "@/server/db";
 import { auditLog } from "@/server/db/schema";
+import type { AnswerFiled } from "@/server/fhir/file-answer";
 import type { RequestState } from "@/server/requests/lifecycle";
 
 // The six audit events with who, what, and when. docs/ARCHITECTURE.md, "Audit log".
@@ -22,33 +23,14 @@ type Entries = {
   link_opened: { outcome: "shown" | "refused"; detail: { state: RequestState } };
   identity_checked: { outcome: CheckResult; detail: { checks: IdentityCheck[] } };
   answer_sent: { outcome: "received"; detail: { sha256: string; size: number } };
-  answer_filed: { outcome: "filed"; detail: AnswerFiledDetail };
+  // The ids from the filing (T13). `acceptedBy` is the network member who accepted a held answer; `at` says when.
+  answer_filed: { outcome: "filed"; detail: AnswerFiled & { acceptedBy?: string } };
   misdelivery_caught:
     | { outcome: "address_mismatch"; detail: { domain: string; expectedDomain: string } }
     // The actor already names the person who failed.
     | { outcome: "wrong_person"; detail: { checks: IdentityCheck[] } }
     // Only the upload's hash and which part did not match. The upload itself is discarded.
     | { outcome: "patient_mismatch"; detail: { sha256: string; size: number; nameMatches: boolean; birthDateMatches: boolean } };
-};
-
-/**
- * The ids of a filed answer, as the filing (T13) returns them. `pnpm validate` (T18) reads `resources`. `acceptedBy` is
- * the network member who accepted a held answer; the entry's `at` says when.
- */
-export type AnswerFiledDetail = {
-  /** The DiagnosticReport or DocumentReference, for example `DiagnosticReport/12`. */
-  output: string;
-  /** Every clinical resource of the answer, the output first. */
-  targets: string[];
-  provenance: string;
-  task: string;
-  /** The sender's Practitioner, for example `Practitioner/9`. */
-  sender: string;
-  author: string;
-  organization: string;
-  /** Every resource the transaction created or reused. */
-  resources: string[];
-  acceptedBy?: string;
 };
 
 export type MisdeliveryReason = Entries["misdelivery_caught"]["outcome"];
