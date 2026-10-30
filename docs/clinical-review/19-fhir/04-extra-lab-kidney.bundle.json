@@ -600,6 +600,7 @@
       }
     },
     {
+      "fullUrl": "http://localhost:8090/fhir/Task/ordy-request-4",
       "resource": {
         "resourceType": "Task",
         "id": "ordy-request-4",

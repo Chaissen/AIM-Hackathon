@@ -18,6 +18,7 @@ import {
 } from "./filing";
 
 const ISSUER = "http://localhost:8080/realms/idaustria-sim";
+const FHIR_BASE_URL = "https://fhir.klinikum.example/fhir";
 const LAB_SHA = "a".repeat(64);
 const REHAB_SHA = "b".repeat(64);
 
@@ -102,6 +103,7 @@ function labFiling(overrides: Partial<AnswerFiling> = {}, uploadSha256 = LAB_SHA
     sentAt: new Date("2026-10-29T13:02:10Z"),
     filedAt: new Date("2026-10-29T13:02:12Z"),
     acceptedByRequester: false,
+    fhirBaseUrl: FHIR_BASE_URL,
     ...overrides,
   };
 }
@@ -117,6 +119,7 @@ function rehabFiling(): AnswerFiling {
     sentAt: new Date("2026-10-29T13:11:00Z"),
     filedAt: new Date("2026-10-29T13:11:01Z"),
     acceptedByRequester: false,
+    fhirBaseUrl: FHIR_BASE_URL,
   };
 }
 
@@ -156,8 +159,10 @@ test("request 1: one transaction with conditional creates on the eHVD OIDs", () 
     ],
   );
 
-  // Every entry with a fullUrl is a urn:uuid, so HAPI rewrites the references to it.
-  for (const entry of bundle.entry ?? []) if (entry.fullUrl) assert.match(entry.fullUrl, /^urn:uuid:/);
+  for (const entry of bundle.entry ?? []) {
+    assert.ok(entry.fullUrl, `${entry.request?.url} has a fullUrl`);
+    if (entry.request?.method === "POST") assert.ok(entry.fullUrl.startsWith("urn:uuid:"), entry.fullUrl);
+  }
   assert.deepEqual(
     byType<Observation>(bundle, "Observation").map((e) => e.request),
     [
@@ -211,6 +216,7 @@ test("request 1: the Task is completed and points at the DiagnosticReport", () =
   const filing = labFiling();
   const { bundle, refs } = buildFilingBundle(filing);
   const entry = only<Task>(bundle, "Task");
+  assert.equal(entry.fullUrl, "https://fhir.klinikum.example/fhir/Task/ordy-request-1");
   assert.deepEqual(entry.request, { method: "PUT", url: "Task/ordy-request-1" });
   assert.equal(refs.task, "Task/ordy-request-1");
   assert.deepEqual(entry.resource, {
