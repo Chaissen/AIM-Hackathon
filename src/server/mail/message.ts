@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import { DOCUMENT_TYPES } from "@/lib/document-types";
 import type { ExpectedPatient } from "@/server/documents/patient-check";
 import type { IsoDate } from "@/server/documents/types";
@@ -89,12 +91,15 @@ function birthDateForms(birthDate: IsoDate): string[] {
 
 const patientName = (patient: ExpectedPatient) => [...patient.given, patient.family].join(" ");
 
+const isInitial = (word: Word) => word.letters === 1;
+const nameTerms = (name: string) => scan(name).filter((word) => !isInitial(word)).map((word) => word.text);
+
+export const checkablePatient = (patient: ExpectedPatient) =>
+  nameTerms(patient.given.join(" ")).length > 0 && nameTerms(patient.family).length > 0 && z.iso.date().safeParse(patient.birthDate).success;
+
 function forbiddenTerms(patient: ExpectedPatient): Term[] {
   return [
-    // An initial names nobody, and the link has the word "r" and the text the word "a".
-    ...scan(patientName(patient))
-      .filter((word) => word.letters > 1)
-      .map((word): Term => ({ category: "patient-name", words: [word.text] })),
+    ...nameTerms(patientName(patient)).map((word): Term => ({ category: "patient-name", words: [word] })),
     ...birthDateForms(patient.birthDate).map((form): Term => ({ category: "birth-date", words: words(form) })),
     ...DOCUMENT_TYPE_TERMS,
   ];

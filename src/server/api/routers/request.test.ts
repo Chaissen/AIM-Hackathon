@@ -9,6 +9,7 @@ import { UnsecuredJWT } from "jose";
 
 import { env, mxid } from "@/env";
 import { createCaller } from "@/server/api/root";
+import { linkDeps } from "@/server/api/routers/request";
 import { createContext } from "@/server/api/trpc";
 import { db } from "@/server/db";
 import { startEhvdMock } from "@/server/ehvd/start-mock";
@@ -60,6 +61,11 @@ const request1 = {
   email: "eva.brandl@labor-kanal.example",
 } as const;
 
+const maria = async () => ({ family: "Beispiel", given: ["Maria"], birthDate: "1961-03-12", display: "Maria Beispiel" });
+
+Object.assign(linkDeps, { readPatient: maria, sendRequestEmail: async () => {} });
+const noLink = async () => {};
+
 const newRequest: NewRequest = {
   docType: "lab-result",
   patientId: "maria-beispiel",
@@ -73,7 +79,7 @@ const newRequest: NewRequest = {
 };
 
 async function seed(overrides: Partial<NewRequest> = {}) {
-  const result = await createRequest(db, { ...newRequest, ...overrides }, { passed: true });
+  const result = await createRequest(db, { ...newRequest, ...overrides }, { passed: true }, noLink);
   created.push(result.request.id);
   return result;
 }
@@ -92,7 +98,7 @@ async function seedHeld(state: "identity_held" | "answer_held", overrides: Parti
 }
 
 async function seedAddressMismatch() {
-  const result = await createRequest(db, newRequest, { passed: false, domain: "labor-kanaI.example", expectedDomain: "labor-kanal.example" });
+  const result = await createRequest(db, newRequest, { passed: false, domain: "labor-kanaI.example", expectedDomain: "labor-kanal.example" }, noLink);
   created.push(result.request.id);
   return result;
 }
@@ -276,7 +282,6 @@ async function withAnswerDeps(stand: Partial<AnswerDeps>, run: () => Promise<voi
   }
 }
 
-const maria = async () => ({ family: "Beispiel", given: ["Maria"], birthDate: "1961-03-12", display: "Maria Beispiel" });
 const filedAs = (id: number) => ({
   output: "DiagnosticReport/1",
   targets: ["DiagnosticReport/1"],
@@ -415,7 +420,7 @@ test("Send anyway sends the request with a new 7-day link and logs request_sent"
 
   // Dr. Hofer decides later; the 7 days start only when the request goes out.
   await db.update(requests).set({ expiresAt: new Date(Date.now() + 60_000) }).where(eq(requests.id, request.id));
-  const sent = await sendAnyway(db, request.id, { kind: "network_member", id: hofer });
+  const sent = await sendAnyway(db, request.id, { kind: "network_member", id: hofer }, noLink);
   assert.ok(sent);
   assert.equal(sent.request.state, "sent");
   assert.ok(sent.request.expiresAt.getTime() > Date.now() + LINK_TTL_MS - 60_000);
@@ -428,7 +433,7 @@ test("Send anyway sends the request with a new 7-day link and logs request_sent"
       ["request_sent", hofer],
     ],
   );
-  await assert.rejects(sendAnyway(db, request.id, { kind: "network_member", id: hofer }), TransitionError);
+  await assert.rejects(sendAnyway(db, request.id, { kind: "network_member", id: hofer }, noLink), TransitionError);
 });
 
 test("M1 through the router: another domain waits for Send anyway, which sends it once", { skip: noDb }, async () => {
