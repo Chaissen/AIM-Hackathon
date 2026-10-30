@@ -102,7 +102,7 @@ A third party, such as the PGK network operator, could later run one shared inst
 | Matrix | Synapse and Element Web, server name `klinikum.example` | The PGK homeserver |
 | ID Austria | Keycloak over OpenID Connect, with the claim names of a real ID Austria response, including the eHVD entry for healthcare professionals | The ID Austria reference environment, then production. Both need a registered service provider, which private companies register through Mein USP. |
 | eHVD | A mock SOAP service in its own container with the real interface (WSDL version 2 from BRZ) and synthetic entries | The eHVD web service, after registration with the health ministry |
-| Email | Mailpit catches every message | The clinic's mail server |
+| Email | Mailpit catches every message locally. For the pitch, Gmail delivers it to the team inboxes only. | The clinic's mail server |
 | SMS | A page in the request service shows each SMS | An SMS gateway |
 | FHIR server | Local HAPI FHIR | The clinic's FHIR server |
 

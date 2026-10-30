@@ -8,12 +8,12 @@ This page describes what runs, how the parts talk, and what the request service 
 |---|---|---|---|---|
 | Synapse | Matrix homeserver for `klinikum.example` | Reused | [`matrixdotorg/synapse`](https://hub.docker.com/r/matrixdotorg/synapse) | 8008 |
 | Element Web | Dr. Hofer's chat client | Reused | [`vectorim/element-web`](https://hub.docker.com/r/vectorim/element-web) | 8081 |
-| Request service (ordy) | Outside portal, widget, identity checks, parser, FHIR mapper, audit log, SMS screen | Built | TypeScript: [Next.js](https://nextjs.org/docs) 16 (App Router), [tRPC](https://trpc.io/docs) v11, [zod](https://zod.dev/), [Drizzle](https://orm.drizzle.team/), [openid-client](https://github.com/panva/openid-client) (T07), [markdown-it](https://github.com/markdown-it/markdown-it) (T10), UI with [shadcn/ui](https://ui.shadcn.com/) on Tailwind CSS | 3010 |
+| Request service (ordy) | Outside portal, widget, identity checks, parser, FHIR mapper, audit log, SMS screen | Built | TypeScript: [Next.js](https://nextjs.org/docs) 16 (App Router), [tRPC](https://trpc.io/docs) v11, [zod](https://zod.dev/), [Drizzle](https://orm.drizzle.team/), [openid-client](https://github.com/panva/openid-client) (T07), [markdown-it](https://github.com/markdown-it/markdown-it) (T10), [Nodemailer](https://nodemailer.com/) (T06), UI with [shadcn/ui](https://ui.shadcn.com/) on Tailwind CSS | 3010 |
 | Matrix bot | Notices and `!status` in Dr. Hofer's room | Built | TypeScript process in `src/bot/`, small Matrix client on `fetch` in `src/server/matrix/client.ts` | none |
 | Postgres | Requests, bindings, audit log | Reused | [`postgres:17-alpine`](https://hub.docker.com/_/postgres) | 5433, mapped to 5432 in the container |
 | Simulated ID Austria | OpenID Connect login with fake citizens | Configured (T02) | [Keycloak](https://www.keycloak.org/server/containers) | 8080 |
 | eHVD mock | Directory of healthcare people and organisations, same SOAP interface as the real eHVD | Built (T23) | TypeScript service on `node:24-alpine` with [`saxes`](https://github.com/lddubeau/saxes), in `services/ehvd-mock/`, see [eHVD](EHVD.md) | 8095 |
-| Mailpit | Catches every outgoing email | Reused | [`axllent/mailpit`](https://hub.docker.com/r/axllent/mailpit) | 1025 SMTP, 8025 web |
+| Mailpit | Catches every outgoing email in local development. For the demo, email goes through Gmail SMTP as ordysoftware@gmail.com to the team inboxes instead, see [Outgoing messages](#outgoing-messages). | Reused | [`axllent/mailpit`](https://hub.docker.com/r/axllent/mailpit) | 1025 SMTP, 8025 web |
 | HAPI FHIR | FHIR R4 server | Reused | [`hapiproject/hapi`](https://hub.docker.com/r/hapiproject/hapi) | 8090, mapped to 8080 in the container |
 | HL7 validator | Validates every filed resource | Reused | [`validator_cli.jar`](https://github.com/hapifhir/org.hl7.fhir.core/releases) | none |
 
@@ -34,17 +34,17 @@ Every reused part can be replaced. Synapse can be any Matrix homeserver, Keycloa
                                |   |   |   +--> HAPI FHIR
                                |   |   +------> Postgres: requests, bindings, audit log
                                |   +----------> eHVD mock (SOAP 1.2)
-                               +--------------> Mailpit (email), /sms page (SMS)
+                               +--------------> Mailpit or Gmail SMTP (email), /sms page (SMS)
 ```
 
 ## Document types
 
 One table in the request service defines each document type. To add a type, add a row.
 
-| Key | Default channel | eHVD check | Mapper | Name in Matrix messages |
-|---|---|---|---|---|
-| `lab-result` | email | Release check: the physician under `Validated by` is active, has the lab medicine specialty, and is a member of the named organisation | Lab mapper: Observations and DiagnosticReport | lab result |
-| `rehab-report` | SMS | Release check: the physician under `Written by` is active and a member of the named organisation, which is an active hospital | Rehab mapper: DocumentReference | rehab discharge report |
+| Key | Default channel | eHVD check | Mapper | Name in Matrix messages | Words no outgoing message may contain |
+|---|---|---|---|---|---|
+| `lab-result` | email | Release check: the physician under `Validated by` is active, has the lab medicine specialty, and is a member of the named organisation | Lab mapper: Observations and DiagnosticReport | lab result | `lab`, `labor`, `result`, `befund` |
+| `rehab-report` | SMS | Release check: the physician under `Written by` is active and a member of the named organisation, which is an active hospital | Rehab mapper: DocumentReference | rehab discharge report | `rehab`, `discharge`, `report` |
 
 ## Request lifecycle
 
@@ -153,7 +153,21 @@ If you did not expect this message, you can ignore it.
 Klinikum Beispielstadt: Dr. L. Hofer sent you a secure request. Open it with ID Austria: http://localhost:3010/r/<link token> (valid until 5 Nov)
 ```
 
-Before sending, the request service compares the words of the message with the patient's name words, the birth date in the formats `1961-03-12`, `12.03.1961`, and `12 March 1961`, and the document type words. It compares whole words, not substrings. A substring check would block every message, because the patient's family name "Beispiel" is part of "Klinikum Beispielstadt". [Compliance and safety](COMPLIANCE_AND_SAFETY.md) has the rule.
+`sendRequestEmail` in `src/server/mail/send.ts` renders the email and sends it over SMTP with Nodemailer. The email is plain text with no HTML part. The requester's name is a Matrix display name that the member sets themselves, so it never goes into HTML. The expiry date is the day in the `Europe/Vienna` time zone. Once T04 lands, the request service calls it when a request goes out.
+
+Locally every email goes to Mailpit, which catches any address. For the demo, it goes through Gmail as ordysoftware@gmail.com, on `smtp.gmail.com` port 465 with TLS from the start. The scenario's `.example` addresses cannot receive mail. With `MAIL_TEAM_INBOXES` set, every email goes to the team inboxes instead of the request's address. The `To` header still names the request's address, so the email for request 1 reads as sent to `eva.brandl@labor-kanal.example`. If `SMTP_USER` is set and `MAIL_TEAM_INBOXES` is empty, the request service sends nothing. A real relay would deliver to any address typed in the widget. [Development](DEVELOPMENT.md#send-email-through-gmail) has the setup.
+
+Before sending, the request service compares the words of the subject and the text with three kinds of forbidden words:
+
+- the patient's name words
+- the birth date in the formats `1961-03-12`, `12.03.1961`, and `12 March 1961`
+- the words of every document type in the table above, not only the requested one
+
+It compares whole words, not substrings. A substring check would block every message, because the patient's family name "Beispiel" is part of "Klinikum Beispielstadt".
+
+A word is a run of digits and letters that have an upper and a lower case, such as Latin, Greek, or Cyrillic letters. Every other character separates words. So "Maria's", "(Maria)", and "maria.beispiel" all contain the word "maria". Case does not matter. Umlauts are spelled out (ü as ue), and other accents are dropped. A number loses its leading zeros. A birth date counts as its sequence of words, so `12.3.1961` and `12/03/1961` match `12.03.1961`. A name in a script without case, such as Chinese, has no words, so the check cannot catch it.
+
+On a hit, nothing is sent. `MessageRefused` names only the kinds of data it found: `patient-name`, `birth-date`, or `document-type`. It never names the words, so logging the error cannot leak the patient's name. The link token is random, so in rare cases it holds a forbidden word between `-` or `_`. The email is then refused too. [Compliance and safety](COMPLIANCE_AND_SAFETY.md) has the rule.
 
 ## Outside portal
 
@@ -285,7 +299,10 @@ Configuration is read in `src/env.ts`. Service addresses and demo accounts have 
 | `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | `request-service`, `request-service-demo-2026` |
 | `KEYCLOAK_ADMIN_USER`, `KEYCLOAK_ADMIN_PASSWORD` | `admin`, demo value (`pnpm citizen` only) |
 | `EHVD_URL` | `http://localhost:8095/` (planned, T15) |
-| `SMTP_HOST`, `SMTP_PORT`, `MAILPIT_API_URL` | `localhost`, `1025`, `http://localhost:8025` |
+| `SMTP_HOST`, `SMTP_PORT`, `MAILPIT_API_URL` | `localhost`, `1025`, `http://localhost:8025`. Port 465 uses TLS from the start. Any other port upgrades with STARTTLS when the server offers it, and requires it when `SMTP_USER` is set. |
+| `SMTP_USER`, `SMTP_PASSWORD` | empty, no login, which is what Mailpit wants. For Gmail: `ordysoftware@gmail.com` and an app password. |
+| `MAIL_FROM` | `ordy · Klinikum Beispielstadt <ordy@klinikum.example>` |
+| `MAIL_TEAM_INBOXES` | empty, so the email goes to the request's address, which is safe only with Mailpit. Comma-separated addresses; required when `SMTP_USER` is set. |
 | `ANTHROPIC_API_KEY` | unset, only for the optional AI fallback; unset turns it off |
 | `AI_FALLBACK_MODEL` | `claude-opus-5-5` |
 
@@ -341,6 +358,8 @@ src/
     matrix/client.ts          Matrix client-server API
     matrix/notices.ts         notice texts and notifyRoom for Dr. Hofer's room
     metrics/                  metrics from audit rows, validator runner, metrics table (T17, T18)
+    mail/message.ts           request email template and the content check (T06)
+    mail/send.ts              sendRequestEmail over SMTP: Mailpit, or Gmail to the team inboxes (T06)
     auth/eid-session.ts       outside person's session cookie
     portal/data.ts            data loaders for the portal and SMS pages, stubs until T04, T06, T07
   bot/                        Matrix bot process and commands

@@ -25,7 +25,14 @@ const schema = z.object({
   KEYCLOAK_ADMIN_PASSWORD: z.string().default("keycloak-demo-2026"),
   SMTP_HOST: z.string().default("localhost"),
   SMTP_PORT: z.coerce.number().int().default(1025),
+  SMTP_USER: z.string().default(""),
+  SMTP_PASSWORD: z.string().default(""),
   MAIL_FROM: z.string().default("ordy · Klinikum Beispielstadt <ordy@klinikum.example>"),
+  MAIL_TEAM_INBOXES: z
+    .string()
+    .default("")
+    .transform((list) => list.split(",").map((address) => address.trim()).filter(Boolean))
+    .pipe(z.array(z.email())),
   MAILPIT_API_URL: z.url().default("http://localhost:8025"),
   // AI fallback parser (task T22). Unset ANTHROPIC_API_KEY turns it off.
   ANTHROPIC_API_KEY: z.preprocess((value) => (value === "" ? undefined : value), z.string().optional()),
