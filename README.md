@@ -12,7 +12,7 @@ The feature table describes this checkout. The workspace gateway and hostname mi
 
 | Part | State |
 |---|---|
-| Stack: Synapse, workspace gateway, HAPI FHIR, Mailpit, Postgres, Keycloak, eHVD mock, ordy web and bot | **Works.** `./scripts/setup.sh` and `pnpm dev` start it. |
+| Stack: Synapse, workspace gateway, HAPI FHIR, Postgres, Keycloak, eHVD mock, ordy web and bot | **Works.** `./scripts/setup.sh` and `pnpm dev` start it. |
 | ordy workspace | **Works.** The app root provides ordy's own sign-in, shared document workflows, and Messages in one design. Existing Matrix accounts sign in without Element. Messages shows joined plaintext rooms, text and bot notices, older history, and a composer. The document views remain Overview, Requests, a request's page, New request, Patients, a patient's page, Contacts, Audit log, and Metrics. Each view has a hash route. |
 | Optional Element client and legacy widget | **Compatibility.** Enable the `legacy-element` Compose profile and open port 8082. The legacy widget remains at `/widget`; the primary workspace has no Element iframe. |
 | Address check before sending, against the eHVD | **Works.** An email domain that does not match the organisation's domain in the eHVD holds the request until Dr. Hofer clicks **Send anyway** (M1). |
@@ -21,7 +21,7 @@ The feature table describes this checkout. The workspace gateway and hostname mi
 | Matrix notices | **Works** for a wrong person, a wrong patient, a held identity or answer, and a filed answer. Nothing posts a "request sent" notice yet, so each notice is a new message in the room, not in a thread. |
 | Matrix bot | **Works.** `!help` and `!status` |
 | Simulated ID Austria (Keycloak) and eHVD mock | **Works.** The real ID Austria claim names, five test citizens, `pnpm citizen` for more. The eHVD mock speaks SOAP 1.2 with the real eHVD WSDL and synthetic entries. |
-| Request email | **Works.** The request form and **Send anyway** send the link by email to Mailpit, or through Gmail to the team inboxes. A check refuses an email that names the patient, the birth date, or a document type. A refused or failed email stores nothing. |
+| Request email | **Works.** The request form and **Send anyway** send the link by email through Gmail, and only to the team inboxes. A check refuses an email that names the patient, the birth date, or a document type. A refused or failed email stores nothing. |
 | SMS, and the SMS screen's message list | **Not built.** The SMS screen stays empty. |
 | AI fallback parser (optional) | **Built, not connected.** Tested with a stand-in for the model. The answer flow uses the rule-based parser only. |
 | Metric runner | **Partly.** `pnpm validate` and `pnpm audit:check` work on the filed data. `pnpm scenario` checks that the stack is up, but its flow steps have no code yet that drives them, so it reports them as blocked. |
@@ -30,7 +30,7 @@ The feature table describes this checkout. The workspace gateway and hostname mi
 
 ## Run it
 
-Requirements: Docker with Compose v2, Node.js 22.9 or newer, and pnpm 10 (`corepack enable`, or `npm install -g pnpm@10` on Node.js 25 and newer, which no longer ship Corepack). The HL7 validator also needs Java 17 or newer and internet access, because it checks LOINC codes against tx.fhir.org. These ports must be free: 3010, 5433, 8008, 8081, 8090, 8025, 1025, 8080, and 8095. Optional Element compatibility uses 8082. [Development](docs/DEVELOPMENT.md) has the full guide and troubleshooting. [Deployment](docs/DEPLOYMENT.md) covers the public chat hostname and existing Element installations.
+Requirements: Docker with Compose v2, Node.js 22.9 or newer, and pnpm 10 (`corepack enable`, or `npm install -g pnpm@10` on Node.js 25 and newer, which no longer ship Corepack). The HL7 validator also needs Java 17 or newer and internet access, because it checks LOINC codes against tx.fhir.org. These ports must be free: 3010, 5433, 8008, 8081, 8090, 8080, and 8095. Optional Element compatibility uses 8082. [Development](docs/DEVELOPMENT.md) has the full guide and troubleshooting. [Deployment](docs/DEPLOYMENT.md) covers the public chat hostname and existing Element installations.
 
 ```bash
 git clone https://github.com/Chaissen/AIM-Hackathon.git
@@ -39,14 +39,14 @@ cd AIM-Hackathon
 pnpm dev             # Next.js on 3010 and the bot; open the workspace through 8081
 ```
 
-`setup.sh` is safe to run again. The first run downloads the container images, and HAPI FHIR needs about a minute to start.
+`setup.sh` is safe to run again. The first run downloads the container images, and HAPI FHIR needs about a minute to start. To send the request email, put the Gmail app password of ordysoftware@gmail.com into `.env` as [Send email through Gmail](docs/DEVELOPMENT.md#send-email-through-gmail) describes.
 
 | What | URL | Login |
 |---|---|---|
 | ordy workspace | http://localhost:8081 | `lena.hofer` / `hofer-demo-2026` |
 | ordy app and outside portal | http://localhost:3010 | the same workspace is available here |
 | Optional Element compatibility | http://localhost:8082 | enable the `legacy-element` profile; same Matrix account |
-| Mailpit (outside emails) | http://localhost:8025 | |
+| Outside emails | the Gmail inbox of ordysoftware@gmail.com, or the team inboxes in `MAIL_TEAM_INBOXES`. A button on http://localhost:3010/inbox opens Gmail. | the team's Google login |
 | SMS screen | http://localhost:3010/sms | Empty for now: ordy sends no SMS yet |
 | HAPI FHIR | http://localhost:8090 (web UI), API base http://localhost:8090/fhir | |
 | Simulated ID Austria (Keycloak) | http://localhost:8080/admin | `admin` / `keycloak-demo-2026` for the admin console. Test citizens such as `eva.brandl` / `demo-eva` log in through the link of a request, see [Identity](docs/IDENTITY.md#test-citizens). |
@@ -61,7 +61,7 @@ Check that it works:
 2. Open http://localhost:8081 and sign in as `lena.hofer` / `hofer-demo-2026`. This is ordy's own workspace, with the same design as the document views.
 3. Open **Messages** and choose "Dr. Hofer · Outside documents". `!help` lists the bot commands; `!status` checks the database, the FHIR server, and Matrix.
 4. http://localhost:8095/healthz shows `{"status":"ok","entries":313}`, the eHVD mock.
-5. Open **New request**, choose **Examples**, then **Lab result from Dr. Brandl**, and click **Send request**. The email arrives in Mailpit at http://localhost:8025, or in the recipient's inbox at http://localhost:3010/inbox. Open its link in a private window, log in as `eva.brandl` / `demo-eva`, upload `track/scenario/documents/lab-result-maria-beispiel.md`, and enter Maria Beispiel and 12 March 1961. The answer is filed on HAPI FHIR, and a notice appears in **Messages**. Log in as `thomas.wagner` / `demo-thomas` instead, and the page says "This request is for someone else". The request's history shows the blocked login.
+5. Open **New request**, choose **Examples**, then **Lab result from Dr. Brandl**, and click **Send request**. The email arrives in the team's Gmail inbox, and its `To` line names `eva.brandl@labor-kanal.example`. Open its link in a private window, log in as `eva.brandl` / `demo-eva`, upload `track/scenario/documents/lab-result-maria-beispiel.md`, and enter Maria Beispiel and 12 March 1961. The answer is filed on HAPI FHIR, and a notice appears in **Messages**. Log in as `thomas.wagner` / `demo-thomas` instead, and the page says "This request is for someone else". The request's history shows the blocked login.
 
 ## Commands
 
@@ -69,7 +69,7 @@ Check that it works:
 |---|---|
 | `pnpm dev` | Next.js (`dev:web`) and the Matrix bot (`dev:bot`), both reload on changes |
 | `pnpm typecheck` · `pnpm lint` · `pnpm test` · `pnpm build` | Checks before every push |
-| `pnpm reset` | Empty Postgres, HAPI, and Mailpit, and reload the patient |
+| `pnpm reset` | Empty Postgres and HAPI, and reload the patient. The Gmail inbox keeps its emails. |
 | `pnpm citizen --given <given> --family <family> --birthdate <yyyy-mm-dd>` | Add a test citizen to the simulated ID Austria, for example a new outside person |
 | `pnpm db:generate --name <name>` · `pnpm db:migrate` | Create a migration from `src/server/db/schema.ts`, apply it |
 | `pnpm db:studio` | Browse the database |
@@ -103,13 +103,13 @@ Dr. Hofer signs in to the ordy workspace with her existing Matrix account. An en
 | Keycloak | Configured | Simulated ID Austria with the real claim names |
 | HAPI FHIR | Reused | FHIR R4 server |
 | Postgres | Reused | Requests, person number bindings, audit log |
-| Mailpit | Reused | Catches every outgoing email |
+| Gmail | Reused | Sends every outgoing email as ordysoftware@gmail.com, only to the team inboxes |
 | HL7 validator | Reused | Validates every filed resource |
 | Anthropic API, model `claude-opus-5-5` | Reused, optional | Second reader for the AI fallback parser, synthetic documents only |
 
 The main flow uses no AI model. Parsing, the identity checks, and the patient check are deterministic. Only when the parser cannot read a document does the optional AI fallback step in: a more lenient code reader reads every value, a model (Anthropic, `claude-opus-5-5`, off without `ANTHROPIC_API_KEY`) reads the document independently, and the two readings must agree. The model can only stop a record, never choose a value. Every answer it read waits for Dr. Hofer ([AI rules](docs/COMPLIANCE_AND_SAFETY.md#ai-rules)). The fallback is built and tested, but the answer flow does not call it yet.
 
-Simulated in the demo: ID Austria (Keycloak, without the phone-app confirmation) and the eHVD (our mock). Email goes to Mailpit, or through Gmail to the team inboxes. SMS would go to the SMS screen, but ordy does not send SMS yet. Each can be replaced by the real service, and every other part we did not build, such as HAPI FHIR or Synapse, by another product of its kind. [Whitepaper](docs/WHITEPAPER.md#what-is-real-and-what-is-simulated) says what each part becomes in production, and [Architecture](docs/ARCHITECTURE.md) has the details.
+Simulated in the demo: ID Austria (Keycloak, without the phone-app confirmation) and the eHVD (our mock). Email goes through Gmail, and only to the team inboxes. SMS would go to the SMS screen, but ordy does not send SMS yet. Each can be replaced by the real service, and every other part we did not build, such as HAPI FHIR or Synapse, by another product of its kind. [Whitepaper](docs/WHITEPAPER.md#what-is-real-and-what-is-simulated) says what each part becomes in production, and [Architecture](docs/ARCHITECTURE.md) has the details.
 
 | Part | Where | Notes |
 |---|---|---|

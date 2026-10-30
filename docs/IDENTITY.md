@@ -372,7 +372,7 @@ Dr. Hofer types `eva.brandl@labor-kanaI.example`, with a capital I.
 
 1. The address check sees that the domain differs from `labor-kanal.example` in the eHVD. The widget warns Dr. Hofer, and the request service writes `misdelivery_caught` with `address_mismatch`.
 2. For the test, Dr. Hofer clicks **Send anyway**.
-3. Anna Huber opens the email in Mailpit and clicks the link. The page shows only "Dr. Lena Hofer at Klinikum Beispielstadt sent you a request".
+3. Anna Huber opens the email, which arrives in the team's Gmail inbox for the demo, and clicks the link. The page shows only "Dr. Lena Hofer at Klinikum Beispielstadt sent you a request".
 4. She logs in as `anna.huber`. The name check fails.
 5. She sees "This request is for someone else. Nothing was shared with you." She never sees the patient or the document type, and she cannot answer.
 6. The audit log has `identity_checked` with `fail` and `misdelivery_caught` with `wrong_person`. Dr. Hofer gets a Matrix message.

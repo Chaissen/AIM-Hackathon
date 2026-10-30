@@ -12,7 +12,7 @@ flowchart LR
     wrong["👤 Wrong recipient<br/>(typo address, colleague)"]
     idp["⚙ ID Austria<br/>(simulated eID)"]
     fhir["⚙ FHIR server<br/>(HAPI)"]
-    gw["⚙ Email / SMS<br/>(Mailpit, SMS page)"]
+    gw["⚙ Email / SMS<br/>(Gmail, SMS page)"]
 
     subgraph SYS["Document request service"]
         direction TB
@@ -205,7 +205,7 @@ flowchart LR
         core <-.-> reg[("Register<br/>(proposed)")]
         portal["Answer portal<br/>(HTTPS, public)"] <--> core
     end
-    core --> mail["Mailpit / SMS page"]
+    core --> mail["Gmail / SMS page"]
     mail -. "link" .-> browser["Outside person's browser"]
     browser --> portal
     portal <--> eid["Simulated ID Austria"]

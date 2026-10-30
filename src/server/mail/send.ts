@@ -16,16 +16,12 @@ export class IncompletePatient extends Error {
   }
 }
 
+/** The `To` header names `to`, but the email is delivered only to the team inboxes. */
 export async function sendRequestEmail({ to, patient, ...content }: RequestEmail & { to: string; patient: ExpectedPatient }): Promise<void> {
   if (!checkablePatient(patient)) throw new IncompletePatient();
   const email = requestEmail(content);
   const categories = forbiddenContent(email, patient);
   if (categories.length) throw new MessageRefused(categories);
-
-  const teamInboxes = env.MAIL_TEAM_INBOXES;
-  if (env.SMTP_USER && !teamInboxes.length) {
-    throw Object.assign(new Error("SMTP_USER is set but MAIL_TEAM_INBOXES is empty, so ordy sends no email"), { code: "NO_TEAM_INBOXES" });
-  }
 
   const transport = nodemailer.createTransport({
     host: env.SMTP_HOST,
@@ -43,7 +39,7 @@ export async function sendRequestEmail({ to, patient, ...content }: RequestEmail
       to,
       subject: email.subject,
       text: email.text,
-      envelope: { from: env.MAIL_FROM, to: teamInboxes.length ? teamInboxes : [to] },
+      envelope: { from: env.MAIL_FROM, to: env.MAIL_TEAM_INBOXES },
     });
   } finally {
     transport.close();
