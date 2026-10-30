@@ -5,6 +5,9 @@ import { z } from "zod";
 import { env } from "@/env";
 import { requestInput } from "@/lib/request-input";
 import { type Actor, clinicProcedure, createTRPCRouter } from "@/server/api/trpc";
+import { answerDeps } from "@/server/answers/deps";
+import { logReason } from "@/server/answers/file";
+import { acceptAnswer, FilingOutcomeOpen, NoHeldAnswer, rejectAnswer } from "@/server/answers/held";
 import { auditActor, recordAudit } from "@/server/audit/record";
 import type { Db } from "@/server/db";
 import { auditLog } from "@/server/db/schema";
@@ -82,12 +85,13 @@ function conflict(e: unknown): never {
 
 const DECIDED = { accept: "accepted", reject: "rejected", cancel: "cancelled" } as const;
 
-async function decide(ctx: { db: Db; actor: Actor; request: RequestRow }, event: keyof typeof DECIDED) {
+type DecideContext = { db: Db; actor: Extract<Actor, { kind: "clinic" }>; request: RequestRow };
+
+async function decide(ctx: DecideContext, event: keyof typeof DECIDED) {
+  if (ctx.request.state === "answer_held" && event !== "cancel") return decideHeldAnswer(ctx, event);
   const request = await applyEvent(ctx.db, ctx.request.id, event, async (tx, changed, from) => {
-    if (event === "accept" && from === "answer_held") {
-      // TODO(T09): file the kept answer here, then write request_decided.
-      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Filing a held answer is not built yet." });
-    }
+    // The answer arrived and was held since the request was read: only the answer flow files or drops it.
+    if (from === "answer_held" && event !== "cancel") throw new TransitionError(from, event);
     await recordAudit(tx, {
       event: "request_decided",
       requestId: changed.id,
@@ -98,6 +102,29 @@ async function decide(ctx: { db: Db; actor: Actor; request: RequestRow }, event:
   }).catch(conflict);
   if (!request) throw notFound(ctx.request.id);
   return request;
+}
+
+/**
+ * Accept files a held answer and Reject drops it, through the answer flow (docs/ARCHITECTURE.md, "The answer"). Both
+ * write `request_decided` in the transaction that changes the state. A failed filing leaves the request held.
+ */
+async function decideHeldAnswer(ctx: DecideContext, event: "accept" | "reject") {
+  const id = ctx.request.id;
+  try {
+    const request = event === "accept" ? await acceptAnswer(answerDeps, id, ctx.actor.mxid) : await rejectAnswer(answerDeps, id, ctx.actor.mxid);
+    if (!request) throw new TRPCError({ code: "CONFLICT", message: `Request ${id} changed in the meantime. Reload and decide again.` });
+    return request;
+  } catch (error) {
+    if (error instanceof TRPCError) throw error;
+    if (error instanceof NoHeldAnswer) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This request has no held answer to file." });
+    if (error instanceof FilingOutcomeOpen) {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The last Accept may have filed the answer. Click Accept again to finish it." });
+    }
+    // A database error's message carries the document text and the ID token; neither goes to the widget or the log.
+    console.error(`${event} on the held answer to request ${id} failed: ${logReason(error)}`);
+    const message = event === "accept" ? "Filing the answer failed. The answer stays held; try Accept again in a few minutes." : "Rejecting the answer failed. Try again in a few minutes.";
+    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message });
+  }
 }
 
 const auditOf = (db: Db, ids: number[]) =>

@@ -84,7 +84,7 @@ export type RehabReport = DocumentBase & {
   sentBy: PersonLine | null;
 };
 
-/** Any other document kind. It becomes a DocumentReference with the text attached, held for Dr. Hofer. */
+/** Any other document kind. The answer flow refuses it, because a request asks for a lab result or a discharge report. */
 export type GenericDocument = DocumentBase & { type: "other" };
 
 export type ParsedDocument = LabResult | RehabReport | GenericDocument;

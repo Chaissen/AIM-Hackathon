@@ -1,6 +1,7 @@
 import { integer, jsonb, pgEnum, pgTable, primaryKey, serial, text, timestamp } from "drizzle-orm/pg-core";
 
 import type { DocumentType } from "@/lib/document-types";
+import type { KeptAnswer } from "@/server/answers/ports";
 import { REQUEST_STATES } from "../requests/lifecycle";
 
 export const auditEvent = pgEnum("audit_event", [
@@ -60,6 +61,43 @@ export const requests = pgTable("requests", {
   // Dr. Hofer's room and the event that starts the request's thread there (T05).
   matrixRoom: text("matrix_room"),
   matrixEvent: text("matrix_event"),
+});
+
+/** The sender of a held answer, as ID Austria named them at login. */
+export type HeldAnswerSender = { givenName: string; familyName: string; gdaOid: string | null };
+
+// An answer that passed the patient check but waits for Dr. Hofer, because the release check did not pass.
+// Accept files it and deletes the row, Reject deletes it. docs/ARCHITECTURE.md, "Storage".
+export const heldAnswers = pgTable("held_answers", {
+  requestId: integer("request_id")
+    .primaryKey()
+    .references(() => requests.id, { onDelete: "cascade" }),
+  // The upload as text. It passed the patient check, so it is about the requested patient.
+  markdown: text("markdown").notNull(),
+  sha256: text("sha256").notNull(),
+  sender: jsonb("sender").$type<HeldAnswerSender>().notNull(),
+  // The ID token from the sender's login, exactly as received, for the Provenance signature.
+  idToken: text("id_token").notNull(),
+  // The sentence Dr. Hofer got with the held notice.
+  reason: text("reason").notNull(),
+  // What the release check found before it held: the organisation's and the responsible person's eHVD OIDs, or null.
+  // Accept files with them, so the Organization and the Practitioner are the ones the eHVD lists.
+  organisationOid: text("organisation_oid"),
+  practitionerOid: text("practitioner_oid"),
+  // When the sender pressed send.
+  sentAt: timestamp("sent_at", { withTimezone: true }).notNull(),
+});
+
+// An answer whose filing has an unknown outcome: the FHIR server may have filed it while the response was lost. Until
+// it is filed, or the server refuses it, the request takes no other upload, and the next send files exactly this
+// answer again. Lives only while the request is `verified` or, after an Accept, `answer_held`. docs/FHIR.md, "Retries".
+export const keptAnswers = pgTable("kept_answers", {
+  requestId: integer("request_id")
+    .primaryKey()
+    .references(() => requests.id, { onDelete: "cascade" }),
+  // Everything the Bundle is built from, so the retry needs no new eHVD lookup and no new parse.
+  answer: jsonb("answer").$type<KeptAnswer>().notNull(),
+  failedAt: timestamp("failed_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 // Which ID Austria person number answered as a given person at a given organisation. docs/IDENTITY.md, "Person number binding".

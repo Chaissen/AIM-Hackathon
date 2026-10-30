@@ -65,7 +65,8 @@ export async function findAnswerContext(
 
   const patient = await fhirFetch<Patient>(`Patient/${encodeURIComponent(request.patientId)}`);
   if (!patient.birthDate) throw new Error(`Patient ${request.patientId} has no birth date`);
-  const name = patient.name?.[0];
+  // The official name if the record has one, as the patient check compares (`readFhirPatient`).
+  const name = patient.name?.find((n) => n.use === "official") ?? patient.name?.[0];
   return {
     ...publicPart(request),
     docType: request.docType,
