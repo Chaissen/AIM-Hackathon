@@ -40,10 +40,17 @@ function viennaOffsetMinutes(instant: number): number {
   return m ? (m[1] === "-" ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) : 0;
 }
 
-/** 60 to `+01:00`. */
-function formatOffset(minutes: number): string {
-  const abs = Math.abs(minutes);
-  return `${minutes < 0 ? "-" : "+"}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+const offsetText = (offset: number) => {
+  const abs = Math.abs(offset);
+  return `${offset < 0 ? "-" : "+"}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+};
+
+/** An instant as FHIR `instant` with seconds and the Vienna offset, for example `2026-10-29T14:02:12+01:00`. */
+export function viennaInstant(date: Date): ViennaDateTime {
+  const offset = viennaOffsetMinutes(date.getTime());
+  const wall = new Date(date.getTime() + offset * 60_000);
+  const day = toIso({ year: wall.getUTCFullYear(), month: wall.getUTCMonth() + 1, day: wall.getUTCDate() });
+  return `${day}T${pad(wall.getUTCHours())}:${pad(wall.getUTCMinutes())}:${pad(wall.getUTCSeconds())}${offsetText(offset)}`;
 }
 
 /** `22 October 2026, 08:10` to `2026-10-22T08:10:00+02:00`. Null for any other format or an impossible date or time. */
@@ -60,17 +67,7 @@ export function parseViennaDateTime(text: string): ViennaDateTime | null {
   const wallClock = Date.UTC(parts.year, parts.month - 1, parts.day, hour, minute);
   let offset = viennaOffsetMinutes(wallClock);
   offset = viennaOffsetMinutes(wallClock - offset * 60_000);
-  return `${toIso(parts)}T${pad(hour)}:${pad(minute)}:00${formatOffset(offset)}`;
-}
-
-/**
- * A moment as a FHIR `instant` in Europe/Vienna, with seconds, for example `2026-10-29T14:02:12+01:00`.
- * For the filing time in `DocumentReference.date` and `Provenance.recorded`.
- */
-export function viennaInstant(moment: Date): ViennaDateTime {
-  const offset = viennaOffsetMinutes(moment.getTime());
-  const wallClock = new Date(moment.getTime() + offset * 60_000).toISOString().slice(0, 19);
-  return `${wallClock}${formatOffset(offset)}`;
+  return `${toIso(parts)}T${pad(hour)}:${pad(minute)}:00${offsetText(offset)}`;
 }
 
 /**

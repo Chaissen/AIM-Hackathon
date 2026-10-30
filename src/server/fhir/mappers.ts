@@ -14,6 +14,7 @@ import type {
 
 import { viennaInstant } from "@/server/documents/dates";
 import type { LabResult, LabRow, ParsedDocument, RehabReport } from "@/server/documents/types";
+import { vitalSign } from "@/server/fhir/vital-signs";
 
 // Lab and rehab mappers (docs/FHIR.md, "Lab result mapping" and "Rehab report mapping").
 // They only build the clinical resources. The filing (T13) creates the Practitioner and Organization,
@@ -21,28 +22,27 @@ import type { LabResult, LabRow, ParsedDocument, RehabReport } from "@/server/do
 
 const LOINC = "http://loinc.org";
 const UCUM = "http://unitsofmeasure.org";
+const CATEGORY = "http://terminology.hl7.org/CodeSystem/observation-category";
 
 /** A resource with the `urn:uuid:` fullUrl it gets in the transaction Bundle. */
 export type Entry<T extends FhirResource> = { fullUrl: `urn:uuid:${string}`; resource: T };
 
-/** A server id such as `Patient/maria-beispiel`, or the `urn:uuid:` fullUrl of another Bundle entry. */
-export type ReferenceValue = `urn:uuid:${string}` | `${"Patient" | "Practitioner" | "Organization"}/${string}`;
-
+/** The references `prepareParties()` in `filing.ts` returns, and the patient of the request. */
 export type MapContext = {
   /** `Patient/maria-beispiel`, chosen by the request, never by the document. */
-  patient: ReferenceValue;
+  patient: Reference;
   /** The organisation from the heading. */
-  organization: ReferenceValue;
+  organization: Reference;
   /** The physician under `Validated by` or `Written by`. Null when the filing has none. */
-  practitioner: ReferenceValue | null;
+  practitioner: Reference | null;
 };
 
 export type LabResultEntries = { diagnosticReport: Entry<DiagnosticReport>; observations: Entry<Observation>[] };
 
 const entry = <T extends FhirResource>(resource: T): Entry<T> => ({ fullUrl: `urn:uuid:${randomUUID()}`, resource });
 
-// A new object for every use, so no two resources share one.
-const ref = (reference: string): Reference => ({ reference });
+// A copy for every use, so no two resources share one object.
+const own = (reference: Reference): Reference => structuredClone(reference);
 
 /** Optional elements may also be null. Required ones may not. */
 type Draft<T> = { [K in keyof T]: undefined extends T[K] ? T[K] | null : T[K] };
@@ -50,8 +50,8 @@ type Draft<T> = { [K in keyof T]: undefined extends T[K] ? T[K] | null : T[K] };
 /**
  * Leaves out the elements that are null, undefined, or an empty string, because FHIR JSON allows no empty values
  * (`ele-1`) and a jury document may leave a cell empty. Typed by the element, so a misspelled key fails the typecheck.
- * It works on one level only and keeps empty arrays, so nested elements go through their own `compact`.
- * A required string must not be empty either; the parser guarantees that for every one used here.
+ * It works on one level and keeps empty arrays. Values that skip it, such as the title in `DiagnosticReport.code`,
+ * the stay dates, and `result` (the parser refuses a table without rows), rely on the parser never leaving them empty.
  */
 const compact = <T extends object>(element: Draft<T>): T =>
   Object.fromEntries(Object.entries(element).filter(([, value]) => value !== null && value !== undefined && value !== "")) as T;
@@ -79,16 +79,19 @@ function referenceRange(row: LabRow): ObservationReferenceRange[] | null {
 }
 
 function observation(row: LabRow, doc: LabResult, context: MapContext): Observation {
+  // A vital sign also gets the profile's category and code. The parser already refused a unit the profile does not allow.
+  const vital = vitalSign(row.loinc);
+  const codes = vital && vital.code !== row.loinc ? [row.loinc, vital.code] : [row.loinc];
   return compact<Observation>({
     resourceType: "Observation",
     status: "final",
-    category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "laboratory" }] }],
+    category: (vital ? ["laboratory", "vital-signs"] : ["laboratory"]).map((code) => ({ coding: [{ system: CATEGORY, code }] })),
     // No `display`: jury documents may carry codes we have not looked up, and a wrong display is a validator error.
-    code: compact<CodeableConcept>({ coding: [{ system: LOINC, code: row.loinc }], text: row.test }),
-    subject: ref(context.patient),
+    code: compact<CodeableConcept>({ coding: codes.map((code) => ({ system: LOINC, code })), text: row.test }),
+    subject: own(context.patient),
     effectiveDateTime: doc.sampleTaken,
     issued: doc.reported,
-    performer: context.practitioner ? [ref(context.practitioner)] : null,
+    performer: context.practitioner ? [own(context.practitioner)] : null,
     valueQuantity: quantity(row.value, row),
     interpretation: row.interpretation
       ? [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation", code: row.interpretation }] }]
@@ -105,12 +108,12 @@ export function mapLabResult(doc: LabResult, context: MapContext): LabResultEntr
       status: "final",
       category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/v2-0074", code: "LAB" }] }],
       code: { coding: [{ system: LOINC, code: "11502-2" }], text: doc.title },
-      subject: ref(context.patient),
+      subject: own(context.patient),
       effectiveDateTime: doc.sampleTaken,
       issued: doc.reported,
-      performer: [ref(context.organization)],
-      resultsInterpreter: context.practitioner ? [ref(context.practitioner)] : null,
-      result: observations.map((o) => ref(o.fullUrl)),
+      performer: [own(context.organization)],
+      resultsInterpreter: context.practitioner ? [own(context.practitioner)] : null,
+      result: observations.map((o) => ({ reference: o.fullUrl })),
       conclusion: doc.conclusion,
       presentedForm: [markdownAttachment(doc)],
     }),
@@ -126,9 +129,9 @@ export function mapRehabReport(doc: RehabReport, context: MapContext, filedAt: D
       status: "current",
       docStatus: "final",
       type: { coding: [{ system: LOINC, code: "18842-5" }], text: "Rehab discharge report" },
-      subject: ref(context.patient),
+      subject: own(context.patient),
       date: viennaInstant(filedAt),
-      author: (context.practitioner ? [context.practitioner, context.organization] : [context.organization]).map(ref),
+      author: (context.practitioner ? [context.practitioner, context.organization] : [context.organization]).map(own),
       description: doc.reason,
       content: [{ attachment: markdownAttachment(doc, doc.title) }],
       context: { period: { start: doc.stay.start, end: doc.stay.end } },

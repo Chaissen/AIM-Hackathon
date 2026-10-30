@@ -7,9 +7,9 @@ import type { LabRow, ParsedDocument } from "@/server/documents/types";
 import { type MapContext, mapLabResult, mapRehabReport } from "./mappers";
 
 const context: MapContext = {
-  patient: "Patient/maria-beispiel",
-  organization: "urn:uuid:organization",
-  practitioner: "urn:uuid:practitioner",
+  patient: { reference: "Patient/maria-beispiel" },
+  organization: { reference: "urn:uuid:organization" },
+  practitioner: { reference: "urn:uuid:practitioner" },
 };
 
 const filedAt = new Date("2026-10-29T13:02:12Z");
@@ -22,6 +22,8 @@ const markdownAttachment = (doc: ParsedDocument) => ({
   contentType: "text/markdown; charset=utf-8",
   data: Buffer.from(doc.markdown, "utf8").toString("base64"),
 });
+/** A row whose cells are empty apart from the result and the LOINC code. */
+const emptyCells: LabRow = { ...aptt, test: "", ucum: null, unitText: "", low: null, high: null, rangeText: "", interpretation: null };
 const withRow = (row: LabRow) => mapLabResult({ ...labResultMaria, rows: [row] }, context).observations[0].resource;
 
 /** Paths of every null, empty string, empty array, or empty object, which FHIR JSON does not allow (`ele-1`). */
@@ -66,6 +68,20 @@ test("mapLabResult keeps a unit the parser could not code in UCUM as text only",
   assert.deepEqual(observation.referenceRange, [{ low: { value: 4, unit: "G/L" }, high: { value: 10, unit: "G/L" }, text: "4 to 10" }]);
 });
 
+test("mapLabResult files a vital sign in a lab table with the profile's category and code", () => {
+  const categories = (o: { category?: { coding?: { code?: string }[] }[] }) => o.category?.map((c) => c.coding?.[0].code);
+  const sO2 = withRow({ ...aptt, test: "sO2", loinc: "2708-6", ucum: "%", unitText: "%" });
+  assert.deepEqual(categories(sO2), ["laboratory", "vital-signs"]);
+  assert.deepEqual(sO2.code?.coding, [{ system: "http://loinc.org", code: "2708-6" }]);
+  // 2713-6 counts as sO2, so the validator also wants the profile's code 2708-6.
+  const calculated = withRow({ ...aptt, test: "sO2 (calculated)", loinc: "2713-6", ucum: "%", unitText: "%" });
+  assert.deepEqual(calculated.code?.coding, [
+    { system: "http://loinc.org", code: "2713-6" },
+    { system: "http://loinc.org", code: "2708-6" },
+  ]);
+  assert.deepEqual(categories(withRow(aptt)), ["laboratory"]);
+});
+
 test("mapLabResult builds the DiagnosticReport around the Observations", () => {
   const { diagnosticReport, observations } = mapLabResult(labResultMaria, context);
   assert.match(diagnosticReport.fullUrl, UUID_URN);
@@ -96,7 +112,8 @@ test("mapLabResult gives every resource its own reference objects", () => {
     report.resultsInterpreter?.[0],
     ...observations.flatMap((o) => [o.resource.subject, o.resource.performer?.[0]]),
   ];
-  assert.equal(new Set(references).size, 11);
+  assert.ok(references.every(Boolean));
+  assert.equal(new Set([...references, ...Object.values(context)]).size, references.length + 3);
 });
 
 test("mapLabResult passes the parser's H for Max Beispiel's raised INR and aPTT through", () => {
@@ -118,7 +135,7 @@ test("mapLabResult keeps only the text of a range the parser could not split", (
 });
 
 test("mapLabResult leaves out the elements of empty cells", () => {
-  const observation = withRow({ ...aptt, test: "", ucum: null, unitText: "", low: null, high: null, rangeText: "", interpretation: null });
+  const observation = withRow(emptyCells);
   assert.equal("referenceRange" in observation, false);
   assert.deepEqual(observation.code, { coding: [{ system: "http://loinc.org", code: "14979-9" }] });
   assert.deepEqual(observation.valueQuantity, { value: 31 });
@@ -135,8 +152,8 @@ test("no mapper output carries an empty value", () => {
   const outputs = [
     mapLabResult(labResultMaria, context),
     mapLabResult(labResultMax, sparse),
-    mapLabResult({ ...labResultMaria, conclusion: null, rows: [{ ...aptt, test: "", ucum: null, unitText: "", low: null, high: null, rangeText: "", interpretation: null }] }, sparse),
-    mapLabResult({ ...labResultMaria, rows: [{ ...aptt, ucum: null, unitText: "G/L", low: null, high: null, rangeText: "below 37", interpretation: null }] }, context),
+    mapLabResult({ ...labResultMaria, conclusion: null, rows: [emptyCells] }, sparse),
+    mapLabResult({ ...labResultMaria, rows: [{ ...emptyCells, unitText: "G/L", rangeText: "below 37" }] }, context),
     mapRehabReport(rehabReportMaria, context, filedAt),
     mapRehabReport({ ...rehabReportMaria, reason: null }, sparse, filedAt),
   ];

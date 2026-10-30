@@ -73,7 +73,7 @@ The report and the people who handle it are different. Dr. Leitner wrote the reh
 | Heading `# Labor Kanalstraße: lab report` | `DiagnosticReport.performer`, the Organization |
 | The whole file | `DiagnosticReport.presentedForm`, `contentType` `text/markdown; charset=utf-8`, data in base64 |
 
-The DiagnosticReport has `status` `final`, `category` `LAB` from `http://terminology.hl7.org/CodeSystem/v2-0074`, and `code` LOINC `11502-2` (Laboratory report) with the document title in `code.text`. Each Observation has `status` `final` and `category` `laboratory` from `http://terminology.hl7.org/CodeSystem/observation-category`.
+The DiagnosticReport has `status` `final`, `category` `LAB` from `http://terminology.hl7.org/CodeSystem/v2-0074`, and `code` LOINC `11502-2` (Laboratory report) with the document title in `code.text`. Each Observation has `status` `final` and `category` `laboratory` from `http://terminology.hl7.org/CodeSystem/observation-category`. A vital sign in the table, such as sO2 on a blood gas report, also gets `category` `vital-signs` and, if the document uses a related code, the profile's own LOINC code as a second coding (`src/server/fhir/vital-signs.ts`).
 
 ### The scenario values
 
@@ -221,10 +221,11 @@ The validator checks LOINC codes against tx.fhir.org, so it needs internet acces
 Traps we know about:
 
 - `10^9/L` is not valid UCUM. Use `10*9/L`.
-- The validator rejects a unit that is not UCUM, such as `µmol/L` or `IU/L`, and some lab spellings mean something else in UCUM: `G/L` is gauss per litre, not giga per litre. The parser codes only the units on its list in `src/server/documents/ucum.ts`, after fixing the usual spellings. Any other unit stays text in `unit`, without `system` and `code`.
+- The validator rejects a unit that is not UCUM, such as `µmol/L` or `IU/L`, and some lab spellings mean something else in UCUM: `G/L` is gauss per litre, not giga per litre, and `mU/L` is milli-enzyme units, while lab reports usually mean milli-international units. The parser codes only the units on its list in `src/server/documents/ucum.ts`, after fixing the usual spellings. Any other unit stays text in `unit`, without `system` and `code`.
 - A `dateTime` with a time needs a time zone. `Europe/Vienna` is `+02:00` until 25 October 2026 and `+01:00` after that. The sample times are `+02:00`, and the filing times are `+01:00`.
 - An `instant`, such as `issued` and `recorded`, needs seconds and a time zone.
 - A Quantity with a `code` needs a `system` (invariant `qty-3`).
+- R4 makes an Observation with a vital sign code, such as sO2 `2708-6`, temperature `8310-5`, or weight `29463-7`, conform to a vital signs profile, and the validator also counts related codes such as `2713-6`. The profile wants `category` `vital-signs`, its own code, and a UCUM unit it allows. The parser refuses a vital sign with any other unit, and a blood pressure row, because blood pressure needs systolic and diastolic as components of one Observation. `vital-signs.ts` lists the codes we know; T18 shows whether a jury document uses another one.
 - FHIR JSON allows no empty strings (`ele-1`). The mappers leave an element out when its cell is empty, and leave out `referenceRange` when a row has neither bounds nor range text.
 - The validator rejects a LOINC code it does not know. The parser checks the LOINC check digit, which catches most typos.
 - The validator reports a `display` that differs from LOINC's. We leave `display` out and put the document's label into `code.text`, because jury documents may carry codes we have not looked up.

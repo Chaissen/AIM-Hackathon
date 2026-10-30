@@ -150,6 +150,27 @@ test("a unit the UCUM list does not know stays text only", () => {
   assert.equal(doc.rows[2].ucum, null);
 });
 
+test("a vital sign needs a unit its FHIR profile allows, and blood pressure cannot be a row", () => {
+  const maria = scenario("lab-result-maria-beispiel.md");
+  const sO2 = (unit: string) => maria.replace("| aPTT | 31 | s | 25 to 37 | 14979-9 |", `| sO2 | 97 | ${unit} | 94 to 98 | 2708-6 |`);
+  assert.equal((parsed(sO2("%")) as LabResult).rows[1].ucum, "%");
+  const ratio = parseDocument(sO2("ratio"));
+  assert.equal(ratio.ok, false);
+  if (!ratio.ok) assert.deepEqual(ratio.errors, ['Row 2 (sO2): "ratio" is not a unit for this vital sign. Use a unit such as %.']);
+
+  const pressure = parseDocument(maria.replace("| aPTT | 31 | s | 25 to 37 | 14979-9 |", "| Systolic | 120 | mmHg | 90 to 140 | 8480-6 |"));
+  assert.equal(pressure.ok, false);
+  if (!pressure.ok) assert.match(pressure.errors.join(" "), /^Row 2 \(Systolic\): blood pressure needs systolic and diastolic together/);
+});
+
+test("a row without a test name is named as such in every reason", () => {
+  const markdown = scenario("lab-result-maria-beispiel.md").replace("| aPTT | 31 | s | 25 to 37 | 14979-9 |", "|  | 31 | s | 25 to 37 | 14997-9 |");
+  const result = parseDocument(markdown);
+  assert.equal(result.ok, false);
+  // 14997-9 swaps two digits of 14979-9, which the check digit catches.
+  if (!result.ok) assert.deepEqual(result.errors, ['Row 2 (no test name): "14997-9" is not a LOINC code such as 6301-6, or its check digit is wrong.']);
+});
+
 test("dates in Europe/Vienna get the right offset in summer and in winter", () => {
   assert.equal(parseViennaDateTime("22 October 2026, 08:10"), "2026-10-22T08:10:00+02:00");
   // Summer time ends on 25 October 2026 (docs/FHIR.md, validator traps).

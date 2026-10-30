@@ -1,5 +1,6 @@
 import MarkdownIt from "markdown-it";
 
+import { BLOOD_PRESSURE, vitalSign } from "@/server/fhir/vital-signs";
 import { TITLE } from "@/server/identity/names";
 import { parseDate, parseStay, parseViennaDateTime } from "./dates";
 import type { LabRow, ParseResult, ParsedDocument, PersonLine } from "./types";
@@ -130,31 +131,44 @@ function labRows(table: Table, errors: string[]): LabRow[] {
   return table.rows.flatMap((cells, n) => {
     const cell = (c: (typeof LAB_COLUMNS)[number]) => cells[col[c]] ?? "";
     const test = cell("Test");
+    const row = `Row ${n + 1} (${test || "no test name"})`;
     const value = toNumber(cell("Result"));
     if (value === null) {
-      errors.push(`Row ${n + 1} (${test || "no test name"}): the result "${cell("Result")}" is not a number.`);
+      errors.push(`${row}: the result "${cell("Result")}" is not a number.`);
       return [];
     }
-    if (!isLoinc(cell("LOINC code"))) {
-      errors.push(`Row ${n + 1} (${test}): "${cell("LOINC code")}" is not a LOINC code such as 6301-6, or its check digit is wrong.`);
+    const loinc = cell("LOINC code");
+    if (!isLoinc(loinc)) {
+      errors.push(`${row}: "${loinc}" is not a LOINC code such as 6301-6, or its check digit is wrong.`);
+      return [];
+    }
+    // FHIR files blood pressure and other vital signs by their own profiles (src/server/fhir/vital-signs.ts).
+    if (BLOOD_PRESSURE.has(loinc)) {
+      errors.push(`${row}: blood pressure needs systolic and diastolic together, which one table row cannot carry. Write it below the table.`);
+      return [];
+    }
+    const unitText = cell("Unit");
+    const ucum = toUcum(unitText);
+    const vital = vitalSign(loinc);
+    if (vital && !(ucum && vital.units.includes(ucum))) {
+      errors.push(`${row}: "${unitText}" is not a unit for this vital sign. Use a unit such as ${vital.example}.`);
       return [];
     }
     const [lowText, highText, ...extra] = cell("Reference range").split(" to ");
     const low = extra.length ? null : toNumber(lowText ?? "");
     const high = extra.length ? null : toNumber(highText ?? "");
     const hasRange = low !== null && high !== null;
-    const unitText = cell("Unit");
     return [
       {
         test,
         value,
         valueText: cell("Result"),
-        ucum: toUcum(unitText),
+        ucum,
         unitText,
         low: hasRange ? low : null,
         high: hasRange ? high : null,
         rangeText: cell("Reference range"),
-        loinc: cell("LOINC code"),
+        loinc,
         interpretation: hasRange ? (value < low ? "L" : value > high ? "H" : "N") : null,
       },
     ];
