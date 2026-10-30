@@ -8,6 +8,7 @@ How to set up, start, reset, and extend ordy. [Architecture](ARCHITECTURE.md) ex
 - Everything we write is TypeScript. Only third-party servers (Synapse, HAPI, Keycloak) and the HL7 validator are not.
 - Synthetic data only. No secrets in git: use `.env`, and add a placeholder to `.env.example`.
 - New dependencies must have been public for at least 7 days. `minimumReleaseAge` in `pnpm-workspace.yaml` enforces this. Do not lower it.
+- The test documents in `track/`, `scripts/fixtures/`, `src/server/documents/fixtures/`, and `docs/clinical-review/19-fhir/` keep LF line ends on every checkout, `core.autocrlf` on Windows included (`.gitattributes`). The tests compare their bytes and the audit log keeps their hashes. A checkout from before that rule still has CRLF copies: delete those folders and run `git checkout -- .` to get them back with LF.
 - Clinical rules that wait for a clinician's decision are marked "pending clinical sign-off". Their questions are in [`clinical-review/`](clinical-review/README.md). Do not change such a rule before its review file is signed.
 
 ## Prerequisites
@@ -69,7 +70,7 @@ Check that everything works:
 | ordy Next.js app, including workspace and outside portal | http://localhost:3010 | the same network account for the workspace |
 | Optional Element compatibility client | http://localhost:8082 | the same Matrix account; enable the `legacy-element` profile |
 | Outside emails: the team inboxes in `MAIL_TEAM_INBOXES`, by default ordysoftware@gmail.com | https://mail.google.com | the team's Google login |
-| Recipient's inbox: a button that opens Gmail for the first team inbox, and the SMS screen with each portal link | http://localhost:3010/inbox | none. Demo only. A production build answers 404. |
+| Recipient's inbox: a button that opens Gmail for the first team inbox, and the SMS screen, empty until ordy keeps an SMS log | http://localhost:3010/inbox | none. Demo only. A production build answers 404. |
 | HAPI FHIR | http://localhost:8090/fhir | |
 | Synapse | http://localhost:8008 | bot: `ordy` / `ordy-demo-2026` |
 | Postgres | `postgres://ordy:ordy@localhost:5433/ordy` | `ordy` / `ordy` |

@@ -17,12 +17,29 @@ export type DirectoryListing =
   /** Every lookup failed */
   | { status: "unavailable" };
 
-/** Each OID once, looked up at the same time. The organisations among them name their members without another call. */
+/** GetGDA calls in flight at once, so a long EHVD_DIRECTORY_OIDS list does not send the eHVD 50 requests together. */
+const CONCURRENT_LOOKUPS = 5;
+
+/** `fn` for every item, at most `limit` at a time, with the results in the items' order. */
+async function mapLimited<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+/** Each OID once, CONCURRENT_LOOKUPS at a time. The organisations among them name their members without another call. */
 export async function listDirectory(oids: readonly string[] = env.EHVD_DIRECTORY_OIDS, client: EhvdClient = ehvd): Promise<DirectoryListing> {
   const unique = [...new Set(oids)];
   if (unique.length === 0) return { status: "ok", entries: [], failed: 0 };
 
-  const lookups = await Promise.all(unique.map((id) => client.getGda({ id })));
+  const lookups = await mapLimited(unique, CONCURRENT_LOOKUPS, (id) => client.getGda({ id }));
   const found: GdaDescriptor[] = [];
   let failed = 0;
   lookups.forEach((lookup, i) => {

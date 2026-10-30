@@ -51,7 +51,7 @@ const ENTRIES: DirectoryEntry[] = [
     specialisations: ["internal medicine"],
     memberOf: [KLINIKUM],
     city: "Beispielstadt",
-    suggestedDocType: "rehab-report",
+    suggestedDocType: null,
     inNetwork: true,
   },
   {

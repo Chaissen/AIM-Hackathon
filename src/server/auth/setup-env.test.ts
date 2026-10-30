@@ -20,7 +20,8 @@ test("setup creates unique private keys and preserves them across reruns", async
   const firstKey = parseEnv(original).ORDY_SECRET;
   assert.match(firstKey ?? "", /^[a-f0-9]{64}$/);
   assert.notEqual(firstKey, parseEnv(await readFile(second, "utf8")).ORDY_SECRET);
-  assert.equal((await stat(first)).mode & 0o777, 0o600);
+  // Windows has no POSIX permission bits: chmod only sets the read-only flag there, and stat reports 0o666.
+  if (process.platform !== "win32") assert.equal((await stat(first)).mode & 0o777, 0o600);
   await setupEnv(first, example);
   assert.equal(await readFile(first, "utf8"), original);
 });

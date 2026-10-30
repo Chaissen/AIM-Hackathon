@@ -16,5 +16,6 @@ const PATIENT_FILES = [
 for (const file of PATIENT_FILES) {
   const patient = JSON.parse(await readFile(new URL(file, import.meta.url), "utf8")) as Patient & { id: string };
   const saved = await put(patient);
-  console.log(`Patient/${saved.id} saved (${saved.name?.[0]?.given?.join(" ")} ${saved.name?.[0]?.family})`);
+  // The id only: logs never name a patient (docs/COMPLIANCE_AND_SAFETY.md).
+  console.log(`Patient/${saved.id} saved`);
 }

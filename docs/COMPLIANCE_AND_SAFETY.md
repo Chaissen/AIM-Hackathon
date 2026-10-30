@@ -7,7 +7,7 @@ This page sets the team rules for data, messages, identity, and AI, and it holds
 1. No real patient data enters the project. That covers the repository, the databases, Keycloak, the team's Gmail inboxes, logs, screenshots, slides, and the video.
 2. Every person, organisation, phone number, email address, eHVD entry, and document is made up. The eHVD mock uses the real OID structure under `1.2.40.0.34.3.1.99.1` and `1.2.40.0.34.3.2.99.1`, but no entry is copied from the real directory. The scenario's `.example` addresses cannot receive mail, and the phone number is made up.
 3. The request service sends email only through Gmail SMTP as ordysoftware@gmail.com, and only to the team inboxes in `MAIL_TEAM_INBOXES`. It sends SMS only to its own SMS screen. It never sends to any other real address or number.
-4. The demo page `/inbox` shows every SMS with its working link to anyone who can reach the request service. It does not show the emails. Its button opens Gmail, which needs the team's Google login. A production build answers 404 there.
+4. The demo page `/inbox` shows the SMS screen to anyone who can reach the request service. The screen would list every SMS with its working link, but ordy keeps no SMS log yet, so it lists none (`listSms` in `src/server/portal/data.ts`), and `pnpm dev` prints each SMS link in its log instead. The page does not show the emails. Its button opens Gmail, which needs the team's Google login. A production build answers 404 there.
 5. If anyone suspects real data somewhere, they post `PRIVACY:` in the team chat. We delete it from the working tree, purge it from git history if it was committed, and note the incident in `docs/privacy_log.md`.
 
 ## What an outgoing email or SMS may contain

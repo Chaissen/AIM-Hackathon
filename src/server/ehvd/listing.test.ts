@@ -102,12 +102,32 @@ test("a member of the clinic that runs ordy is in the network, so the widget off
   const result = await listDirectory([HOFER, EVA], client);
   assert.equal(result.status, "ok");
   assert.deepEqual(
-    result.entries.map(({ name, inNetwork }) => [name, inNetwork]),
+    result.entries.map(({ name, inNetwork, suggestedDocType }) => [name, inNetwork, suggestedDocType]),
     [
-      ["Dr. Lena Hofer", true],
-      ["Dr. Eva Brandl", false],
+      // Her clinic is a hospital, which would suggest a rehab report, but nobody requests a document from the network.
+      ["Dr. Lena Hofer", true, null],
+      ["Dr. Eva Brandl", false, "lab-result"],
     ],
   );
+});
+
+test("the listing runs at most five GetGDA calls at a time and keeps the configured order", async () => {
+  let inFlight = 0;
+  let most = 0;
+  const limited: EhvdClient = {
+    getGda: async (query) => {
+      most = Math.max(most, ++inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight--;
+      return client.getGda(query);
+    },
+    gdaSearch: () => assert.fail("The listing never searches"),
+  };
+  const oids = [KLINIKUM, LABOR, REHA, HOFER, EVA, LEITNER, MARTIN, BRANDL_HUBER];
+  const result = await listDirectory(oids, limited);
+  assert.equal(result.status, "ok");
+  assert.deepEqual(result.entries.map((entry) => entry.oid), oids);
+  assert.equal(most, 5);
 });
 
 test("an OID the eHVD does not list is left out, and a failed lookup is counted", async () => {

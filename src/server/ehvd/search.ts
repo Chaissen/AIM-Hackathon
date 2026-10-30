@@ -27,7 +27,10 @@ export type DirectoryEntry = {
   memberOf: { oid: string; name: string | null }[];
   mailDomain: string | null;
   city: string | null;
-  /** The lab medicine specialty suggests a lab result, membership of a hospital (role 300 or 301) a rehab report. */
+  /**
+   * The lab medicine specialty suggests a lab result, membership of a hospital (role 300 or 301) a rehab report. Null
+   * for an entry in the network, which the widget offers no request to.
+   */
   suggestedDocType: DocumentType | null;
   /**
    * The organisation named CLINIC_NAME, or a person who is a member of it. They are inside the closed network, so the
@@ -99,25 +102,28 @@ export async function toEntries(
   });
   const isClinic = (gda: GdaDescriptor | undefined) => gda !== undefined && isOrganisation(gda) && sameOrganisationName(gda.surname, clinic);
 
-  return found.map((gda) => ({
-    oid: gda.id.id,
-    kind: isPerson(gda) ? "person" : "organisation",
-    name: fullName(gda),
-    title: gda.title ?? null,
-    given: gda.firstname ?? null,
-    family: gda.surname,
-    active: isActive(gda),
-    roles: codeLabels(gda.roles.role),
-    specialisations: codeLabels(gda.roles.specialisation),
-    memberOf: gda.relations.memberof.map((oid) => {
-      const organisation = organisations.get(oid);
-      return { oid, name: organisation ? fullName(organisation) : null };
-    }),
-    mailDomain: mailDomain(gda.mail),
-    city: gda.address[0]?.city ?? null,
-    suggestedDocType: suggestedDocType(gda, organisations),
-    inNetwork: isClinic(gda) || (isPerson(gda) && gda.relations.memberof.some((oid) => isClinic(organisations.get(oid)))),
-  }));
+  return found.map((gda) => {
+    const inNetwork = isClinic(gda) || (isPerson(gda) && gda.relations.memberof.some((oid) => isClinic(organisations.get(oid))));
+    return {
+      oid: gda.id.id,
+      kind: isPerson(gda) ? "person" : "organisation",
+      name: fullName(gda),
+      title: gda.title ?? null,
+      given: gda.firstname ?? null,
+      family: gda.surname,
+      active: isActive(gda),
+      roles: codeLabels(gda.roles.role),
+      specialisations: codeLabels(gda.roles.specialisation),
+      memberOf: gda.relations.memberof.map((oid) => {
+        const organisation = organisations.get(oid);
+        return { oid, name: organisation ? fullName(organisation) : null };
+      }),
+      mailDomain: mailDomain(gda.mail),
+      city: gda.address[0]?.city ?? null,
+      suggestedDocType: inNetwork ? null : suggestedDocType(gda, organisations),
+      inNetwork,
+    };
+  });
 }
 
 /**

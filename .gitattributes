@@ -1,0 +1,6 @@
+# Test documents and their FHIR exports are data: the tests compare their bytes, and the audit log their SHA-256 hashes,
+# so every checkout keeps them exactly as committed, with LF line ends, whatever core.autocrlf says.
+track/** text=auto eol=lf
+scripts/fixtures/** text=auto eol=lf
+src/server/documents/fixtures/** text=auto eol=lf
+docs/clinical-review/19-fhir/** text=auto eol=lf
