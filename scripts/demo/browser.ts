@@ -1,5 +1,6 @@
-// The outside person's browser for `pnpm demo:seed`: opens a request link, logs in at the simulated ID Austria, and
-// uploads an answer, through the same code the web server runs. Nothing here skips a check.
+// The outside person's phone and browser for `pnpm demo:seed` and `pnpm scenario`: reads the link from an SMS, opens it,
+// logs in at the simulated ID Austria, and uploads an answer, through the same code the web server runs. Nothing here
+// skips a check.
 //
 // - Opening the link calls `findPublicRequest`, as the landing page /r/{token} does, so `link_opened` is logged.
 // - The login calls the route handlers of POST /auth/login and GET /auth/callback in this process. Between them, it
@@ -10,6 +11,7 @@
 // - The upload calls `portal.answer` through `createCaller` with the session the callback set.
 //
 // It never prints a link token, an ID token, a person number, or a patient's name (docs/COMPLIANCE_AND_SAFETY.md).
+import { eq } from "drizzle-orm";
 import { NextRequest } from "next/server";
 
 import { POST as loginRoute } from "@/app/auth/login/route";
@@ -18,8 +20,12 @@ import { env } from "@/env";
 import { createCaller } from "@/server/api/root";
 import { createContext } from "@/server/api/trpc";
 import { EID_SESSION_COOKIE, type EidSession, loginTransactionCookie, readEidSession } from "@/server/auth/eid-session";
+import { db } from "@/server/db";
+import { smsOutbox } from "@/server/db/schema";
 import type { LoginPage } from "@/server/identity/login";
 import { findPublicRequest } from "@/server/portal/data";
+import { hashLinkToken } from "@/server/requests/link-token";
+import { getRequest } from "@/server/requests/service";
 
 /** A test citizen from docs/IDENTITY.md. The passwords are the documented demo passwords of the simulated ID Austria. */
 export type Citizen = { username: string; password: string; ip: string };
@@ -32,6 +38,23 @@ export const CITIZENS = {
   anna: { username: "anna.huber", password: "demo-anna", ip: "198.51.100.14" },
   eva2: { username: "eva.brandl2", password: "demo-eva2", ip: "198.51.100.15" },
 } as const satisfies Record<string, Citizen>;
+
+const linkPrefix = new URL("/r/", env.PUBLIC_URL).href;
+
+/** The link tokens in a message: whatever follows each portal link prefix, up to the first character a token cannot have. */
+export const linkTokens = (text: string) => text.split(linkPrefix).slice(1).map((rest) => /^[A-Za-z0-9_-]+/.exec(rest)?.[0] ?? "");
+
+/** The link token of a request, out of the messages sent for it: the one whose hash the request stores. */
+export async function currentToken(requestId: number, messages: string[]): Promise<string | undefined> {
+  const request = await getRequest(db, requestId);
+  return messages.flatMap(linkTokens).find((token) => hashLinkToken(token) === request?.linkHash);
+}
+
+/** The link token in the SMS the request service stored for the SMS screen. */
+export async function tokenFromSms(requestId: number): Promise<string | undefined> {
+  const sms = await db.select({ body: smsOutbox.body }).from(smsOutbox).where(eq(smsOutbox.requestId, requestId));
+  return currentToken(requestId, sms.map(({ body }) => body));
+}
 
 const PAGES: Record<string, LoginPage> = { "": "closed", answer: "answer", held: "held", refused: "wrong_person", unavailable: "unavailable" };
 
@@ -70,11 +93,12 @@ async function keycloakLogin(authorizationUrl: string, citizen: Citizen): Promis
   return callback;
 }
 
-export type Login = { page: LoginPage; session: EidSession | null };
+export type Login = { page: LoginPage; session: EidSession | null; landing: URL; cookies: string[] };
 
 /**
  * The ID Austria login for one request link, as a browser does it: POST /auth/login, Keycloak, GET /auth/callback.
- * Returns the portal page the callback sent the person to, and the ID Austria session if the request is now bound to them.
+ * Returns the portal page the callback sent the person to, with its URL and the cookies the callback set, and the ID
+ * Austria session if the request is now bound to them.
  */
 export async function logIn(token: string, citizen: Citizen): Promise<Login> {
   const origin = new URL(env.PUBLIC_URL).origin;
@@ -93,7 +117,7 @@ export async function logIn(token: string, citizen: Citizen): Promise<Login> {
   }
   const page = PAGES[landing.pathname.split("/")[3] ?? ""];
   if (!page) throw new Error(`The callback sent ${citizen.username} to an unknown page`);
-  return { page, session: await readEidSession(finished.cookies.get(EID_SESSION_COOKIE)?.value) };
+  return { page, session: await readEidSession(finished.cookies.get(EID_SESSION_COOKIE)?.value), landing, cookies: cookiesOf(finished) };
 }
 
 /** The answer page's upload: the file and the patient's name and birth date as the sender types them. */

@@ -1,11 +1,12 @@
 // pnpm scenario [--no-validate]: runs request 1, M1 to M3, and request 2 against the running stack and writes the
 // four metric results to out/metrics/ (docs/WHITEPAPER.md, "How we measure the metrics"). Start `pnpm dev` first.
 //
-// Each step has two parts. `act` drives the flow the way Dr. Hofer and the outside person would. `verify` checks the
-// result in the audit log, on HAPI, and in Matrix. A step without `act` is not runnable yet: `needs` names the open
-// issues and `todo` says what `act` must do once they land. Only entries written after the start of the run count. The
-// start comes from the clocks that write them: Postgres `now()` for the audit log, the newest room event for Matrix.
-import { mkdir, writeFile } from "node:fs/promises";
+// Each step has two parts. `act` drives the flow the way Dr. Hofer and the outside person would: Dr. Hofer through the
+// tRPC router, the outside person through the link in Mailpit or on the SMS screen, the simulated ID Austria, and the
+// portal (scripts/demo/browser.ts). `verify` checks the result in the audit log, on HAPI, and in Matrix. Only entries
+// written after the start of the run count. The start comes from the clocks that write them: Postgres `now()` for the
+// audit log, the newest room event for Matrix.
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
@@ -14,8 +15,12 @@ import { gte, sql } from "drizzle-orm";
 import { env, mxid } from "@/env";
 import { createCaller } from "@/server/api/root";
 import { createContext } from "@/server/api/trpc";
+import type { AnswerOutcome } from "@/server/answers/submit";
+import type { EidSession } from "@/server/auth/eid-session";
 import { db } from "@/server/db";
 import { auditLog } from "@/server/db/schema";
+import type { LoginPage } from "@/server/identity/login";
+import { listInboxEmails } from "@/server/mail/mailpit";
 import { getBotClient, roomAlias, type MatrixEvent } from "@/server/matrix/client";
 import { coverageLines, effortSeconds, filedReferences, misdeliveryCaught, requestCoverage, type AuditRow, type MisdeliveryKind } from "@/server/metrics/audit";
 import { scanForNotice } from "@/server/metrics/notice-check";
@@ -32,6 +37,9 @@ import {
   type ValidationRun,
 } from "@/server/metrics/report";
 import { exportResources, runValidator } from "@/server/metrics/validator";
+import { findAnswerContext } from "@/server/portal/data";
+
+import { CITIZENS, type Citizen, currentToken, type Login, logIn, openLink, tokenFromSms, upload } from "./demo/browser";
 
 const { values: flags } = parseArgs({ options: { "no-validate": { type: "boolean", default: false } } });
 
@@ -45,6 +53,9 @@ type Ctx = {
   r1?: number;
   m1?: number;
   r2?: number;
+  // Request 1's link from Mailpit, and Dr. Brandl's ID Austria session for it, set by `act`.
+  r1Token?: string;
+  eva?: EidSession;
   // The page the wrong person saw after the ID Austria login in M1, set by `act`.
   m1Page?: string;
 };
@@ -55,8 +66,6 @@ type Step = {
   id: string;
   title: string;
   act?: (ctx: Ctx) => Promise<void>;
-  needs?: string;
-  todo?: string;
   verify: (ctx: Ctx) => Promise<string>;
 };
 
@@ -116,6 +125,33 @@ async function reachable(name: string, url: string) {
   if (!res.ok) fail(`${name} answered ${res.status} at ${url}`);
 }
 
+const hofer = createCaller(createContext({ kind: "clinic", mxid: mxid(env.MATRIX_HOFER_USER) }));
+const BRANDL = { docType: "lab-result", patient: "maria-beispiel", given: "Eva", family: "Brandl", org: "Labor Kanalstraße" } as const;
+
+/** The link token in the email Mailpit caught for this request. */
+async function tokenFromMailpit(requestId: number, address: string): Promise<string> {
+  const inbox = await listInboxEmails();
+  if (inbox.status !== "ok") return fail(`Mailpit cannot be reached at ${env.MAILPIT_API_URL}`);
+  const texts = inbox.emails.filter((email) => email.to.some((to) => to.toLowerCase() === address.toLowerCase())).map((email) => email.text);
+  return (await currentToken(requestId, texts)) ?? fail(`no email in Mailpit for request ${requestId}`);
+}
+
+/** Opens the link and logs in at the simulated ID Austria. Fails unless the person lands on the expected page. */
+async function login(token: string, citizen: Citizen, expected: LoginPage): Promise<Login> {
+  if (!(await openLink(token, citizen))) fail(`the link did not open for ${citizen.username}`);
+  const result = await logIn(token, citizen);
+  if (result.page !== expected) fail(`${citizen.username} landed on ${result.page}, expected ${expected}`);
+  return result;
+}
+
+/** Uploads a scenario document, typing the patient's name and birth date as the answer page shows them. */
+async function answer(token: string, session: EidSession, file: string, expected: AnswerOutcome["outcome"]) {
+  const page = (await findAnswerContext(token, session)) ?? fail("the answer page did not open");
+  const bytes = new Uint8Array(await readFile(new URL(`../track/scenario/documents/${file}`, import.meta.url)));
+  const outcome = await upload(token, session, { name: file, bytes }, { name: page.patient.name, birthDate: page.patient.birthDate });
+  if (outcome.outcome !== expected) fail(`the upload ended as ${outcome.outcome}, expected ${expected}`);
+}
+
 const steps: Step[] = [
   {
     id: "preflight",
@@ -135,10 +171,12 @@ const steps: Step[] = [
   {
     id: "request-1",
     title: "Request 1: Dr. Hofer asks Dr. Brandl for the lab result by email",
-    needs: "#3 (request.create), #4 (email to Mailpit)",
-    todo:
-      `Call request.create through createCaller as ${mxid(env.MATRIX_HOFER_USER)} with the request 1 fields from docs/ARCHITECTURE.md ("Widget"). ` +
-      "Set ctx.r1 and read the link from the Mailpit message to eva.brandl@labor-kanal.example.",
+    act: async (ctx) => {
+      const r1 = await hofer.request.create({ ...BRANDL, email: "eva.brandl@labor-kanal.example" });
+      ctx.r1 = r1.id;
+      if (r1.state !== "sent") fail(`request 1 is ${r1.state}, expected sent`);
+      ctx.r1Token = await tokenFromMailpit(r1.id, "eva.brandl@labor-kanal.example");
+    },
     verify: async (ctx) => {
       const sent = await expectEvent(ctx, need(ctx.r1, "request 1"), "request_sent");
       return `request ${sent.requestId} sent by ${sent.actor}`;
@@ -147,10 +185,18 @@ const steps: Step[] = [
   {
     id: "m1",
     title: "M1: wrong address, opened by someone else",
-    needs: "#11 (address check), #14 or createCaller (Send anyway), #6 (login), #7 (identity check)",
-    todo:
-      "Send request 1 again to eva.brandl@labor-kanaI.example and set ctx.m1. Expect awaiting_confirmation, then Send anyway. " +
-      "Open the link from Mailpit, log in as anna.huber / demo-anna, and set ctx.m1Page to the HTML of the page after the login.",
+    // Request 1 again, to the mistyped address, which belongs to Anna Huber. After Send anyway she opens the link.
+    act: async (ctx) => {
+      const address = "eva.brandl@labor-kanaI.example";
+      const m1 = await hofer.request.create({ ...BRANDL, email: address });
+      ctx.m1 = m1.id;
+      if (m1.state !== "awaiting_confirmation") fail(`the M1 request is ${m1.state}, expected awaiting_confirmation`);
+      await hofer.request.sendAnyway({ id: m1.id });
+      const { landing, cookies } = await login(await tokenFromMailpit(m1.id, address), CITIZENS.anna, "wrong_person");
+      const page = await fetch(landing, { headers: { cookie: cookies.join("; ") }, signal: AbortSignal.timeout(30_000) });
+      if (!page.ok) fail(`the page after the M1 login answered ${page.status}`);
+      ctx.m1Page = await page.text();
+    },
     // Caught if the person cannot see the patient or the document type, cannot answer, and the failed identity check is logged.
     verify: async (ctx) => {
       const m1 = need(ctx.m1, "the M1 request");
@@ -170,8 +216,9 @@ const steps: Step[] = [
   {
     id: "m2",
     title: "M2: request 1 forwarded to a colleague",
-    needs: "#6 (login), #7 (identity check)",
-    todo: "Open the request 1 link and log in as thomas.wagner / demo-thomas.",
+    act: async (ctx) => {
+      await login(need(ctx.r1Token, "request 1's link"), CITIZENS.thomas, "wrong_person");
+    },
     verify: async (ctx) => {
       const r1 = need(ctx.r1, "request 1");
       const caught = await expectMisdelivery(ctx, r1, "wrong_person");
@@ -182,8 +229,12 @@ const steps: Step[] = [
   {
     id: "m3",
     title: "M3: Dr. Brandl answers with Max Beispiel's result",
-    needs: "#6 (login), #7 (identity check), #13 (answer upload)",
-    todo: "Open the request 1 link, log in as eva.brandl / demo-eva, and upload track/scenario/documents/lab-result-max-beispiel.md.",
+    act: async (ctx) => {
+      const token = need(ctx.r1Token, "request 1's link");
+      const { session } = await login(token, CITIZENS.eva, "answer");
+      ctx.eva = session ?? fail("the login gave Dr. Brandl no ID Austria session");
+      await answer(token, ctx.eva, "lab-result-max-beispiel.md", "patient_mismatch");
+    },
     verify: async (ctx) => {
       const r1 = need(ctx.r1, "request 1");
       await expectMisdelivery(ctx, r1, "patient_mismatch");
@@ -195,8 +246,9 @@ const steps: Step[] = [
   {
     id: "request-1-answer",
     title: "Request 1: Dr. Brandl answers with Maria Beispiel's result",
-    needs: "#13 (answer upload), #12 (filing)",
-    todo: "In the same session as M3, upload track/scenario/documents/lab-result-maria-beispiel.md.",
+    act: async (ctx) => {
+      await answer(need(ctx.r1Token, "request 1's link"), need(ctx.eva, "Dr. Brandl's session"), "lab-result-maria-beispiel.md", "filed");
+    },
     verify: async (ctx) => {
       const filed = await expectEvent(ctx, need(ctx.r1, "request 1"), "answer_filed");
       const refs = filedReferences([filed]);
@@ -207,10 +259,14 @@ const steps: Step[] = [
   {
     id: "request-2",
     title: "Request 2: Stefan Kern sends the rehab discharge report after an SMS",
-    needs: "#3 (request.create), #4 (SMS outbox), #6 (login), #7 (identity check), #13 (answer upload), #12 (filing)",
-    todo:
-      "Send request 2 (rehab-report, Stefan Kern, Reha Waldblick, +43 660 000 0101) and set ctx.r2. Read the link from listSms(), " +
-      "log in as stefan.kern / demo-stefan, and upload track/scenario/documents/rehab-report-maria-beispiel.md.",
+    act: async (ctx) => {
+      const kern = { given: "Stefan", family: "Kern", org: "Reha Waldblick", phone: "+43 660 000 0101" };
+      const r2 = await hofer.request.create({ docType: "rehab-report", patient: "maria-beispiel", ...kern });
+      ctx.r2 = r2.id;
+      const token = (await tokenFromSms(r2.id)) ?? fail(`no SMS for request ${r2.id}`);
+      const { session } = await login(token, CITIZENS.stefan, "answer");
+      await answer(token, session ?? fail("the login gave Stefan Kern no ID Austria session"), "rehab-report-maria-beispiel.md", "filed");
+    },
     verify: async (ctx) => {
       const r2 = need(ctx.r2, "request 2");
       await expectEvent(ctx, r2, "request_sent");
@@ -226,7 +282,6 @@ async function runSteps(ctx: Ctx): Promise<StepResult[]> {
   for (const step of steps) {
     const base = { id: step.id, title: step.title };
     if (stackDown) results.push({ ...base, status: "skipped", detail: "the stack is not up" });
-    else if (step.needs && !step.act) results.push({ ...base, status: "blocked", detail: `needs ${step.needs}. To do: ${step.todo}` });
     else {
       try {
         await step.act?.(ctx);
