@@ -166,10 +166,16 @@ test("a vital sign needs a unit its FHIR profile allows, and blood pressure cann
   assert.equal(pressure.ok, false);
   if (!pressure.ok) assert.match(pressure.errors.join(" "), /^Row 2 \(Systolic\): blood pressure needs systolic and diastolic together/);
 
-  // The oxygen profile's code means arterial blood, so a mixed venous saturation is refused rather than mislabelled.
-  const venous = parseDocument(maria.replace("| aPTT | 31 | s | 25 to 37 | 14979-9 |", "| SvO2 | 70 | % | 65 to 75 | 19224-5 |"));
-  assert.equal(venous.ok, false);
-  if (!venous.ok) assert.match(venous.errors.join(" "), /^Row 2 \(SvO2\): the FHIR profile for oxygen saturation adds the code for arterial blood/);
+  // The oxygen profile's code means arterial blood, so a venous or capillary saturation is refused rather than mislabelled.
+  for (const [test, loinc] of [["SvO2", "19224-5"], ["sO2 cap", "2709-4"]]) {
+    const result = parseDocument(maria.replace("| aPTT | 31 | s | 25 to 37 | 14979-9 |", `| ${test} | 70 | % | 65 to 75 | ${loinc} |`));
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.errors.join(" "), new RegExp(`^Row 2 \\(${test}\\): the FHIR profile for oxygen saturation adds the code for arterial blood`));
+  }
+
+  const temperature = (parsed(maria.replace("| aPTT | 31 | s | 25 to 37 | 14979-9 |", "| Temperature | 37.2 | °C | 36 to 37.5 | 8310-5 |")) as LabResult).rows[1];
+  assert.equal(temperature.unitText, "°C");
+  assert.equal(temperature.ucum, "Cel");
 });
 
 test("a row without a test name is called so in its reason", () => {
@@ -232,6 +238,8 @@ test("a LOINC code with a wrong check digit is refused", () => {
   // All scenario codes and the report code 11502-2 from docs/FHIR.md have valid check digits.
   for (const file of ["lab-result-maria-beispiel.md", "lab-result-max-beispiel.md"]) assert.equal((parsed(scenario(file)) as LabResult).rows.length, 4);
   assert.ok(parseDocument(scenario("lab-result-maria-beispiel.md").replace("6301-6", "11502-2")).ok);
+  // A leading zero keeps the check digit, but LOINC codes have none: 02160-0 is not 2160-0.
+  for (const code of ["02160-0", "00000-0"]) assert.equal(parseDocument(scenario("lab-result-maria-beispiel.md").replace("6301-6", code)).ok, false, code);
 });
 
 test("a byte order mark at the start does not hide the heading", () => {

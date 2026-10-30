@@ -112,7 +112,7 @@ function toNumber(text: string): number | null {
 
 /** A LOINC code such as `6301-6`, with the mod-10 check digit after the dash (Luhn over the digits before it). */
 function isLoinc(code: string): boolean {
-  const m = /^(\d{1,7})-(\d)$/.exec(code);
+  const m = /^([1-9]\d{0,6})-(\d)$/.exec(code);
   if (!m) return false;
   const sum = [...m[1]].reverse().reduce((acc, c, i) => {
     const d = Number(c) * (i % 2 === 0 ? 2 : 1);

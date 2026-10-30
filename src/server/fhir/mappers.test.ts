@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import type { DiagnosticReport, DocumentReference, FhirResource, Observation } from "fhir/r4";
+
+import type { DocumentType } from "@/lib/document-types";
 import { labResultMaria, labResultMax, rehabReportMaria } from "@/server/documents/scenario-fixtures";
 import type { LabRow, ParsedDocument } from "@/server/documents/types";
 
+import { buildFilingBundle, ID_AUSTRIA_SIMULATION, prepareParties, type AnswerFiling, type Parties } from "./filing";
 import { type MapContext, mapLabResult, mapRehabReport } from "./mappers";
 
 const context: MapContext = {
@@ -121,11 +125,9 @@ test("mapLabResult passes the parser's H for Max Beispiel's raised INR and aPTT 
   assert.deepEqual(codes, ["H", "H", "N", "N"]);
 });
 
-test("mapLabResult leaves out the physician when the filing passes none, and a missing conclusion", () => {
-  const { diagnosticReport, observations } = mapLabResult({ ...labResultMaria, conclusion: null }, { ...context, practitioner: null });
-  assert.equal("resultsInterpreter" in diagnosticReport.resource, false);
+test("mapLabResult leaves out a missing conclusion", () => {
+  const { diagnosticReport } = mapLabResult({ ...labResultMaria, conclusion: null }, context);
   assert.equal("conclusion" in diagnosticReport.resource, false);
-  assert.equal("performer" in observations[0].resource, false);
 });
 
 test("mapLabResult keeps only the text of a range the parser could not split", () => {
@@ -148,14 +150,13 @@ test("mapLabResult keeps zero values and zero bounds", () => {
 });
 
 test("no mapper output carries an empty value", () => {
-  const sparse = { ...context, practitioner: null };
   const outputs = [
     mapLabResult(labResultMaria, context),
-    mapLabResult(labResultMax, sparse),
-    mapLabResult({ ...labResultMaria, conclusion: null, rows: [emptyCells] }, sparse),
+    mapLabResult(labResultMax, context),
+    mapLabResult({ ...labResultMaria, conclusion: null, rows: [emptyCells] }, context),
     mapLabResult({ ...labResultMaria, rows: [{ ...emptyCells, unitText: "G/L", rangeText: "below 37" }] }, context),
     mapRehabReport(rehabReportMaria, context, filedAt),
-    mapRehabReport({ ...rehabReportMaria, reason: null }, sparse, filedAt),
+    mapRehabReport({ ...rehabReportMaria, reason: null }, context, filedAt),
   ];
   assert.deepEqual(emptyValues(JSON.parse(JSON.stringify(outputs))), []);
 });
@@ -184,8 +185,92 @@ test("mapRehabReport gives the DocumentReference its own reference objects", () 
   assert.equal(new Set([...references, ...Object.values(context)]).size, references.length + 3);
 });
 
-test("mapRehabReport names only the organisation when the filing passes no physician", () => {
-  const { resource } = mapRehabReport({ ...rehabReportMaria, reason: null }, { ...context, practitioner: null }, filedAt);
-  assert.deepEqual(resource.author, [{ reference: "urn:uuid:organization" }]);
+test("mapRehabReport leaves out a missing reason", () => {
+  const { resource } = mapRehabReport({ ...rehabReportMaria, reason: null }, context, filedAt);
   assert.equal("description" in resource, false);
+});
+
+// The mappers inside the filing (T13): prepareParties(), then the mapper, then the transaction Bundle.
+
+const ISSUER = "http://localhost:8080/realms/idaustria-sim";
+const patient = { reference: "Patient/maria-beispiel" };
+const hofer = { given: "Lena", family: "Hofer", titles: ["Dr."], ehvdOid: "1.2.40.0.34.3.2.99.1.1" };
+const idAustria = { name: ID_AUSTRIA_SIMULATION, issuer: ISSUER };
+
+// The filing only decodes the ID token, so an unsigned one is enough.
+const part = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
+const idToken = `${part({ alg: "RS256" })}.${part({ iss: ISSUER, iat: Date.parse("2026-10-29T13:01:40Z") / 1000 })}.c2lnbmF0dXJl`;
+
+const labParties: Parties = {
+  requester: hofer,
+  sender: { given: "Eva", family: "Brandl", titles: ["Dr."], ehvdOid: "1.2.40.0.34.3.2.99.1.2" },
+  author: null,
+  organization: { name: "Labor Kanalstraße", ehvdOid: "1.2.40.0.34.3.1.99.1.2" },
+  identityProvider: idAustria,
+};
+
+const rehabParties: Parties = {
+  requester: hofer,
+  sender: { given: "Stefan", family: "Kern", ehvdOid: null },
+  author: { given: "Johanna", family: "Leitner", titles: ["Dr."], ehvdOid: "1.2.40.0.34.3.2.99.1.3" },
+  organization: { name: "Reha Waldblick", ehvdOid: "1.2.40.0.34.3.1.99.1.3" },
+  identityProvider: idAustria,
+};
+
+function fileAnswer(docType: DocumentType, parties: Parties, map: (context: MapContext) => AnswerFiling["clinical"]) {
+  const prepared = prepareParties(parties, { requestId: 1, uploadSha256: "a".repeat(64) });
+  const clinical = map({ patient, organization: prepared.organization, practitioner: prepared.author });
+  const request = { id: 1, docType, patient, createdAt: new Date("2026-10-29T12:58:00Z"), expiresAt: new Date("2026-11-05T12:58:00Z") };
+  const { bundle } = buildFilingBundle({ request, parties, prepared, clinical, idToken, sentAt: new Date("2026-10-29T13:02:00Z"), filedAt, acceptedByRequester: false });
+  const entries = bundle.entry ?? [];
+  /** The fullUrl of the entry whose resource carries this OID. */
+  const byOid = (oid: string) => entries.find((e) => JSON.stringify(e.resource).includes(`urn:oid:${oid}`))?.fullUrl;
+  const ofType = <T extends FhirResource>(type: T["resourceType"]) => entries.flatMap((e) => (e.resource?.resourceType === type ? [e.resource as T] : []));
+  return { bundle, entries, byOid, ofType };
+}
+
+/** Every `reference` in the value that points into the Bundle. */
+function uuidReferences(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(uuidReferences);
+  if (!value || typeof value !== "object") return [];
+  return Object.entries(value).flatMap(([k, v]) => (k === "reference" && typeof v === "string" && v.startsWith("urn:uuid:") ? [v] : uuidReferences(v)));
+}
+
+test("a lab answer files the mapper output in one Bundle whose references all resolve", () => {
+  const { bundle, entries, byOid, ofType } = fileAnswer("lab-result", labParties, (context) => {
+    const { diagnosticReport, observations } = mapLabResult(labResultMaria, context);
+    return { output: diagnosticReport, others: observations };
+  });
+  const fullUrls = new Set(entries.map((e) => e.fullUrl));
+  const references = uuidReferences(bundle);
+  assert.ok(references.length > 0);
+  for (const reference of references) assert.ok(fullUrls.has(reference), reference);
+  assert.deepEqual(emptyValues(JSON.parse(JSON.stringify(bundle))), []);
+
+  const [report] = ofType<DiagnosticReport>("DiagnosticReport");
+  const observations = ofType<Observation>("Observation");
+  assert.equal(observations.length, 4);
+  // Dr. Brandl sent and wrote the report, so she is performer and interpreter; the lab performs the report.
+  const brandl = byOid("1.2.40.0.34.3.2.99.1.2");
+  assert.ok(brandl);
+  assert.deepEqual(report.resultsInterpreter, [{ reference: brandl }]);
+  assert.deepEqual(report.performer, [{ reference: byOid("1.2.40.0.34.3.1.99.1.2") }]);
+  for (const o of observations) assert.deepEqual(o.performer, [{ reference: brandl }]);
+});
+
+test("a rehab answer names the author and the clinic of the filing as the DocumentReference's authors", () => {
+  const { bundle, entries, byOid, ofType } = fileAnswer("rehab-report", rehabParties, (context) => ({
+    output: mapRehabReport(rehabReportMaria, context, filedAt),
+    others: [],
+  }));
+  const fullUrls = new Set(entries.map((e) => e.fullUrl));
+  for (const reference of uuidReferences(bundle)) assert.ok(fullUrls.has(reference), reference);
+  assert.deepEqual(emptyValues(JSON.parse(JSON.stringify(bundle))), []);
+
+  const [document] = ofType<DocumentReference>("DocumentReference");
+  // Dr. Leitner wrote the report; Stefan Kern only sent it.
+  assert.deepEqual(document.author, [
+    { reference: byOid("1.2.40.0.34.3.2.99.1.3") },
+    { reference: byOid("1.2.40.0.34.3.1.99.1.3") },
+  ]);
 });

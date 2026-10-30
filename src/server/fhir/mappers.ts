@@ -34,10 +34,10 @@ export type MapContext = {
   /** The organisation from the heading. */
   organization: Reference;
   /**
-   * The author, or the sender when the sender is the author, as `prepareParties()` decides. It becomes the performer,
-   * the results interpreter, and the first author. Null leaves those out.
+   * `PreparedParties.author`: the author, or the sender when the sender is the author. It becomes the performer, the
+   * results interpreter, and the first author.
    */
-  practitioner: Reference | null;
+  practitioner: Reference;
 };
 
 export type LabResultEntries = { diagnosticReport: Entry<DiagnosticReport>; observations: Entry<Observation>[] };
@@ -94,7 +94,7 @@ function observation(row: LabRow, doc: LabResult, context: MapContext): Observat
     subject: own(context.patient),
     effectiveDateTime: doc.sampleTaken,
     issued: doc.reported,
-    performer: context.practitioner ? [own(context.practitioner)] : null,
+    performer: [own(context.practitioner)],
     valueQuantity: quantity(row.value, row),
     interpretation: row.interpretation
       ? [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation", code: row.interpretation }] }]
@@ -115,7 +115,7 @@ export function mapLabResult(doc: LabResult, context: MapContext): LabResultEntr
       effectiveDateTime: doc.sampleTaken,
       issued: doc.reported,
       performer: [own(context.organization)],
-      resultsInterpreter: context.practitioner ? [own(context.practitioner)] : null,
+      resultsInterpreter: [own(context.practitioner)],
       result: observations.map((o) => ({ reference: o.fullUrl })),
       conclusion: doc.conclusion,
       presentedForm: [markdownAttachment(doc)],
@@ -134,7 +134,7 @@ export function mapRehabReport(doc: RehabReport, context: MapContext, filedAt: D
       type: { coding: [{ system: LOINC, code: "18842-5" }], text: "Rehab discharge report" },
       subject: own(context.patient),
       date: viennaInstant(filedAt),
-      author: (context.practitioner ? [context.practitioner, context.organization] : [context.organization]).map(own),
+      author: [context.practitioner, context.organization].map(own),
       description: doc.reason,
       content: [{ attachment: markdownAttachment(doc, doc.title) }],
       context: { period: { start: doc.stay.start, end: doc.stay.end } },

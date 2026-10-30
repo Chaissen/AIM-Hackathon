@@ -18,7 +18,7 @@ export type VitalSign = {
 export const VITAL_SIGNS: readonly VitalSign[] = [
   {
     code: "2708-6",
-    related: ["20564-1", "2709-4", "2710-2", "2713-6", "51733-4", "59408-5", "59417-6", "89276-0"],
+    related: ["20564-1", "2713-6", "51733-4", "59408-5", "59417-6", "89276-0"],
     units: ["%"],
     example: "%",
   },
@@ -53,14 +53,14 @@ const BY_CODE = new Map(VITAL_SIGNS.flatMap((v) => [v.code, ...v.related].map((c
 export const vitalSign = (loinc: string): VitalSign | undefined => BY_CODE.get(loinc);
 
 const BLOOD_PRESSURE = "blood pressure needs systolic and diastolic together, which one table row cannot carry. Write it below the table.";
-const VENOUS =
-  "the FHIR profile for oxygen saturation adds the code for arterial blood, which a venous saturation is not. Write it below the table.";
+const NOT_ARTERIAL =
+  "the FHIR profile for oxygen saturation adds the code for arterial blood, which a venous or capillary saturation is not. Write it below the table.";
 
-/** Vital sign codes that cannot be one table row, with the reason the parser gives. */
+/** Vital sign codes that cannot be one table row, with the reason the parser gives. With `VITAL_SIGNS`, the validator's list. */
 export const REFUSED_VITAL_SIGNS: ReadonlyMap<string, string> = new Map([
   ...["85354-9", "35094-2", "8459-0", "76534-7", "55284-4", "8480-6", "8462-4"].map((code) => [code, BLOOD_PRESSURE] as const),
   ["85353-1", "a vital signs panel cannot be one table row. Give each vital sign its own row."],
-  // Mixed and central venous sO2: the validator wants 2708-6 (arterial) on them, which would file a wrong code.
-  ["19224-5", VENOUS],
-  ["97549-0", VENOUS],
+  // Mixed venous, central venous, and capillary sO2: the validator wants 2708-6 (arterial) on them, which would file a
+  // wrong code. sO2 in blood without a site (20564-1, calculated 2713-6) stays, as its code does not rule out arterial.
+  ...["19224-5", "97549-0", "2709-4", "2710-2"].map((code) => [code, NOT_ARTERIAL] as const),
 ]);

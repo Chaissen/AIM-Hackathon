@@ -64,8 +64,13 @@ export const UCUM_CODES: ReadonlySet<string> = new Set([
 /** Whole units with another name in UCUM. */
 const ALIASES: ReadonlyMap<string, string> = new Map([
   ["°C", "Cel"],
+  ["℃", "Cel"],
   ["°F", "[degF]"],
+  ["℉", "[degF]"],
   ["pH", "[pH]"],
+  // Heart and breathing rates: the vital signs profiles want `/min`.
+  ["bpm", "/min"],
+  ["1/min", "/min"],
 ]);
 
 const SUPERSCRIPT = "⁰¹²³⁴⁵⁶⁷⁸⁹";
