@@ -20,7 +20,7 @@ One person can do both, but a separate observer catches more.
 - Someone who has never seen ordy: not on the team, has not watched the demo or the video, and has not read the repository or the slides.
 - Ideally someone who works in healthcare or uses email and a browser at work every day. Note the profile, not the name.
 - They must be able to read English, because the email and the portal are in English.
-- Tell them only: "We are testing how long a task takes in our software. We test the software, not you." Do not say what the task is, what ordy does, or that a login is involved.
+- Tell them only: "We are testing how long a task takes in our software. We test the software, not you." Do not say what the task is or what ordy does. The login card in the script below is the only mention of a login.
 - Testers 2 and 3 must not watch tester 1.
 - The tester plays Dr. Eva Brandl with a made-up ID Austria login. Nothing about the tester goes into the system, and the result table names only the profile, such as "medical student, final year".
 
@@ -29,7 +29,7 @@ One person can do both, but a separate observer catches more.
 1. **Stack.** On the computer the tester will use, start the stack as [Development](../DEVELOPMENT.md#start) describes: the containers are up (`./scripts/setup.sh` once) and `pnpm dev` runs. http://localhost:3010 shows three green dots. Use this same computer for the test: the link points to `localhost:3010` and the login to Keycloak on `localhost:8080`, so a second device would need `PUBLIC_URL` and the Keycloak address changed, which this protocol does not cover.
 2. **Email.** For the test, email goes to the team's Gmail inbox, as [Development](../DEVELOPMENT.md) ("Send email through Gmail", from #47) describes: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `MAIL_FROM`, and `MAIL_TEAM_INBOXES` in `.env`, and the inbox the tester will see is in `MAIL_TEAM_INBOXES`. Restart `pnpm dev` after changing `.env`. Without Gmail, use Mailpit at http://localhost:8025 and note "Mailpit" in the result table.
 3. **Clean slate.** Run `pnpm reset`. It empties Postgres, HAPI, and Mailpit and reloads Maria Beispiel. Then restart `pnpm dev`.
-4. **Rehearse once yourself.** Do steps 6 to 8 and answer the request as the tester would, then run `pnpm audit:check --effort` and check that it prints an effort. Then run `pnpm reset` again and delete the rehearsal email from the inbox. If Gmail warns about the link or hides it, note it: the tester will see the same.
+4. **Rehearse once yourself.** Do steps 6 to 8 and answer the request as the tester would, then run `pnpm audit:check --effort` and check that it prints an effort. Then run `pnpm reset` again, restart `pnpm dev`, and delete the rehearsal email from the inbox. If Gmail warns about the link or hides it, note it: the tester will see the same.
 5. **The tester's screen.** Open a browser window with the team inbox. Close every other tab, especially Element, the widget, Mailpit, and the docs. Use a browser profile that is logged in to Gmail and nothing else of ours.
 6. **The document.** Copy `track/scenario/documents/lab-result-maria-beispiel.md` to the desktop of this computer under the same name. It stands for the report that Dr. Brandl's lab system produced.
 7. **The login card.** Write on a card: "Your ID Austria login: username `eva.brandl`, password `demo-eva`". Real ID Austria would use the phone app. The card is the only stand-in for it.
@@ -38,7 +38,7 @@ One person can do both, but a separate observer catches more.
 
 ## Read this aloud
 
-Read it word for word. Do not add anything, do not point at the screen, and do not mention a link, a login, an upload, a patient, or ordy.
+Read it word for word. Do not add anything, do not point at the screen, and do not mention a link, an upload, a patient, or ordy. The only mention of a login is the sentence about the card, because the card stands in for the tester's own ID Austria. Say nothing else about it.
 
 > Thank you for helping us. For the next few minutes you are Dr. Eva Brandl, a lab physician at Labor Kanalstraße.
 >
@@ -58,7 +58,7 @@ If the tester asks something during the task, answer only: "Do what you would do
 |---|---|
 | **Start** | The tester clicks the email in the inbox to open it. Not when you finish the script. |
 | **Lap** | Each time the tester presses **Send securely**. |
-| **Stop** | The press of **Send securely** after which the page says the answer was filed. If an earlier send was refused, for example because a name or birth date did not match, keep the stopwatch running. The time is the lap of the send that was filed. |
+| **Stop** | The press of **Send securely** after which a confirmation appears, whichever text it shows: "Thank you, your document is filed" or "Thank you, your document arrived" (held for Dr. Hofer). If an earlier send was refused, for example because a name or birth date did not match, keep the stopwatch running. The time is the lap of the send that led to the confirmation. |
 
 The audit times run from the `link_opened` entry, which the server writes when the link opens, to the `answer_sent` of the upload that was filed. So the stopwatch should be a few seconds longer: reading the email and clicking the link happen before `link_opened`. Both audit times come from the Postgres clock, so the audit side compares no two clocks.
 
@@ -72,7 +72,7 @@ Write one row for each hesitation, with the stopwatch time. A hesitation is any 
 - going back to an earlier page, reopening the email, or rereading the card
 - an error message, such as a refused upload or a date in the wrong format
 
-Name the screen: **Inbox**, **Email**, **Landing** (the ordy page with **Log in with ID Austria**), **ID Austria login** (the Keycloak page), **Answer** (patient, document type, upload, name and birth date), **Refused upload** (the message about a different patient), **Done** (the page after a filed answer), or **Other** (anything else, with what it showed).
+Name the screen: **Inbox**, **Email**, **Landing** (the ordy page with **Log in with ID Austria**), **ID Austria login** (the Keycloak page), **Answer** (patient, document type, upload, name and birth date), **Refused upload** (the message about a different patient), **Done** ("Thank you, your document is filed"), **Held** (`AnswerHeld`: "Thank you, your document arrived … checks it before it is filed"), or **Other** (anything else, with what it showed).
 
 Also note anything the tester installed or any account they had to create. Logging in with the ID Austria card counts as an existing state ID, not an account with us. The Gmail inbox counts as the tester's own work email.
 
@@ -88,7 +88,10 @@ A tester passes when all of these hold:
 | Audit effort | under 120 s, as `pnpm audit:check --effort` rounds it |
 | Filed | the request has an `answer_filed` entry |
 
-If the answer is held for Dr. Hofer instead of filed (the release check could not confirm the role), click **Accept** in the widget after the stopwatch stopped. `answer_filed` is then written, and the audit effort still ends at the tester's send. Note "held, accepted" in the table.
+If the tester sees the **Held** page, the answer waits for Dr. Hofer and no `answer_filed` is written yet. Until the release check (#44) is wired into the answer flow's `answerDeps` (#54), every answer is held. What to do then depends on **Accept**:
+
+- If **Accept** in the widget files a held answer, click it after the stopwatch stopped. `answer_filed` is then written, the audit effort still ends at the tester's send, and you note "held, accepted" in the table.
+- If **Accept** refuses with "Filing a held answer is not built yet." (as on `main` on 30 October 2026), `pnpm audit:check --effort` prints "Effort: not measured" and exits with 1. The audit criterion cannot be met, so do not run the test with a real tester yet. See [Readiness](#readiness-on-30-october-2026).
 
 ## Fetch the audit times
 
@@ -223,16 +226,16 @@ Where testers hesitated, and what we changed because of it:
 
 ## Readiness on 30 October 2026
 
-Checked from the code on `main` at `db9fe63`, without a running stack. Check again when #13 lands, with the rehearsal in Prepare, step 4.
+Checked from the code on `main` at `a48e40e` and on the open PRs, without a running stack. Check again when the blockers below land, with the rehearsal in Prepare, step 4.
 
 | Step | Today |
 |---|---|
-| Send request 1 from the widget | Works (#32). The request is created and `request_sent` written, but no email goes out: `request.create` only prints the link to the `[web]` log in development. |
-| Email in the Gmail inbox | Missing. #47 (open) adds `sendRequestEmail()` and the Gmail settings, but nothing calls it yet. `request.create` has to call it where it prints the link today. The Gmail app password of the team account is needed in `.env`. |
+| Send request 1 from the widget | Works (#32, #56). The request is created and `request_sent` written, but no email goes out: `request.create` only prints the link to the `[web]` log in development. |
+| Email in the Gmail inbox | **Blocker.** #47 (open) adds `sendRequestEmail()` and the Gmail settings, but nothing calls it yet. `request.create` has to call it where it prints the link today. The Gmail app password of the team account is needed in `.env`. |
 | Landing page `/r/{token}`, `link_opened` | Works. |
 | ID Austria login and identity checks | Work (#42, #34). A pass sends the tester to the answer page. |
 | Answer page with patient and document type | Works. The upload field and the name and birth date fields are there. |
-| **Send securely** | Missing (#13). The button only says "Uploading is not connected yet", so no `answer_sent` and no `answer_filed` are written. |
-| Refused upload, held, refused, and unavailable pages, Done page | Missing on `main`. `feat/T09-portal-flow` (#13) has them. |
-| Release check at filing | #44 (open). Without it, how #13 files or holds the answer decides whether the request reaches `answer_filed` without **Accept**. |
-| `pnpm audit:check --effort` | Works, with tests. Measures nothing until #13 writes `answer_sent` and `answer_filed`. |
+| **Send securely**, `answer_sent` | **Blocker.** #54 (#13, open). On `main` the button only says "Uploading is not connected yet". |
+| Refused upload, Held, refused, and unavailable pages, Done page | Missing on `main`. #54 has them. |
+| `answer_filed` | **Blocker**, even after #54. #54 says: "Until #44 is wired into `answerDeps`, every answer is held, and Accept files it." But **Accept** on a held answer does not file on `main`: `request.accept` refuses it with "Filing a held answer is not built yet." (`src/server/api/routers/request.ts`, and the note in `src/app/widget/request-card.tsx`). So the tester's send is held, no `answer_filed` is written, and `pnpm audit:check --effort` prints "not measured" and exits with 1. One of these must land: #44 wired into #54's `answerDeps`, so that request 1 is filed directly, **or** the widget's **Accept** (#14) calling #54's `acceptAnswer`, so that a held answer is filed. |
+| `pnpm audit:check --effort` | Works, with tests. Measures nothing until an `answer_filed` entry is written. |
