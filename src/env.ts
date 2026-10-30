@@ -36,6 +36,8 @@ const schema = z.object({
     .transform((list) => list.split(",").map((address) => address.trim()).filter(Boolean))
     .pipe(z.array(z.email())),
   MAILPIT_API_URL: z.url().default("http://localhost:8025"),
+  // eHVD web service (task T15): the mock from T23, or the real eHVD from an address BRZ has allowed.
+  EHVD_URL: z.url().default("http://localhost:8095/"),
   // AI fallback parser (task T22). Unset ANTHROPIC_API_KEY turns it off.
   ANTHROPIC_API_KEY: z.preprocess((value) => (value === "" ? undefined : value), z.string().optional()),
   AI_FALLBACK_MODEL: z.string().default("claude-opus-5-5"),

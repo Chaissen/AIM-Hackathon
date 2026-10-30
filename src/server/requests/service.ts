@@ -25,23 +25,29 @@ export type NewRequest = {
   requesterName: string;
 };
 
-const requestSent = (request: RequestRow, actor: AuditActor): AuditEntry => ({
+const requestSent = (request: RequestRow, actor: AuditActor, sentAnyway: boolean): AuditEntry => ({
   event: "request_sent",
   requestId: request.id,
   actor,
   outcome: "sent",
-  detail: { docType: request.docType, channel: request.channel, address: request.address },
+  detail: { docType: request.docType, channel: request.channel, address: request.address, sentAnyway },
 });
 
 const newExpiry = () => new Date(Date.now() + LINK_TTL_MS);
 
-/** The result of the address check (T15): the email domain against the organisation's domain in the eHVD. */
-export type AddressCheck = { passed: true } | { passed: false; domain: string; expectedDomain: string };
+/** The result of the address check (T15, src/server/ehvd/address-check.ts) as the request service stores it. */
+export type AddressCheck =
+  | { passed: true }
+  /** The email domain differs from the organisation's domain in the eHVD. */
+  | { passed: false; domain: string; expectedDomain: string }
+  /** The eHVD could not confirm the address. The request waits too, but nothing was caught. */
+  | { passed: false; unchecked: true };
 
 /**
  * Stores a new request, with its audit entry in the same transaction. If the address check passed, the request is
- * `sent` with `request_sent`. Otherwise it waits in `awaiting_confirmation` with `misdelivery_caught: address_mismatch`.
- * Returns the link token, which exists only here: the database keeps its hash.
+ * `sent` with `request_sent`. Otherwise it waits in `awaiting_confirmation`: with `misdelivery_caught: address_mismatch`
+ * for another domain, and with no entry yet for an address the eHVD could not confirm, until Send anyway logs
+ * `request_sent`. Returns the link token, which exists only here: the database keeps its hash.
  */
 export async function createRequest(db: Db, input: NewRequest, addressCheck: AddressCheck) {
   const { token, hash } = newLinkToken();
@@ -49,18 +55,16 @@ export async function createRequest(db: Db, input: NewRequest, addressCheck: Add
   const request = await db.transaction(async (tx) => {
     const [row] = await tx.insert(requests).values({ ...input, state, linkHash: hash, expiresAt: newExpiry() }).returning();
     const actor: AuditActor = { kind: "network_member", id: row.requester };
-    await recordAudit(
-      tx,
-      addressCheck.passed
-        ? requestSent(row, actor)
-        : {
-            event: "misdelivery_caught",
-            requestId: row.id,
-            actor,
-            outcome: "address_mismatch",
-            detail: { domain: addressCheck.domain, expectedDomain: addressCheck.expectedDomain },
-          },
-    );
+    if (addressCheck.passed) await recordAudit(tx, requestSent(row, actor, false));
+    else if ("domain" in addressCheck) {
+      await recordAudit(tx, {
+        event: "misdelivery_caught",
+        requestId: row.id,
+        actor,
+        outcome: "address_mismatch",
+        detail: { domain: addressCheck.domain, expectedDomain: addressCheck.expectedDomain },
+      });
+    }
     return row;
   });
   return { request, token };
@@ -74,7 +78,7 @@ export async function sendAnyway(db: Db, id: number, actor: AuditActor) {
   const { token, hash } = newLinkToken();
   const request = await applyEvent(db, id, "send_anyway", async (tx) => {
     const [row] = await tx.update(requests).set({ linkHash: hash, expiresAt: newExpiry() }).where(eq(requests.id, id)).returning();
-    await recordAudit(tx, requestSent(row, actor));
+    await recordAudit(tx, requestSent(row, actor, true));
     return row;
   });
   return request && { request, token };

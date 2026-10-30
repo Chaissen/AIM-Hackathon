@@ -52,7 +52,7 @@ The request service stores each request with one state. The FHIR Task for the re
 
 | State | Meaning | Task status |
 |---|---|---|
-| `awaiting_confirmation` | The address check failed and Dr. Hofer has not confirmed yet | `draft` |
+| `awaiting_confirmation` | The address check failed or could not confirm the address, and Dr. Hofer has not confirmed yet | `draft` |
 | `sent` | The email or SMS went out | `requested` |
 | `identity_held` | The identity check held: the name matched only partly, the requested name had no words, or the eHVD could not be reached. Dr. Hofer decides. | `on-hold` |
 | `verified` | The identity check passed, and the outside person can answer | `in-progress` |
@@ -65,7 +65,7 @@ The request service stores each request with one state. The FHIR Task for the re
 | Event | In code | From | To |
 |---|---|---|---|
 | Dr. Hofer sends the request form and the address check passes | `initialState(true)` | none | `sent` |
-| Dr. Hofer sends the request form and the address check fails | `initialState(false)` | none | `awaiting_confirmation` |
+| Dr. Hofer sends the request form and the address check fails or cannot confirm the address | `initialState(false)` | none | `awaiting_confirmation` |
 | Dr. Hofer clicks **Send anyway** | `send_anyway` | `awaiting_confirmation` | `sent` |
 | Identity check passes | `identity_pass` | `sent` | `verified` |
 | Identity check holds: partial name, requested name without words, or eHVD unreachable | `identity_hold` | `sent` | `identity_held` |
@@ -97,6 +97,14 @@ The login changes a request through the five ports that `runIdentityChecks` in `
 - The caller passes `notify`, because the thread of a request belongs to T05.
 
 The link token and the 7 days start when the request goes out. **Send anyway** (`sendAnyway`) gives the request a new token and a new expiry and writes `request_sent` then, not when the request was created.
+
+`request.create` runs the address check (`checkAddress` from `src/server/ehvd/address-check.ts`) before it stores the request:
+
+- A pass is `sent`.
+- A mismatch waits in `awaiting_confirmation`, and `misdelivery_caught` records `address_mismatch` with both domains.
+- An address the eHVD could not confirm waits too, but with no audit entry: nothing was caught, and nothing went out. If Dr. Hofer sends it anyway, `request_sent` with `sentAnyway` and no `misdelivery_caught` before it shows that.
+
+`create` returns `addressWarning`, the warning that belongs next to **Send anyway**, or null. `get` and `list` return it while the request waits. A mismatch is rebuilt from its audit entry; for an unconfirmed address they say only that the eHVD could not confirm it. `request.sendAnyway` sends a waiting request, and answers `CONFLICT` for any other state.
 
 ## Link rules
 
@@ -131,7 +139,7 @@ The request form has the document type, the patient, the given name, the family 
 | Organisation | Labor Kanalstraße | Reha Waldblick |
 | Contact | `eva.brandl@labor-kanal.example` | `+43 660 000 0101` |
 
-If the address check fails, the widget shows the warning next to **Send anyway** and **Cancel**: "The address domain `labor-kanaI.example` does not match Labor Kanalstraße (`labor-kanal.example`)."
+If the address check fails, the widget shows the warning next to **Send anyway** and **Cancel**: "The address domain `labor-kanaI.example` does not match Labor Kanalstraße (`labor-kanal.example`)." If the eHVD cannot confirm the address, for example because it cannot be reached, the request waits the same way, and the widget says "The address did not pass the address check." The reason is in `addressWarning` from `request.create`, such as "The eHVD could not be reached, so the address could not be checked.", but the widget does not show it yet. [eHVD](EHVD.md#the-address-check) has every case.
 
 ## Matrix bot
 
@@ -282,7 +290,7 @@ In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `
 
 | Event | Who | Outcome | What |
 |---|---|---|---|
-| `request_sent` | Dr. Hofer's Matrix ID | `sent` | Document type, channel, recipient address |
+| `request_sent` | Dr. Hofer's Matrix ID | `sent` | Document type, channel, recipient address, and whether Dr. Hofer clicked **Send anyway** |
 | `link_opened` | An anonymous browser, named by a keyed hash of its IP address from `X-Forwarded-For` | `shown`, or `refused` when the link no longer works | Request id and its state |
 | `identity_checked` | The ID Austria name and person number, or `ID Austria login` when Keycloak could not be reached | `pass`, `hold`, or `fail` | The reason for each check |
 | `answer_sent` | The verified person | `received` | SHA-256 and size of the upload |
@@ -296,7 +304,7 @@ Every entry has a UTC timestamp in `at`. The `outcome` column holds the short re
 
 | Event | `detail` fields |
 |---|---|
-| `request_sent` | `docType`, `channel`, `address` |
+| `request_sent` | `docType`, `channel`, `address`. Also `sentAnyway`, which `pnpm audit:check` does not require: true after **Send anyway**. Without a `misdelivery_caught` before it, the eHVD had not confirmed the address. |
 | `link_opened` | `state` |
 | `identity_checked` | `checks`, one entry per check with its result and reason |
 | `answer_sent` | `sha256`, `size` |
@@ -328,7 +336,7 @@ Configuration is read in `src/env.ts`. Service addresses and demo accounts have 
 | `OIDC_METADATA_URL` | `http://localhost:8080/realms/idaustria-sim/.well-known/openid-configuration` |
 | `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | `request-service`, `request-service-demo-2026` |
 | `KEYCLOAK_ADMIN_USER`, `KEYCLOAK_ADMIN_PASSWORD` | `admin`, demo value (`pnpm citizen` only) |
-| `EHVD_URL` | `http://localhost:8095/` (planned, T15) |
+| `EHVD_URL` | `http://localhost:8095/` |
 | `SMTP_HOST`, `SMTP_PORT`, `MAILPIT_API_URL` | `localhost`, `1025`, `http://localhost:8025`. Port 465 uses TLS from the start. Any other port upgrades with STARTTLS when the server offers it, and requires it when `SMTP_USER` is set. |
 | `SMTP_USER`, `SMTP_PASSWORD` | empty, no login, which is what Mailpit wants. For Gmail: `ordysoftware@gmail.com` and an app password. |
 | `MAIL_FROM` | `ordy · Klinikum Beispielstadt <ordy@klinikum.example>` |
@@ -385,7 +393,9 @@ src/
     identity/checks.ts        identity checks at login: level, name, person number, eHVD claim (T08)
     identity/login.ts         what a check result does: state, audit entries, page, notice, and runIdentityChecks for the callback (T08)
     ehvd/oid.ts               OID check shared by the login and pnpm citizen
-    ehvd/                     eHVD SOAP client, planned (T15)
+    ehvd/client.ts            eHVD SOAP client (T15), with soap.ts for the messages and xml.ts for the parser
+    ehvd/address-check.ts     address check before sending (T15)
+    ehvd/release-check.ts     release check when an answer arrives (T15)
     fhir/filing.ts            one answer as a transaction Bundle with Provenance and Task; fhir/file-answer.ts posts it (T13)
     matrix/client.ts          Matrix client-server API
     matrix/notices.ts         notice texts and notifyRoom for Dr. Hofer's room

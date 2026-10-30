@@ -9,6 +9,7 @@ import { env, mxid } from "@/env";
 import { createCaller } from "@/server/api/root";
 import { createContext } from "@/server/api/trpc";
 import { db } from "@/server/db";
+import { startEhvdMock } from "@/server/ehvd/start-mock";
 import { anonymousBrowser } from "@/server/audit/record";
 import { auditLog, requests } from "@/server/db/schema";
 import { capabilities } from "@/server/fhir/client";
@@ -36,6 +37,10 @@ const noDb = await db.execute(sql`select 1`).then(
   () => "Postgres is not reachable, start it with ./scripts/setup.sh",
 );
 const noFhir = noDb || (await capabilities(AbortSignal.timeout(3_000)).then(() => false, () => "the FHIR server is not reachable"));
+
+// request.create checks the address against the eHVD at EHVD_URL. The mock container serves it after ./scripts/setup.sh;
+// without it, the mock runs in this process on the same port.
+const ehvdMock = await startEhvdMock({}, Number(new URL(env.EHVD_URL).port)).catch(() => null);
 
 const hofer = mxid(env.MATRIX_HOFER_USER);
 const clinic = createCaller(createContext({ kind: "clinic", mxid: hofer }));
@@ -93,6 +98,7 @@ after(async () => {
     await db.delete(requests).where(inArray(requests.id, created));
   }
   await db.$client.end();
+  await ehvdMock?.close();
 });
 
 test("a request created through createCaller is stored and logged as request_sent", { skip: noDb }, async () => {
@@ -101,6 +107,7 @@ test("a request created through createCaller is stored and logged as request_sen
   created.push(request.id);
 
   assert.equal(request.state, "sent");
+  assert.equal(request.addressWarning, null, "the eHVD confirms the lab's domain");
   assert.equal(request.taskStatus, "requested");
   assert.equal(request.channel, "email");
   assert.equal(request.requester, hofer);
@@ -118,21 +125,20 @@ test("a request created through createCaller is stored and logged as request_sen
   assert.equal(audit[0].actorKind, "network_member");
   assert.equal(audit[0].actor, hofer);
   assert.equal(audit[0].outcome, "sent");
-  assert.deepEqual(audit[0].detail, { docType: "lab-result", channel: "email", address: "eva.brandl@labor-kanal.example" });
+  assert.deepEqual(audit[0].detail, { docType: "lab-result", channel: "email", address: "eva.brandl@labor-kanal.example", sentAnyway: false });
 });
 
-test("an SMS request stores the phone number", { skip: noDb }, async () => {
-  const request = await clinic.request.create({
-    docType: "rehab-report",
-    patient: "maria-beispiel",
-    given: "Stefan",
-    family: "Kern",
-    org: "Reha Waldblick",
-    phone: "+43 660 000 0101",
-  });
+test("an SMS request stores the phone number and is sent without the address check", { skip: noDb }, async () => {
+  const sms = { docType: "rehab-report", patient: "maria-beispiel", given: "Stefan", family: "Kern", phone: "+43 660 000 0101" } as const;
+  const request = await clinic.request.create({ ...sms, org: "Reha Waldblick" });
   created.push(request.id);
   assert.equal(request.channel, "sms");
   assert.equal(request.address, "+43 660 000 0101");
+  assert.deepEqual([request.state, request.addressWarning], ["sent", null]);
+  // Even for an organisation the eHVD does not list, which would hold an email address.
+  const unlisted = await clinic.request.create({ ...sms, org: "Labor Nirgendwo" });
+  created.push(unlisted.id);
+  assert.deepEqual([unlisted.state, unlisted.addressWarning], ["sent", null]);
 });
 
 test("create refuses a request without a contact or with both", { skip: noDb }, async () => {
@@ -211,7 +217,7 @@ test("Send anyway through the widget sends the request with a new link and logs 
     (await auditOf(request.id)).map((a) => [a.event, a.actor, a.outcome, a.detail]),
     [
       ["misdelivery_caught", hofer, "address_mismatch", { domain: "labor-kanaI.example", expectedDomain: "labor-kanal.example" }],
-      ["request_sent", hofer, "sent", { docType: "lab-result", channel: "email", address: "eva.brandl@labor-kanal.example" }],
+      ["request_sent", hofer, "sent", { docType: "lab-result", channel: "email", address: "eva.brandl@labor-kanal.example", sentAnyway: true }],
     ],
   );
   await assert.rejects(clinic.request.sendAnyway({ id: request.id }), (e) => e instanceof TRPCError && e.code === "CONFLICT");
@@ -333,6 +339,41 @@ test("Send anyway sends the request with a new 7-day link and logs request_sent"
     ],
   );
   await assert.rejects(sendAnyway(db, request.id, { kind: "network_member", id: hofer }), TransitionError);
+});
+
+test("M1 through the router: another domain waits for Send anyway, which sends it once", { skip: noDb }, async () => {
+  const request = await clinic.request.create({ ...request1, email: "eva.brandl@labor-kanaI.example" });
+  created.push(request.id);
+  assert.equal(request.state, "awaiting_confirmation");
+  const warning = "The address domain labor-kanaI.example does not match Labor Kanalstraße (labor-kanal.example).";
+  assert.equal(request.addressWarning, warning);
+  assert.equal((await clinic.request.get({ id: request.id })).addressWarning, warning, "a reload shows the same warning");
+  assert.equal((await clinic.request.list()).find((r) => r.id === request.id)?.addressWarning, warning, "so does the widget's list");
+  assert.deepEqual(
+    (await auditOf(request.id)).map((a) => [a.event, a.outcome]),
+    [["misdelivery_caught", "address_mismatch"]],
+  );
+
+  const sent = await clinic.request.sendAnyway({ id: request.id });
+  assert.equal(sent.state, "sent");
+  assert.equal((await clinic.request.get({ id: request.id })).addressWarning, null);
+  assert.equal((await clinic.request.list()).find((r) => r.id === request.id)?.addressWarning, null);
+  assert.deepEqual((await auditOf(request.id)).map((a) => a.event), ["misdelivery_caught", "request_sent"]);
+  await assert.rejects(clinic.request.sendAnyway({ id: request.id }), (e) => e instanceof TRPCError && e.code === "CONFLICT");
+});
+
+test("an address the eHVD cannot confirm waits too, but nothing is logged as caught", { skip: noDb }, async () => {
+  const request = await clinic.request.create({ ...request1, org: "Labor Nirgendwo", email: "office@nirgendwo.example" });
+  created.push(request.id);
+  assert.equal(request.state, "awaiting_confirmation");
+  assert.equal(request.addressWarning, "The eHVD does not list Labor Nirgendwo as an active organisation, so the address could not be checked.");
+  const unconfirmed = "The eHVD could not confirm the address, so the request has not been sent.";
+  assert.equal((await clinic.request.get({ id: request.id })).addressWarning, unconfirmed);
+  assert.equal((await clinic.request.list()).find((r) => r.id === request.id)?.addressWarning, unconfirmed);
+  assert.deepEqual(await auditOf(request.id), [], "nothing went out and nothing was caught");
+  assert.equal((await clinic.request.sendAnyway({ id: request.id })).state, "sent");
+  // With no misdelivery_caught before it, sentAnyway shows that the address went out unconfirmed.
+  assert.deepEqual((await auditOf(request.id)).map((a) => [a.event, (a.detail as { sentAnyway?: boolean }).sentAnyway]), [["request_sent", true]]);
 });
 
 test("a failed write in the same transaction rolls the state change back", { skip: noDb }, async () => {
