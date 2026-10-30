@@ -8,7 +8,7 @@ The steps follow the documented target behaviour in [Architecture](ARCHITECTURE.
 - **Partly**: some of it is built (the row says what), but the step cannot be shown as written yet.
 - **Not built**: waits for the tasks named. [Timeline](TIMELINE.md) has the owners.
 
-States as of 30 October 2026, 02:30, with the request core (T04), the ID Austria login (T07), the filing (T13), the metric runner (T17, T18), and the AI fallback parser (T22) on `main`. Check them again on the frozen build before recording. Cut every step that is still not built, or replace it with one spoken sentence. If you show a screen from `prototype/ordy-app`, label it on screen as a design mock-up, not the running app.
+States as of 30 October 2026, 02:30, with the request core (T04), the ID Austria login (T07), the FHIR mappers (T12, T14), the filing (T13), the metric runner (T17, T18), and the AI fallback parser (T22) on `main`. Check them again on the frozen build before recording. Cut every step that is still not built, or replace it with one spoken sentence. If you show a screen from `prototype/ordy-app`, label it on screen as a design mock-up, not the running app.
 
 The landing page, the login, the identity checks, and the answer page work on `main`, but there is no link to open yet: the widget does not send the request (T05), and no email or SMS goes out (T06). Those steps say "needs a link". The pages for a refused, held, or failed login are not built yet (T09), so on `main` such a login ends on a 404 page.
 
@@ -94,8 +94,8 @@ Say: She entered Maria's details, but the file is about Max Beispiel. The notice
 | Click | What you see | State |
 |---|---|---|
 | Upload `lab-result-maria-beispiel.md`, enter Maria Beispiel and 12 March 1961, send | A confirmation that the answer was sent | Partly: the answer form exists, sending it is not built (T09) |
-| Switch to Element and open the thread of request 1 | "Lab result for Maria Beispiel from Dr. Eva Brandl is filed. Identity checked with ID Austria. 4 values, all within the reference range." | Partly: the notice text and the filing Bundle are built (T13), the upload, the lab mapper, and the release check are not (T09, T12, T15) |
-| Open http://localhost:8090/fhir/DiagnosticReport?subject=Patient/maria-beispiel&_include=DiagnosticReport:result&_revinclude=Provenance:target&_pretty=true | One DiagnosticReport with four Observations and their LOINC codes (INR, aPTT, platelets, fibrinogen), and a Provenance that holds the ID Austria token | Not built: the lab mapper (T12) and the upload (T09). The filing Bundle with Provenance and Task is built (T13) but not connected. |
+| Switch to Element and open the thread of request 1 | "Lab result for Maria Beispiel from Dr. Eva Brandl is filed. Identity checked with ID Austria. 4 values, all within the reference range." | Partly: the notice text, the lab mapper, and the filing Bundle are built (T12, T13), the upload and the release check are not (T09, T15) |
+| Open http://localhost:8090/fhir/DiagnosticReport?subject=Patient/maria-beispiel&_include=DiagnosticReport:result&_revinclude=Provenance:target&_pretty=true | One DiagnosticReport with four Observations and their LOINC codes (INR, aPTT, platelets, fibrinogen), and a Provenance that holds the ID Austria token | Partly: the lab mapper and the filing Bundle with Provenance and Task are built (T12, T13), but nothing calls them until the upload exists (T09) |
 
 Say: Dr. Hofer gets structured values she can trend and reuse, not a scan, and the Provenance proves who sent them.
 
@@ -106,8 +106,8 @@ Say: Dr. Hofer gets structured values she can trend and reuse, not a scan, and t
 | In the widget, pick **Rehab discharge report**, Stefan Kern, Reha Waldblick, `+43 660 000 0101`, send | The form switches to SMS. The notice "Request 2 sent to Stefan Kern (Reha Waldblick) by SMS." | Partly: the form and the request core (T04) work, but the widget does not call the request core yet (T05), and no SMS goes out (T06) |
 | Open the SMS screen and the link in it | The SMS on a phone frame, then the landing page | Partly: the SMS screen exists, the SMS log is not built (T06) |
 | Log in as `stefan.kern` / `demo-stefan`, upload `rehab-report-maria-beispiel.md`, enter Maria Beispiel and 12 March 1961, send | The answer page, then a confirmation | Partly: the login and the answer page are built (T07), the upload is not (T09), and it needs a link (T05, T06) |
-| Switch to Element and open the thread of request 2 | "Rehab discharge report for Maria Beispiel from Stefan Kern is filed. Identity checked with ID Austria." | Partly: the notice text and the filing Bundle (T13) are built, the upload, the rehab mapper, and the release check are not (T09, T14, T15) |
-| Open http://localhost:8090/fhir/DocumentReference?subject=Patient/maria-beispiel&_revinclude=Provenance:target&_pretty=true | A DocumentReference with the report attached, and its Provenance | Not built: the rehab mapper (T14) and the upload (T09). The filing Bundle is built (T13) but not connected. |
+| Switch to Element and open the thread of request 2 | "Rehab discharge report for Maria Beispiel from Stefan Kern is filed. Identity checked with ID Austria." | Partly: the notice text, the rehab mapper, and the filing Bundle are built (T13, T14), the upload and the release check are not (T09, T15) |
+| Open http://localhost:8090/fhir/DocumentReference?subject=Patient/maria-beispiel&_revinclude=Provenance:target&_pretty=true | A DocumentReference with the report attached, and its Provenance | Partly: the rehab mapper and the filing Bundle are built (T13, T14), but nothing calls them until the upload exists (T09) |
 
 Say: Stefan Kern only sends the report. The Provenance names Dr. Leitner, who wrote it, as author and Stefan Kern as informant.
 
@@ -131,7 +131,7 @@ Say: ordy warns before sending, and even if Dr. Hofer sends anyway, the stranger
 
 Say, filled in from the frozen build and the README status, in about 17 s: "Works today: …. Built but not connected: …. Not built: …."
 
-As of 02:30 that would be: "Works today: the stack, the widget and its audit log, the request core, and the ID Austria login, whose checks stop a wrong person. Built but not connected: parser, patient check, FHIR filing, AI fallback. Not built: sending, upload, FHIR mappers, eHVD checks."
+As of 02:30 that would be: "Works today: the stack, the widget and its audit log, the request core, and the ID Austria login, whose checks stop a wrong person. Built but not connected: parser, patient check, FHIR mapping and filing, AI fallback. Not built: sending, upload, eHVD checks."
 
 ## Scene 10: disclaimer (8 s)
 
@@ -155,7 +155,7 @@ Record only what is Ready, and say plainly what is not built. A possible order, 
 
 1. Dr. Hofer's room, the widget, and the request form with its input check (15 s). Its message "Sending from the widget is not connected yet." is honest on screen.
 2. `!status` in the room, with the checks of the database, the FHIR server, and Matrix (8 s).
-3. The tests for M1, M2, and M3, the filing Bundle with Provenance and Task, and the AI fallback (25 s). Run only these files, because the full `pnpm test` output scrolls by too fast: `pnpm exec tsx --test src/server/identity/login.test.ts src/server/documents/patient-check.test.ts src/server/fhir/filing.test.ts src/server/documents/fallback.test.ts`. They need no running services.
+3. The tests for M1, M2, and M3, the FHIR mappers, the filing Bundle with Provenance and Task, and the AI fallback (25 s). Run only these files, because the full `pnpm test` output scrolls by too fast: `pnpm exec tsx --test src/server/identity/login.test.ts src/server/documents/patient-check.test.ts src/server/fhir/mappers.test.ts src/server/fhir/filing.test.ts src/server/documents/fallback.test.ts`. They need no running services.
 4. The eHVD mock (7 s): http://localhost:8095/healthz, or a `GetGDA` call for Dr. Brandl as in [eHVD](EHVD.md#getgda-look-up-one-entry-by-id).
 5. The output of `pnpm scenario`: which steps pass and which are blocked, and why (15 s).
 6. The design in one sentence per step, over the README architecture diagram (20 s), then the spoken part of scene 9 (22 s), and scene 10 (8 s).

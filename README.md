@@ -22,8 +22,7 @@ Status on `main`, 30 October 2026, 02:30: the scenario does not run end to end y
 | Document parser and patient check | Built and tested on the scenario documents and our [extra test documents](track/scenario/extra/index.md), which also list the parser's known gaps. Not connected to an upload yet. |
 | Answer upload, and the portal pages for a refused, held, or failed login | Not built yet |
 | Sending the request by email or SMS, and the SMS screen's message list | Not built yet |
-| FHIR filing: one transaction Bundle with Provenance, Task, Practitioner, and Organization, and the `answer_filed` audit entry | Built and tested. Not called yet, because the upload and the mappers are missing. |
-| FHIR mappers: Observations and DiagnosticReport for the lab result, DocumentReference for the rehab report | Not built yet |
+| FHIR mappers and filing: Observations and DiagnosticReport for the lab result, DocumentReference for the rehab report, filed in one transaction Bundle with Provenance, Task, Practitioner, and Organization, and the `answer_filed` audit entry | Built and tested. Not called yet, because the upload is missing. |
 | eHVD address check and release check in ordy | Not built yet |
 | Metric runner (`pnpm scenario`, `pnpm validate`, `pnpm audit:check`) | Built and tested. It cannot drive the flow yet, so it reports every flow step as blocked and every metric as not measured. |
 | AI fallback parser (optional) | Built and tested with a stand-in for the model. Off without `ANTHROPIC_API_KEY`. Not called yet, because the upload is missing. |
@@ -114,7 +113,7 @@ Simulated in the demo: ID Austria (Keycloak, without the phone-app confirmation)
 | Env | `src/env.ts` | zod-validated, demo defaults for everything |
 | tRPC | `src/server/api/` | `publicProcedure`, `clinicProcedure` (Matrix OpenID token or bot), `eidProcedure` (eID session cookie) |
 | Database | `src/server/db/` | Drizzle schema, migrations in `drizzle/` |
-| FHIR | `src/server/fhir/` | the filing Bundle with Provenance and Task (`filing.ts`, `file-answer.ts`), typed with `@types/fhir` (R4) |
+| FHIR | `src/server/fhir/` | the mappers (`mappers.ts`) and the filing Bundle with Provenance and Task (`filing.ts`, `file-answer.ts`), typed with `@types/fhir` (R4) |
 | Documents | `src/server/documents/` | Markdown parser (markdown-it) and patient check |
 | Identity | `src/server/identity/` | name words for the name match and the patient check |
 | Matrix | `src/server/matrix/client.ts` | small client-server API client, no E2EE (not required by the track) |
@@ -130,7 +129,7 @@ Dependencies must be public for at least 7 days (`minimumReleaseAge` in `pnpm-wo
 
 ## Design answers
 
-Short answers to the five questions of the track. They describe our design. Of what they describe, the identity checks at login run on `main`. The patient check, the filing Bundle with Provenance and Task, and the AI fallback are built and unit-tested but not connected to the flow yet. [Status](#status) says what runs, and the [Whitepaper](docs/WHITEPAPER.md#design-answers) has the full answers and the reasons.
+Short answers to the five questions of the track. They describe our design. Of what they describe, the identity checks at login run on `main`. The patient check, the FHIR mappers, the filing Bundle with Provenance and Task, and the AI fallback are built and unit-tested but not connected to the flow yet. [Status](#status) says what runs, and the [Whitepaper](docs/WHITEPAPER.md#design-answers) has the full answers and the reasons.
 
 ### 1. How does an outside person prove who they are if they are in no directory?
 
