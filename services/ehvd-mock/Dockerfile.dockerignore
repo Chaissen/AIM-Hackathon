@@ -1,0 +1,8 @@
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!docs/ehvd/eHVD.wsdl
+!services/ehvd-mock/package.json
+!services/ehvd-mock/src
+**/node_modules

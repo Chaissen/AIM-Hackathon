@@ -40,6 +40,19 @@ function viennaOffsetMinutes(instant: number): number {
   return m ? (m[1] === "-" ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) : 0;
 }
 
+const offsetText = (offset: number) => {
+  const abs = Math.abs(offset);
+  return `${offset < 0 ? "-" : "+"}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+};
+
+/** An instant as FHIR `instant` with seconds and the Vienna offset, for example `2026-10-29T14:02:12+01:00`. */
+export function viennaInstant(date: Date): ViennaDateTime {
+  const offset = viennaOffsetMinutes(date.getTime());
+  const wall = new Date(date.getTime() + offset * 60_000);
+  const day = toIso({ year: wall.getUTCFullYear(), month: wall.getUTCMonth() + 1, day: wall.getUTCDate() });
+  return `${day}T${pad(wall.getUTCHours())}:${pad(wall.getUTCMinutes())}:${pad(wall.getUTCSeconds())}${offsetText(offset)}`;
+}
+
 /** `22 October 2026, 08:10` to `2026-10-22T08:10:00+02:00`. Null for any other format or an impossible date or time. */
 export function parseViennaDateTime(text: string): ViennaDateTime | null {
   const m = text.trim().match(/^(\d{1,2}) ([A-Za-z]+) (\d{4}), (\d{1,2}):(\d{2})$/);
@@ -54,9 +67,7 @@ export function parseViennaDateTime(text: string): ViennaDateTime | null {
   const wallClock = Date.UTC(parts.year, parts.month - 1, parts.day, hour, minute);
   let offset = viennaOffsetMinutes(wallClock);
   offset = viennaOffsetMinutes(wallClock - offset * 60_000);
-  const sign = offset < 0 ? "-" : "+";
-  const abs = Math.abs(offset);
-  return `${toIso(parts)}T${pad(hour)}:${pad(minute)}:00${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+  return `${toIso(parts)}T${pad(hour)}:${pad(minute)}:00${offsetText(offset)}`;
 }
 
 /**

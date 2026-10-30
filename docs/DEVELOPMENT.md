@@ -18,7 +18,7 @@ How to set up, start, reset, and extend ordy. [Architecture](ARCHITECTURE.md) ex
 | pnpm | 10 (pinned in `package.json`) | `corepack enable`, then `pnpm -v` |
 | Java | 17 or newer, only for the HL7 validator | `java -version` |
 
-These ports must be free: 3010 (ordy), 5433 (Postgres), 8008 (Synapse), 8081 (Element), 8090 (HAPI), 8025 and 1025 (Mailpit), 8080 (Keycloak). The eHVD mock will use 8095 (T23).
+These ports must be free: 3010 (ordy), 5433 (Postgres), 8008 (Synapse), 8081 (Element), 8090 (HAPI), 8025 and 1025 (Mailpit), 8080 (Keycloak), 8095 (eHVD mock).
 
 ## First-time setup
 
@@ -32,7 +32,7 @@ cd AIM-Hackathon
 
 1. installs dependencies, creates `.env` if needed, and generates a private 32-byte random `ORDY_SECRET`; reruns preserve a valid key and replace missing, short, or old demo keys. `.env` is restricted to its owner (mode 0600)
 2. generates the Synapse config in `docker/synapse/` once, for the closed server `klinikum.example`
-3. starts the containers from `docker-compose.yml` and waits for Synapse, Postgres, HAPI, and Keycloak with the `idaustria-sim` realm (HAPI needs about a minute the first time)
+3. builds the eHVD mock image and starts the containers from `docker-compose.yml`. It then waits for Synapse, Postgres, HAPI, Keycloak with the `idaustria-sim` realm, and the eHVD mock. HAPI needs about a minute the first time.
 4. registers the Matrix users `@lena.hofer` (Dr. Hofer) and `@ordy` (the bot)
 5. runs the database migrations (`pnpm db:migrate`)
 6. loads Maria Beispiel from `track/scenario/patient.json` into HAPI (`pnpm fhir:seed`)
@@ -59,7 +59,8 @@ Check that everything works:
 2. Open Element at http://localhost:8081, log in as `lena.hofer` / `hofer-demo-2026`, and open "Dr. Hofer · Outside documents".
 3. Send `!status`. The bot answers with the same three checks.
 4. Open the ordy widget and approve Element's identity request. The patient list and **Audit log** tab require this Matrix sign-in. Opening `/widget` or `/audit` directly shows sign-in guidance without patient or audit data.
-5. Open http://localhost:8080/realms/idaustria-sim/.well-known/openid-configuration. It shows the issuer `http://localhost:8080/realms/idaustria-sim`. This is the simulated ID Austria. Its test logins, such as `eva.brandl` / `demo-eva`, work from a request link. The answer page opens once the identity checks (T08) set the request to `verified`. Keycloak's account page does not work in this realm, on purpose.
+5. Open http://localhost:8080/realms/idaustria-sim/.well-known/openid-configuration. It shows the issuer `http://localhost:8080/realms/idaustria-sim`. This is the simulated ID Austria. Its test logins, such as `eva.brandl` / `demo-eva`, work from a request link. Keycloak's account page does not work in this realm, on purpose.
+6. Open http://localhost:8095/healthz. It shows `{"status":"ok","entries":313}`. This is the eHVD mock, and [eHVD](EHVD.md#trigger-each-fault) shows how to call it.
 
 | Service | URL | Login |
 |---|---|---|
@@ -70,7 +71,7 @@ Check that everything works:
 | Synapse | http://localhost:8008 | bot: `ordy` / `ordy-demo-2026` |
 | Postgres | `postgres://ordy:ordy@localhost:5433/ordy` | `ordy` / `ordy` |
 | Keycloak (simulated ID Austria) | http://localhost:8080 | `admin` / `keycloak-demo-2026` for the admin console |
-| eHVD mock (T23) | http://localhost:8095/ehvd.wsdl | none, IP allowlist as in [eHVD](EHVD.md) |
+| eHVD mock | http://localhost:8095/ehvd.wsdl | none. Loopback and private networks get through, see [eHVD](EHVD.md#configuration). |
 
 Test citizens for the ID Austria login: `eva.brandl` / `demo-eva`, `stefan.kern` / `demo-stefan`, `thomas.wagner` / `demo-thomas`, `anna.huber` / `demo-anna`, and `eva.brandl2` / `demo-eva2`. [Identity and misdelivery](IDENTITY.md#test-citizens) says whom each one plays. There is no sign-up page. `pnpm citizen` adds more people, such as the two senders of the [extra test documents](#extra-test-documents).
 
@@ -81,9 +82,9 @@ Test citizens for the ID Austria login: `eva.brandl` / `demo-eva`, `stefan.kern`
 | `pnpm dev` | Next.js and the bot, with reload |
 | `pnpm dev:web`, `pnpm dev:bot` | Only one of the two |
 | `pnpm build`, then `pnpm start` | Production build, then both processes without reload |
-| `pnpm typecheck` | Generates the Next.js route types, then runs `tsc` |
+| `pnpm typecheck` | Generates the Next.js route types, then runs `tsc` on ordy and on the eHVD mock |
 | `pnpm lint` | ESLint |
-| `pnpm test` | The `*.test.ts` files under `src/`, with Node's test runner through tsx. The request tests use the Postgres and FHIR server at the default addresses from `src/env.ts`, because `pnpm test` does not read `.env`. They delete their rows afterwards and are skipped when the servers are not running. Request ids still move on, so run `pnpm reset` before a demo. |
+| `pnpm test` | The `*.test.ts` files under `src/` and `services/`, with Node's test runner through tsx. The request tests use the Postgres and FHIR server at the default addresses from `src/env.ts`, because `pnpm test` does not read `.env`. They delete their rows afterwards and are skipped when the servers are not running. Request ids still move on, so run `pnpm reset` before a demo. |
 | `pnpm reset` | Empties Postgres, HAPI, and Mailpit, and reloads the patient. Matrix users and the room stay. Run it before every demo. |
 | `pnpm db:generate --name <name>` | Writes a SQL migration to `drizzle/` from the schema |
 | `pnpm db:migrate` | Applies pending migrations |
@@ -91,6 +92,9 @@ Test citizens for the ID Austria login: `eva.brandl` / `demo-eva`, `stefan.kern`
 | `pnpm fhir:seed` | Puts `Patient/maria-beispiel` on HAPI |
 | `pnpm matrix:bootstrap` | Creates the room if needed, joins Dr. Hofer and the bot, sets her display name, and pins the widget |
 | `pnpm citizen --given Peter --family Muster --birthdate 1970-01-01` | Adds a test citizen to the simulated ID Austria and prints the username, password, bPK, and eHVD OID. [Identity and misdelivery](IDENTITY.md#add-a-test-citizen) lists the options. |
+| `pnpm validate` | Runs the HL7 validator on every resource named in an `answer_filed` entry and counts the errors. `--since <time>` takes only the entries from that time on. `pnpm validate <file or folder>` checks hand-made resources instead. Needs Java. [FHIR](FHIR.md#validation) has the details. |
+| `pnpm audit:check` | Lists the six audit event types per request, each with who, what, and when. `--request <id>` checks one request. |
+| `pnpm scenario` | Runs request 1, M1 to M3, and request 2 against the running stack and writes the four metric results to `out/metrics/metrics.md`. `--no-validate` skips the validator. [Whitepaper](WHITEPAPER.md#how-we-measure-the-metrics) has the details. |
 | `./scripts/setup.sh` | Full one-time setup, see above |
 
 Before every push: `pnpm typecheck && pnpm lint && pnpm test && pnpm build`.
@@ -179,21 +183,22 @@ To add a document, write the file, add its row to the index, and run `pnpm test`
 
 ## Configuration
 
-`src/env.ts` reads configuration with zod. Service addresses and demo accounts have defaults. `ORDY_SECRET` defaults to empty, which disables outside-person session authentication; setup generates a unique private key. Existing installations can run `pnpm exec tsx scripts/init-env.ts` and restart the app to upgrade their key without restarting containers. Changing the key invalidates old outside-person cookies. To add a variable, add it to `src/env.ts` and `.env.example`. [Architecture](ARCHITECTURE.md#configuration) lists all variables.
+`src/env.ts` reads configuration with zod. Service addresses and demo accounts have defaults. `ORDY_SECRET` defaults to empty, which disables outside-person session authentication; setup generates a unique private key. Existing installations can run `pnpm exec tsx scripts/init-env.ts` and restart the app to upgrade their key without restarting containers. Changing the key invalidates old outside-person cookies. To add a variable, add it to `src/env.ts` and `.env.example`. The eHVD mock's `EHVD_ALLOWLIST` and `EHVD_SCHEMA_ERRORS` are read only by its container, so they live in `docker-compose.yml` and `.env.example`, not in `src/env.ts`. [Architecture](ARCHITECTURE.md#configuration) lists all variables.
 
 To open answer links on a phone in the same network, set `PUBLIC_URL` to your computer's LAN address, for example `http://192.168.1.20:3010`, restart `pnpm dev`, and run `pnpm matrix:bootstrap` so the widget uses the new address.
 
 ## HL7 validator
 
-The validator is not in git. Download it once:
+The validator is not in git. We pin version 7.0.3. `pnpm validate` downloads it to `tools/` when it is missing, and it runs the jar only if its SHA-256 is `57aa43fb40cec5de41def81c927725fd85908eeb71509b7f9313e04d9b8ec79b` (`VALIDATOR_SHA256` in `src/server/metrics/validator.ts`). To download it by hand:
 
 ```bash
 mkdir -p tools
-curl -L -o tools/validator_cli.jar https://github.com/hapifhir/org.hl7.fhir.core/releases/latest/download/validator_cli.jar
+curl -L -o tools/validator_cli.jar https://github.com/hapifhir/org.hl7.fhir.core/releases/download/7.0.3/validator_cli.jar
+sha256sum tools/validator_cli.jar
 java -jar tools/validator_cli.jar some-resource.json -version 4.0
 ```
 
-It checks LOINC codes against tx.fhir.org, so it needs internet access. `pnpm validate` (T18) will run it on every filed resource.
+A jar with another hash, such as one from `releases/latest`, makes `pnpm validate` stop; delete it and run again. To update the validator, change the version, URL, and hash in `validator.ts` and here. It checks LOINC codes against tx.fhir.org, so it needs internet access. `pnpm validate` runs it on every filed resource, and `pnpm validate <file>` on a hand-made one. The first run takes a few minutes, because the validator downloads the FHIR packages to `~/.fhir`.
 
 ## Clean slate
 
@@ -218,5 +223,7 @@ This deletes all local data. Matrix logins in open Element tabs stop working.
 | No widget in the room | Run `pnpm matrix:bootstrap`, reload Element, and allow the widget when Element asks |
 | Element shows an old room or no room | Log out and in again. The room alias is `#outside-documents:klinikum.example`. |
 | Keycloak ignores a change to the realm file | It imports the realm only when it does not exist yet. Run `docker compose up -d --force-recreate keycloak`. This also removes people added with `pnpm citizen`. |
+| The eHVD mock answers every request with an empty HTTP 403 | Either the client address is outside `EHVD_ALLOWLIST`, or the request breaks SOAP 1.2 or the WSDL. `docker compose logs ehvd` shows the client address. With `EHVD_SCHEMA_ERRORS=fault-6001` in `.env` and `docker compose up -d ehvd`, a broken request gets fault 6001 instead. |
+| A change under `services/ehvd-mock/` does not show up | The container runs the image built earlier. Run `docker compose up -d --build ehvd`. |
 | Strange Next.js errors after switching branches | Stop `pnpm dev`, delete `.next/`, start again |
 | `pnpm install` refuses a package | It is younger than 7 days. Pick an older version. |

@@ -5,7 +5,7 @@ import { type AuditActor, type AuditEntry, recordAudit } from "@/server/audit/re
 import type { Db, Tx } from "@/server/db";
 import { bindings, requests } from "@/server/db/schema";
 import type { LoginTransition } from "@/server/identity/login";
-import { initialState, OPEN_STATES, type RequestEvent, transition } from "./lifecycle";
+import { initialState, MAX_FAILED_CHECKS, OPEN_STATES, type RequestEvent, transition, TransitionError } from "./lifecycle";
 import { hashLinkToken, isLinkToken, LINK_TTL_MS, newLinkToken } from "./link-token";
 
 // Reads and state changes of requests. Every caller goes through here: the tRPC router, the portal pages, and later the login and filing.
@@ -83,7 +83,7 @@ export async function sendAnyway(db: Db, id: number, actor: AuditActor) {
 /**
  * Sets open requests past their expiry to `expired` ("7 days pass" in the lifecycle): the one with `id`, or all of them.
  * No job runs for this; every read below calls it first, so nobody sees an open request that has expired.
- * Returns the ids it expired.
+ * Returns the ids it expired. Inside a transaction that rolls back, the expiry rolls back too, and the next read redoes it.
  */
 export async function expireDueRequests(db: Db | Tx, id?: number): Promise<number[]> {
   const expired = await db
@@ -123,6 +123,9 @@ export async function listRequests(db: Db, requester: string, limit = 100): Prom
     .limit(limit);
 }
 
+/** Every lifecycle event but a login's. Only `applyLoginTransition` applies those, so a login always stores the bPK. */
+export type NonLoginEvent = Exclude<RequestEvent, (typeof LOGIN_EVENT)[keyof typeof LOGIN_EVENT]>;
+
 /**
  * Applies a lifecycle event and stores the new state: Dr. Hofer's decisions and the answer. A login goes through
  * `applyLoginTransition` below. Locks the row, so two events on one request run one after the other.
@@ -134,13 +137,15 @@ export async function listRequests(db: Db, requester: string, limit = 100): Prom
 export async function applyEvent(
   db: Db,
   id: number,
-  event: RequestEvent,
+  event: NonLoginEvent,
   then?: (tx: Tx, request: RequestRow) => Promise<RequestRow | void>,
 ): Promise<RequestRow | null> {
   return db.transaction(async (tx) => {
     await expireDueRequests(tx, id);
     const [row] = await tx.select().from(requests).where(eq(requests.id, id)).for("update");
     if (!row) return null;
+    // The type already refuses a login's event; this holds for a caller that casts too.
+    if ((Object.values(LOGIN_EVENT) as RequestEvent[]).includes(event)) throw new TransitionError(row.state, event);
     const state = transition(row.state, event, row.failedChecks);
     const [updated] = await tx.update(requests).set({ state }).where(eq(requests.id, id)).returning();
     return (await then?.(tx, updated)) ?? updated;
@@ -175,12 +180,14 @@ export async function applyLoginTransition(db: Db, id: number, change: LoginTran
     await expireDueRequests(tx, id);
     const [row] = await tx.select().from(requests).where(eq(requests.id, id)).for("update");
     if (!row || row.state !== change.from) return false;
-    if (transition(row.state, LOGIN_EVENT[change.to], row.failedChecks) !== change.to) return false;
+    // Three counted failures lock a sent request. If the lock after the third one never ran, this login locks it instead.
+    const to = row.failedChecks >= MAX_FAILED_CHECKS ? "locked" : change.to;
+    if (transition(row.state, LOGIN_EVENT[to], row.failedChecks) !== to) return false;
     await tx
       .update(requests)
-      .set({ state: change.to, ...("personNumber" in change ? { personNumber: change.personNumber } : {}) })
+      .set({ state: to, ...("personNumber" in change && to === change.to ? { personNumber: change.personNumber } : {}) })
       .where(eq(requests.id, id));
-    return true;
+    return to === change.to;
   });
 }
 

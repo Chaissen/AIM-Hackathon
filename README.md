@@ -35,8 +35,9 @@ pnpm dev             # Next.js on http://localhost:3010 and the Matrix bot
 | Mailpit (outside emails) | http://localhost:8025 | |
 | HAPI FHIR | http://localhost:8090/fhir | |
 | Postgres | `postgres://ordy:ordy@localhost:5433/ordy` | `ordy` / `ordy` |
+| eHVD mock (WSDL) | http://localhost:8095/ehvd.wsdl | |
 
-In Element, open the room "Dr. Hofer · Outside documents". `!help` lists the bot commands and `!status` checks all services.
+In Element, open the room "Dr. Hofer · Outside documents". `!help` lists the bot commands. `!status` checks the database, the FHIR server, and Matrix. The eHVD mock reports its state at http://localhost:8095/healthz.
 
 ## Commands
 
@@ -48,6 +49,7 @@ In Element, open the room "Dr. Hofer · Outside documents". `!help` lists the bo
 | `pnpm db:generate --name <name>` · `pnpm db:migrate` | Create a migration from `src/server/db/schema.ts`, apply it |
 | `pnpm db:studio` | Browse the database |
 | `pnpm fhir:seed` · `pnpm matrix:bootstrap` | Load the scenario patient; create the room and pin the widget |
+| `pnpm scenario` · `pnpm validate` · `pnpm audit:check` | All four metrics in one run; the HL7 validator on the filed resources; the six audit events per request |
 
 ## Architecture
 

@@ -1,0 +1,15 @@
+{
+  "name": "ehvd-mock",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.ts"
+  },
+  "dependencies": {
+    "saxes": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "soap": "^1.14.0"
+  }
+}
