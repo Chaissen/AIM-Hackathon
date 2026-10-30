@@ -35,7 +35,7 @@ rc_invites:
 YAML
 fi
 
-docker compose up -d
+docker compose up -d --build
 
 echo "Waiting for Synapse ..."
 until curl -fsS http://localhost:8008/health >/dev/null 2>&1; do sleep 2; done
@@ -45,6 +45,8 @@ echo "Waiting for HAPI FHIR (first start takes ~1 min) ..."
 until curl -fsS http://localhost:8090/fhir/metadata >/dev/null 2>&1; do sleep 3; done
 echo "Waiting for Keycloak and the idaustria-sim realm ..."
 until curl -fsS http://localhost:8080/realms/idaustria-sim/.well-known/openid-configuration >/dev/null 2>&1; do sleep 2; done
+echo "Waiting for the eHVD mock ..."
+until curl -fsS http://localhost:8095/healthz >/dev/null 2>&1; do sleep 2; done
 
 register() {
   docker compose exec -T synapse register_new_matrix_user -c /data/homeserver.yaml \
