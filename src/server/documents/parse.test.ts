@@ -511,3 +511,39 @@ test("a birth date is read from its start only when an age or sex marker follows
     ...["(64 y)", "(64 years)", ", 64", "(f)", "(m)"].map((m): [string, string[]] => [`\nDate of birth: 12.03.1961 ${m}\n`.replace(" ,", ","), []]),
   ]);
 });
+
+test("a birth date column beside a Name column is a contact's", () => {
+  expectSafety(
+    [
+      [kvTable("| Name | Date of birth |", "| Stefan Kern | 05.05.1970 |"), []],
+      [kvTable("| Patient ID | Date of birth |", "| 42 | 01.01.1960 |"), ["several-birth-dates"]],
+    ],
+    [rehabLf(), referral],
+  );
+});
+
+test("a table inside a code block is not read, a key line there is", () => {
+  expectSafety([
+    ["\n## Template example\n\n```example\n| Patient | Max Beispiel |\n|---|---|\n```\n", []],
+    ["\n## Template example\n\n    | Patient | Max Beispiel |\n    |---|---|\n", []],
+    ["\n```\nPatient: Max Beispiel\n```\n", ["several-patients"]],
+  ]);
+});
+
+test("a name that may be a label or a column name counts only when it holds more than a name or shares a word with the patient's", () => {
+  expectSafety([
+    ["\n**Patient:**\nElective Inpatient Admission\n", []],
+    ["\n**Patient:**\n\nElective Inpatient Admission\n", []],
+    ["\nPatient:\nMaria\n", ["several-patients"]],
+    ["\n**Patient:**\n\nJohann Gruber, born 1 January 1960\n", ["several-patients", "several-birth-dates"]],
+    ["\nPatient:\nJohann Gruber (1 January 1960)\n", ["several-patients"]],
+  ]);
+  expectSafety(
+    [
+      [kvTable("| Patient | Floor |", "| Maria Beispiel | 2 |"), []],
+      [kvTable("| Patient | Maria Beispiel |", "| Insurance | ÖGK |"), []],
+      [kvTable("| Patient | Max Beispiel |", "| Insurance | ÖGK |"), ["several-patients"]],
+    ],
+    [rehabLf(), referral],
+  );
+});
