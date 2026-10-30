@@ -5,7 +5,6 @@ import { auditActor, recordAudit } from "@/server/audit/record";
 import type { EidSession } from "@/server/auth/eid-session";
 import type { Db, Tx } from "@/server/db";
 import { heldAnswers, keptAnswers } from "@/server/db/schema";
-import { confirmReading, HELD_REASON, readWithCode } from "@/server/documents/fallback";
 import { parseDocument } from "@/server/documents/parse";
 import { checkAnswerPatient, patientMismatch, uploadHash } from "@/server/documents/patient-check";
 import type { PersonLine } from "@/server/documents/types";
@@ -17,8 +16,6 @@ import { type AnswerToFile, type FileableDocument, NotFiled, type ReleaseCheckRe
 
 // `portal.answer`, the answer page's upload (docs/ARCHITECTURE.md, "The answer"): `answer_sent`, parse, patient check,
 // release check, then file and `answer_filed`, or hold for Dr. Hofer. The uploader learns only what they can act on.
-// With a model configured, a file the parser cannot read for its format goes through the AI fallback: code reads it,
-// the patient check runs on code's reading, then the model must agree, and the answer is always held.
 
 /** The scenario documents are about 2 KB. A larger upload is not a document from a lab or a rehab clinic. */
 export const MAX_UPLOAD_BYTES = 64 * 1024;
@@ -165,13 +162,8 @@ export async function submitAnswer(deps: AnswerDeps, upload: AnswerUpload): Prom
     return unreadable(`A line of the file is longer than ${MAX_LINE_CHARS} characters. Upload the document as Markdown or text.`);
   }
   const parsed = parseDocument(markdown);
-  // docs/ARCHITECTURE.md, "AI fallback": only for a file the parser cannot read for its format, never after a safety
-  // refusal (`readWithCode()` keeps it), and only with a model. Without one, the parser's reasons go back as before.
-  const reader = deps.documentReader ?? null;
-  const code = parsed.ok || !reader ? null : readWithCode(markdown, parsed);
-  const read = code ?? parsed;
-  if (!read.ok) return unreadable(...read.errors);
-  const doc = read.document;
+  if (!parsed.ok) return unreadable(...parsed.errors);
+  const doc = parsed.document;
 
   const patient = await deps.readPatient(request.patientId);
   const check = checkAnswerPatient(doc.patient, upload.form, patient);
@@ -203,44 +195,19 @@ export async function submitAnswer(deps: AnswerDeps, upload: AnswerUpload): Prom
     return unreadable(`This request asks for a ${wanted}. The heading of your document says "${doc.kind}".`);
   }
 
-  // Code's wide reading goes on only if the model, reading the file on its own, agrees in every field. Only now, after
-  // the patient check, does the file go to the model provider. A model that fails or disagrees keeps nothing: the
-  // sender gets the parser's reasons, as without the fallback, and nothing is filed or held.
-  let readByModel: string | null = null;
-  if (code?.ok && reader) {
-    const confirmed = await confirmReading(markdown, code, reader);
-    if (!confirmed?.ok) {
-      // A count only: the differing values quote the model's reading, which never goes into a log.
-      const why = confirmed ? `${confirmed.held.unverified.length} fields differ from code's reading` : "no usable model answer";
-      console.warn(`the AI fallback did not confirm the answer to request ${request.id}: ${why}`);
-      return unreadable(...(parsed.ok ? [] : parsed.errors));
-    }
-    readByModel = confirmed.held.model;
-  }
-
   const sender: Sender = { givenName: session.givenName, familyName: session.familyName, gdaOid: session.gdaOid };
   const responsible = responsiblePerson(doc);
   const release = await releaseCheck(deps, doc, sender, request);
 
-  // An answer the AI fallback read always waits for Dr. Hofer, also when the eHVD confirms who released it.
-  if (release.verdict === "hold" || !responsible || readByModel !== null) {
-    const releaseSentence =
-      release.verdict === "hold"
-        ? release.sentence
-        : responsible
-          ? releaseFinding(responsible, request.org, release.via)
-          : "The document names nobody responsible for its content.";
-    const reason = readByModel === null ? releaseSentence : `${HELD_REASON} ${releaseSentence}`;
-    const found = {
-      organisationOid: release.organisation?.id.id ?? null,
-      practitionerOid: release.verdict === "hold" ? (release.practitioner?.id.id ?? null) : responsible ? release.practitioner.id.id : null,
-    };
+  if (release.verdict === "hold" || !responsible) {
+    const reason = release.verdict === "hold" ? release.sentence : "The document names nobody responsible for its content.";
+    const found = { organisationOid: release.organisation?.id.id ?? null, practitionerOid: release.verdict === "hold" ? (release.practitioner?.id.id ?? null) : null };
     // docs/IDENTITY.md, "Block or hold": the right person answered, so keep the answer and let Dr. Hofer decide.
     try {
       await applyEvent(db, request.id, "answer_unconfirmed", async (tx) => {
         // An upload at the same time may have been kept in between; it goes first.
         if (await keptUpload(tx, request.id)) throw new KeptFirst();
-        const held = { markdown, sha256, sender, idToken, reason, sentAt, ...found, readByModel };
+        const held = { markdown, sha256, sender, idToken, reason, sentAt, ...found };
         await tx
           .insert(heldAnswers)
           .values({ requestId: request.id, ...held })

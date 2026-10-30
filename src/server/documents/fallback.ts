@@ -179,8 +179,7 @@ function labRow(row: ModelReading["rows"][number], n: number, errors: string[]):
 
 /**
  * Code's own reading of a format the parser does not know, with synonyms for keys and headers. It returns the record
- * and its reading in the model's schema. Not exported: the way out is `readWithCode()`, whose record the answer flow
- * holds only after `confirmReading()`.
+ * and its reading in the model's schema. Not exported: the only way out is `parseWithFallback()`, which holds it.
  */
 function readWide(markdown: string): Wide {
   const source = markdown.replace(/^﻿/, "").replace(/\r\n?/g, "\n");
@@ -316,55 +315,6 @@ function disagreements(model: ModelReading, code: ModelReading): string[] {
   return out;
 }
 
-type ParseFailure = Extract<ParseResult, { ok: false }>;
-
-/**
- * Code's reading of a file the parser cannot read for its format: a record and the same reading in the model's schema,
- * or the reasons there is none. The record is not confirmed yet: only `confirmReading()` can let it through, held.
- */
-export type CodeReading = { ok: true; document: ParsedDocument; reading: ModelReading } | ParseFailure;
-
-/**
- * Step 1 of the fallback, code alone, for a file `parseDocument()` refused with `parsed`. A safety refusal of the parser
- * stays as it is, and the same checks run on the wide reading. The answer flow runs the patient check on the record
- * before the model sees the file, then `confirmReading()`, and holds what passes; it never files the record without both.
- */
-export function readWithCode(markdown: string, parsed: ParseFailure): CodeReading {
-  if (parsed.safety.length) return parsed;
-  const wide = readWide(markdown);
-  if (wide.refusals.length) {
-    return { ok: false, errors: [...parsed.errors, ...wide.refusals.map((r) => r.error)], safety: [...new Set(wide.refusals.map((r) => r.safety))] };
-  }
-  if (!wide.document) return { ok: false, errors: [...parsed.errors, ...wide.errors], safety: [] };
-  return { ok: true, document: wide.document, reading: wide.reading };
-}
-
-/** The model's verdict on code's reading. */
-export type Confirmation =
-  /** The model's reading agrees with code's in every field. The record is held for Dr. Hofer. */
-  | { ok: true; held: Held }
-  /** The model's reading differs. `unverified` quotes the model's values: never in Matrix, the audit log, or the portal. */
-  | { ok: false; held: Held & { unverified: string[] } };
-
-/**
- * Step 2: the model reads the same file on its own, and its reading is compared with code's. Null when the model call
- * fails or its answer does not fit the schema; the parser's result then stands.
- */
-export async function confirmReading(markdown: string, code: Extract<CodeReading, { ok: true }>, reader: DocumentReader): Promise<Confirmation | null> {
-  let answer: { model: string; output: unknown };
-  try {
-    answer = await reader(markdown);
-  } catch {
-    return null;
-  }
-  const reading = modelReadingSchema.safeParse(answer.output);
-  if (!reading.success) return null;
-
-  const unverified = disagreements(reading.data, code.reading);
-  const held = { by: "model" as const, model: answer.model };
-  return unverified.length ? { ok: false, held: { ...held, reason: UNVERIFIED_REASON, unverified } } : { ok: true, held: { ...held, reason: HELD_REASON } };
-}
-
 /**
  * `parseDocument()`, and when it fails for its format and a reader is configured, the AI fallback. A safety refusal
  * never reaches the model, and neither does a file code cannot read. A model failure or an answer that does not fit the
@@ -373,22 +323,24 @@ export async function confirmReading(markdown: string, code: Extract<CodeReading
 export async function parseWithFallback(markdown: string, reader: DocumentReader | null): Promise<FallbackResult> {
   const parsed = parseDocument(markdown);
   if (parsed.ok || !reader || parsed.safety.length) return parsed;
-  const code = readWithCode(markdown, parsed);
-  if (!code.ok) return code;
-  const confirmed = await confirmReading(markdown, code, reader);
-  if (!confirmed) return parsed;
-  return confirmed.ok ? { ok: true, document: code.document, held: confirmed.held } : { ok: false, errors: parsed.errors, held: confirmed.held };
-}
+  const wide = readWide(markdown);
+  if (wide.refusals.length) {
+    return { ok: false, errors: [...parsed.errors, ...wide.refusals.map((r) => r.error)], safety: [...new Set(wide.refusals.map((r) => r.safety))] };
+  }
+  if (!wide.document) return { ok: false, errors: [...parsed.errors, ...wide.errors], safety: [] };
 
-/**
- * A held or filed answer read again without the model: the parser, and for a format it does not know, code's wide
- * reading. Both are deterministic, so for text the fallback held this is the record the model agreed with, and Accept
- * files exactly it. Only for text the answer flow already held or filed: it never asks the model and never refuses on
- * the model's behalf.
- */
-export function readAgain(markdown: string): ParseResult {
-  const parsed = parseDocument(markdown);
-  if (parsed.ok) return parsed;
-  const code = readWithCode(markdown, parsed);
-  return code.ok ? { ok: true, document: code.document } : code;
+  let answer: { model: string; output: unknown };
+  try {
+    answer = await reader(markdown);
+  } catch {
+    return parsed;
+  }
+  const reading = modelReadingSchema.safeParse(answer.output);
+  if (!reading.success) return parsed;
+
+  const unverified = disagreements(reading.data, wide.reading);
+  const held = { by: "model" as const, model: answer.model };
+  return unverified.length
+    ? { ok: false, errors: parsed.errors, held: { ...held, reason: UNVERIFIED_REASON, unverified } }
+    : { ok: true, document: wide.document, held: { ...held, reason: HELD_REASON } };
 }

@@ -47,7 +47,7 @@ The check compares whole words. A substring check would block every message, bec
 | Person number bindings | Postgres `bindings` | Only the person who answered before can answer as that person again | Until the demo reset |
 | Audit log | Postgres `audit_log`, including the document type, channel, and recipient address of each sent request | Who did what and when. No document text. | Until the demo reset |
 | Filed answers | HAPI FHIR | The clinical record | Until the demo reset |
-| Held answers, about the right patient | Postgres `held_answers`: the text, its hash, the sender's name and eHVD OID, their ID token, the hold reason, the eHVD OIDs the release check found, and the name of the model that agreed with the AI fallback's reading. Never the model's reading itself. | Dr. Hofer decides about an answer the eHVD did not confirm or the AI fallback read | Until she accepts (then it is in HAPI) or rejects it, or the request is cancelled or expires |
+| Held answers, about the right patient | Postgres `held_answers`: the text, its hash, the sender's name and eHVD OID, their ID token, the hold reason, and the eHVD OIDs the release check found | Dr. Hofer decides about an answer the eHVD did not confirm | Until she accepts (then it is in HAPI) or rejects it, or the request is cancelled or expires |
 | Answers whose filing outcome is unknown | Postgres `kept_answers`: the parsed document, the parties, the sender's ID token, and the upload hash | After a timeout the FHIR server may have filed it, so a retry must file exactly this answer | Until it is filed or the FHIR server refuses it, or the request is cancelled or expires |
 | ID token of the sender | Provenance `signature.data`, and `requests.id_token` for the person the request is bound to | Proof of the identity check that anyone can verify later | With the record. In `requests` only while the request is open: filing, cancelling, rejecting, and expiry clear it |
 | Uploads for the wrong patient | Nowhere. Only the SHA-256 hash and the reason stay in the audit log. | Max Beispiel's data must not end up in Maria's record or anywhere else | Discarded after the check |
@@ -71,11 +71,11 @@ Workspace calls explicitly select their clinic cookie with `x-ordy-workspace: 1`
 
 ## AI rules
 
-AI is optional in this project. The AI fallback parser runs only with `ANTHROPIC_API_KEY` set ([Architecture](ARCHITECTURE.md#ai-fallback-optional-cut-first)):
+AI is optional in this project. If we build the AI fallback parser:
 
-- The model only reads documents. It never decides identity, the patient match, or whether an answer gets filed. The patient check runs on code's reading before the document goes to the model provider, so a file about another patient never reaches it.
-- Every value and every LOINC code it returns must appear word for word in the document. Otherwise the answer is not filed and not kept: the sender gets the same reasons as without the fallback and can upload the document again.
-- An answer that the model read always waits until Dr. Hofer accepts it in the workspace or optional widget. The held notice and the decision panel say that a language model read it, and the Provenance names the model.
+- The model only reads documents. It never decides identity, the patient match, or whether an answer gets filed.
+- Every value and every LOINC code it returns must appear word for word in the document. Otherwise the answer is held.
+- An answer that the model read always waits until Dr. Hofer accepts it in the workspace or optional widget.
 - We send only synthetic documents to the model provider and record the provider and model version in the README.
 
 ## Production alignment

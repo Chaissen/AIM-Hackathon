@@ -23,7 +23,7 @@ The feature table describes this checkout. The workspace gateway and hostname mi
 | Simulated ID Austria (Keycloak) and eHVD mock | **Works.** The real ID Austria claim names, five test citizens, `pnpm citizen` for more. The eHVD mock speaks SOAP 1.2 with the real eHVD WSDL and synthetic entries. |
 | Request email | **Works.** The request form and **Send anyway** send the link by email through Gmail, and only to the team inboxes. A check refuses an email that names the patient, the birth date, or a document type. A refused or failed email stores nothing. |
 | SMS, and the SMS screen's message list | **Works, as a demo.** There is no SMS gateway: the request form puts each SMS into a demo outbox that the SMS screen at `/sms` and `/inbox` shows, with its working link, after the same content check as the email. A production build keeps no outbox and refuses SMS requests. |
-| AI fallback parser (optional) | **Connected, off without `ANTHROPIC_API_KEY`.** Without the key the answer flow uses the rule-based parser only, as before. With it, an upload in a format the parser does not know is read by code, passes the patient check, is read again by the model, and is always held for Dr. Hofer's **Accept**. Tested with a stand-in for the model only, never against the API. |
+| AI fallback parser (optional) | **Built, not connected.** Tested with a stand-in for the model. The answer flow uses the rule-based parser only. |
 | Metric runner | **Yes.** `pnpm scenario` drives request 1, M1 to M3, and request 2 against the running stack and measures the four metrics; its effort is machine time, not a person. `pnpm validate` and `pnpm audit:check` work on the filed data. |
 
 [Timeline](docs/TIMELINE.md) has the tasks and owners.
@@ -112,7 +112,7 @@ Dr. Hofer signs in to the ordy workspace with her existing Matrix account. An en
 | HL7 validator | Reused | Validates every filed resource |
 | Anthropic API, model `claude-opus-5-5` | Reused, optional | Second reader for the AI fallback parser, synthetic documents only |
 
-The main flow uses no AI model. Parsing, the identity checks, and the patient check are deterministic. Only when the parser cannot read a document does the optional AI fallback step in: a more lenient code reader reads every value, a model (Anthropic, `claude-opus-5-5`, off without `ANTHROPIC_API_KEY`) reads the document independently, and the two readings must agree. The model can only stop a record, never choose a value. Every answer it read waits for Dr. Hofer ([AI rules](docs/COMPLIANCE_AND_SAFETY.md#ai-rules)). The answer flow calls it only with `ANTHROPIC_API_KEY` set, and only after the patient check passed on code's reading, so a file about another patient never goes to the provider. A reading that disagrees files and keeps nothing.
+The main flow uses no AI model. Parsing, the identity checks, and the patient check are deterministic. Only when the parser cannot read a document does the optional AI fallback step in: a more lenient code reader reads every value, a model (Anthropic, `claude-opus-5-5`, off without `ANTHROPIC_API_KEY`) reads the document independently, and the two readings must agree. The model can only stop a record, never choose a value. Every answer it read waits for Dr. Hofer ([AI rules](docs/COMPLIANCE_AND_SAFETY.md#ai-rules)). The fallback is built and tested, but the answer flow does not call it yet.
 
 Simulated in the demo: ID Austria (Keycloak, without the phone-app confirmation) and the eHVD (our mock). Email goes through Gmail, and only to the team inboxes. SMS would go to the SMS screen, but ordy does not send SMS yet. Each can be replaced by the real service, and every other part we did not build, such as HAPI FHIR or Synapse, by another product of its kind. [Whitepaper](docs/WHITEPAPER.md#what-is-real-and-what-is-simulated) says what each part becomes in production, and [Architecture](docs/ARCHITECTURE.md) has the details.
 
@@ -130,7 +130,7 @@ Simulated in the demo: ID Austria (Keycloak, without the phone-app confirmation)
 | Matrix | `src/server/matrix/client.ts` | small client-server API client, no E2EE (not required by the track) |
 | Bot | `src/bot/` | separate process for `!help` and `!status`. Requests go through the widget. |
 | Client | `src/trpc/` | `@trpc/tanstack-react-query`, superjson |
-| AI fallback | `src/server/documents/fallback.ts` | optional, off without `ANTHROPIC_API_KEY`. Provider Anthropic, model `claude-opus-5-5` (`AI_FALLBACK_MODEL`), no server-side fallback model, `@anthropic-ai/sdk` 1.1. Synthetic documents only; every answer it reads is held for Dr. Hofer. The model name the API returns is kept with the held answer and named in the Provenance. |
+| AI fallback | `src/server/documents/fallback.ts` | optional, off without `ANTHROPIC_API_KEY`. Provider Anthropic, model `claude-opus-5-5` (`AI_FALLBACK_MODEL`), no server-side fallback model, `@anthropic-ai/sdk` 1.1. Synthetic documents only; every answer it reads is held for Dr. Hofer. |
 | Requests | `src/server/requests/`, `src/server/api/routers/request.ts` | request core: lifecycle, link tokens, `request.create`, and the ports the identity checks use |
 | Login | `src/app/auth/`, `src/server/auth/` | ID Austria login over OpenID Connect and the outside person's session cookie |
 | Audit | `src/server/audit/record.ts` | writes the audit entries |
@@ -140,7 +140,7 @@ Dependencies must be public for at least 7 days (`minimumReleaseAge` in `pnpm-wo
 
 ## Design answers
 
-Short answers to the five questions of the track. They describe our design, and `main` runs it, except that ordy has no SMS gateway, so the SMS goes to the demo SMS screen, and the AI fallback is off without an API key. [Status](#status) says what runs, and the [Whitepaper](docs/WHITEPAPER.md#design-answers) has the full answers and the reasons.
+Short answers to the five questions of the track. They describe our design, and `main` runs it, except that ordy has no SMS gateway, so the SMS goes to the demo SMS screen, and the AI fallback is not connected. [Status](#status) says what runs, and the [Whitepaper](docs/WHITEPAPER.md#design-answers) has the full answers and the reasons.
 
 ### 1. How does an outside person prove who they are if they are in no directory?
 

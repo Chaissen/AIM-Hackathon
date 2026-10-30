@@ -8,7 +8,6 @@ import { HELD_REASON, UNVERIFIED_REASON, modelReadingSchema, parseWithFallback, 
 import { parseDocument } from "./parse";
 import { checkAnswerPatient } from "./patient-check";
 import type { LabResult, RehabReport } from "./types";
-import { toDocumentView } from "./view";
 
 // The model is always a stub here: tests never call the network.
 
@@ -421,49 +420,8 @@ test("the parser's result stands when it reads the file, when no model is set, o
   assert.deepEqual(await parseWithFallback(lab, stub({ type: "lab-result" })), parserOnly);
 });
 
-test("the fallback exports only its steps, and the wide reader stays behind readWithCode()", () => {
-  assert.deepEqual(Object.keys(fallback).sort(), [
-    "HELD_REASON",
-    "UNVERIFIED_REASON",
-    "confirmReading",
-    "modelReadingSchema",
-    "parseWithFallback",
-    "readAgain",
-    "readWithCode",
-  ]);
-});
-
-test("readWithCode() and confirmReading() are the two steps of parseWithFallback()", async () => {
-  const parsed = parseDocument(lab);
-  assert.ok(!parsed.ok);
-  const code = fallback.readWithCode(lab, parsed);
-  assert.ok(code.ok);
-  assert.deepEqual(code.reading, goodLab(), "code's own reading in the model's schema");
-  assert.deepEqual(await fallback.confirmReading(lab, code, stub(goodLab())), { ok: true, held: { by: "model", model: "stub-model", reason: HELD_REASON } });
-  const differs = await fallback.confirmReading(lab, code, stub(changed(goodLab, (r) => (r.rows[1].valueText = "44"))));
-  assert.ok(differs && !differs.ok);
-  assert.deepEqual(differs.held.unverified, ['rows[1].valueText: "44"']);
-  assert.equal(await fallback.confirmReading(lab, code, () => Promise.reject(new Error("offline"))), null);
-  assert.equal(await fallback.confirmReading(lab, code, stub({ type: "lab-result" })), null);
-
-  // A safety refusal of the parser stays as it is.
-  const twoPatients = parseDocument(insertAfter(scenario("lab-result-maria-beispiel.md"), "Patient: Maria Beispiel, born 12 March 1961", "**Patient:** Max Beispiel"));
-  assert.ok(!twoPatients.ok && twoPatients.safety.length);
-  assert.equal(fallback.readWithCode("", twoPatients), twoPatients);
-});
-
-test("readAgain() reads a held answer again without the model and gives the same record", async () => {
-  const held = await record(lab, goodLab());
-  assert.deepEqual(fallback.readAgain(lab), { ok: true, document: held });
-  assert.deepEqual(fallback.readAgain(rehab), { ok: true, document: await record(rehab, goodRehab()) });
-  const scenarioLab = scenario("lab-result-maria-beispiel.md");
-  assert.deepEqual(fallback.readAgain(scenarioLab), parseDocument(scenarioLab), "the parser's own record when it reads the file");
-  assert.equal(fallback.readAgain("Patient: Maria Beispiel\n").ok, false);
-
-  // The widget shows a held answer the fallback read, as it shows any other.
-  const view = toDocumentView(lab);
-  assert.equal(view?.original, lab);
-  assert.deepEqual({ ...view?.document, markdown: view?.original }, held);
+test("only parseWithFallback() turns a reading into a record, so every record from the fallback is held", () => {
+  assert.deepEqual(Object.keys(fallback).sort(), ["HELD_REASON", "UNVERIFIED_REASON", "modelReadingSchema", "parseWithFallback"]);
 });
 
 test("the wide date readers take the dotted and ISO formats", () => {
