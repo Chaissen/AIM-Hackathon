@@ -69,6 +69,21 @@ test("a lab result validated by someone the eHVD does not confirm is held, with 
   }
 });
 
+test("a name without a given name never passes, not even from the sender with the claim", async () => {
+  const document = lab((m) => m.replace("Validated by: Dr. Eva Brandl, lab physician", "Validated by: Dr. Brandl, lab physician"));
+  for (const sender of [eva, stefan]) {
+    assert.deepEqual(await run({ document, sender }), { verdict: "hold", reason: "incomplete_name", sentence: "The document does not give the full name of Dr. Brandl." });
+  }
+});
+
+test("the search hits must carry the document's name, however the eHVD matches names", async () => {
+  // An eHVD that ignores the first name would return every Brandl, and Eva is the only one at Labor Kanalstraße.
+  const lax: EhvdClient = { getGda: (query) => client.getGda(query), gdaSearch: (query) => client.gdaSearch({ ...query, firstname: undefined }) };
+  const document = lab((m) => m.replace("Validated by: Dr. Eva Brandl, lab physician", "Validated by: Dr. Erika Brandl, lab physician"));
+  const check = await checkRelease({ document, org: "Labor Kanalstraße", sender: stefan }, lax);
+  assert.deepEqual(check, { verdict: "hold", reason: "not_listed", sentence: "The eHVD does not list Dr. Erika Brandl." });
+});
+
 test("a physician of another specialty is held as the wrong role", async () => {
   const document = lab((m) => m.replace("# Labor Kanalstraße:", "# Klinikum Beispielstadt:").replace("Dr. Eva Brandl, lab physician", "Dr. Lena Hofer, internist"));
   assert.deepEqual(await run({ document, org: "Klinikum Beispielstadt", sender: stefan }), {
@@ -96,7 +111,25 @@ test("the OID in the login must belong to the person the document names", async 
 
 test("an eHVD that is down or answers 6003 is a hold, never a pass", async () => {
   const down = await checkRelease({ document: lab(), org: "Labor Kanalstraße", sender: eva }, createEhvdClient({ url: "http://127.0.0.1:9/" }));
-  assert.deepEqual(down, { verdict: "hold", reason: "ehvd_unavailable", sentence: "The eHVD could not be reached to confirm Dr. Eva Brandl." });
+  assert.deepEqual(down, { verdict: "hold", reason: "ehvd_unreachable", sentence: "The eHVD could not be reached to confirm Dr. Eva Brandl." });
   const fault = await run({ document: lab(), sender: { ...eva, gdaOid: "1.2.40.0.34.3.1.99.9.6003" } });
-  assert.deepEqual(fault, { verdict: "hold", reason: "ehvd_unavailable", sentence: "The eHVD could not be reached to confirm Dr. Eva Brandl." });
+  assert.deepEqual(fault, { verdict: "hold", reason: "ehvd_unreachable", sentence: "The eHVD could not be reached to confirm Dr. Eva Brandl." });
+});
+
+test("the extra test documents: the release check finds the physician who validated or wrote them", async () => {
+  // track/scenario/extra/index.md, column Expected. The three blocked documents stop at the patient check first.
+  const extra = (file: string) => readFileSync(new URL(`../../../track/scenario/extra/${file}`, import.meta.url), "utf8");
+  const sophie = { givenName: "Sophie", familyName: "Lindner-Pichler", gdaOid: null };
+  const karl = { givenName: "Karl Heinz", familyName: "Moser-Wallner", gdaOid: null };
+  const cases: [string, ReleaseInput["sender"], string, "claim" | "search", string][] = [
+    ["lab-result-maria-beispiel-blood-count.md", eva, "Labor Kanalstraße", "claim", EVA_OID],
+    ["lab-result-maria-beispiel-kidney.md", sophie, "Labor Kanalstraße", "search", EVA_OID],
+    ["lab-result-maria-beispiel-metabolic.md", sophie, "Labor Kanalstraße", "search", EVA_OID],
+    ["rehab-report-maria-beispiel-2025.md", stefan, "Reha Waldblick", "search", "1.2.40.0.34.3.2.99.1.3"],
+    ["rehab-report-maria-beispiel-2024.md", karl, "Reha Waldblick", "search", "1.2.40.0.34.3.2.99.1.3"],
+  ];
+  for (const [file, sender, org, via, oid] of cases) {
+    const check = await checkRelease({ document: parsed(extra(file)), org, sender }, client);
+    assert.deepEqual(check.verdict === "pass" ? [check.via, check.practitioner.id.id] : check, [via, oid], file);
+  }
 });

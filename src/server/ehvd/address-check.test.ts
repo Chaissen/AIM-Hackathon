@@ -38,6 +38,6 @@ test("an address the eHVD cannot confirm is never a pass", async () => {
   assert.deepEqual(await checkAddress(email("eva.brandl@labor-kanal.example", "Labor Kanal"), client), { result: "unchecked", reason: "organisation_not_listed" });
   assert.deepEqual(await checkAddress(email("x@y.example", "Labor & Partner"), client), { result: "unchecked", reason: "not_searchable" });
   const unreachable = await checkAddress(email("eva.brandl@labor-kanal.example"), down);
-  assert.deepEqual(unreachable, { result: "unchecked", reason: "ehvd_unavailable" });
+  assert.deepEqual(unreachable, { result: "unchecked", reason: "ehvd_unreachable" });
   assert.equal(addressWarning(unreachable, "Labor Kanalstraße"), "The eHVD could not be reached, so the address could not be checked.");
 });
