@@ -480,3 +480,43 @@ test("a key with its value on the next line is refused without the model when it
   assert.deepEqual(doc.patient, { name: "Maria Beispiel", birthDate: "1961-03-12" });
   assert.equal(checkAnswerPatient(doc.patient, { name: "Maria Beispiel", birthDate: "1961-03-12" }, maria).pass, true);
 });
+
+// #46 review: only a value that reads as one is taken from the next line or a table's header row.
+
+test("a sentence after a bare Patient key is not a patient line in the fallback", async () => {
+  for (const extra of [
+    "**Patient:**\n\n72-year-old woman after a total hip replacement on the left.",
+    "**Patient:**\n72-year-old woman after a total hip replacement on the left.",
+    "Patient:\nThe patient was admitted on 3 May.",
+  ]) {
+    assert.equal((await record(insertAfter(lab, "Reported: 22.10.2026 11:40\n", extra), goodLab())).patient.name, "Maria Beispiel", extra);
+    assert.equal((await record(`${rehab}\n${extra}\n`, goodRehab())).patient.name, "Maria Beispiel", extra);
+  }
+});
+
+test("a two-column table with column names in its header is read by column in the fallback", async () => {
+  const table = (head: string, row: string) => `\n## Details\n\n${head}\n|---|---|\n${row}\n`;
+  for (const [head, row] of [
+    ["| Patient | Ward |", "| Maria Beispiel | 3 |"],
+    ["| Patient | Date of birth |", "| Maria Beispiel | 12.03.1961 |"],
+    ["| Date of birth | Age |", "| 12 March 1961 | 65 |"],
+  ]) {
+    assert.deepEqual((await record(`${rehab}${table(head, row)}`, goodRehab())).patient, { name: "Maria Beispiel", birthDate: "1961-03-12" }, head);
+  }
+  assert.deepEqual(await refused(`${rehab}${table("| Patient | Ward |", "| Max Beispiel | 3 |")}`), ["several-patients"]);
+  assert.deepEqual(await refused(`${rehab}${table("| Patient | Date of birth |", "| Max Beispiel | 01.01.1960 |")}`), ["several-patients", "several-birth-dates"]);
+  assert.deepEqual(await refused(`${rehab}${table("| Date of birth | Age |", "| 1 January 1960 | 66 |")}`), ["several-birth-dates"]);
+});
+
+test("a next-line value with DOB, a backslash hard break, an HTML block, or a dash is read in the fallback", async () => {
+  const cases: [string, string[]][] = [
+    ["Patient:\nMax Beispiel DOB: 01.01.1960", ["several-patients", "several-birth-dates"]],
+    ["Patient:\\\nMax Beispiel", ["several-patients"]],
+    ["Patient:\n<div>Max Beispiel</div>", ["several-patients"]],
+    ["Patient -\nMax Beispiel", ["several-patients"]],
+  ];
+  for (const [line, safety] of cases) assert.deepEqual(await refused(insertAfter(lab, "Reported: 22.10.2026 11:40\n", line)), safety, line);
+  for (const line of ["Patient:\nMaria Beispiel DOB: 12.03.1961", "Patient:\\\nMaria Beispiel", "Patient:\n<div>Maria Beispiel</div>", "Patient -\nMaria Beispiel"]) {
+    assert.equal((await record(insertAfter(lab, "Reported: 22.10.2026 11:40\n", line), goodLab())).patient.name, "Maria Beispiel", line);
+  }
+});

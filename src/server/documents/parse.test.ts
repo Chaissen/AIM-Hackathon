@@ -364,3 +364,62 @@ test("image alt text alone on its line names the patient like link text, in ever
     assert.deepEqual(result.safety, ["several-patients"]);
   }
 });
+
+/** Each extra text against Maria's file: the refusals it must give, or none when it must be accepted. */
+function expectSafety(cases: [string, string[]][], bases = [labLf(), rehabLf(), referral]) {
+  for (const base of bases) {
+    for (const [extra, safety] of cases) {
+      const result = parseDocument(`${base}${extra}`);
+      if (safety.length) assert.deepEqual(result.ok ? [] : result.safety, safety, extra);
+      else assert.ok(result.ok, `${extra}: ${result.ok ? "" : result.errors.join("; ")}`);
+    }
+  }
+}
+
+// #46 review: only a value that reads as one is taken from the next line or a table's header row.
+
+test("a sentence after a bare Patient key is not a patient line", () => {
+  expectSafety([
+    ["\n**Patient:**\n\n72-year-old woman after a total hip replacement on the left.\n", []],
+    ["\n**Patient:**\n72-year-old woman after a total hip replacement on the left.\n", []],
+    ["\nPatient:\nThe patient was admitted on 3 May.\n", []],
+    ["\nPatient:\nAdmitted for rehabilitation\n", []],
+    ["\nDate of birth:\nunknown, see the referral.\n", []],
+  ]);
+});
+
+test("a two-column table with column names in its header is read by column", () => {
+  const table = (head: string, row: string) => `\n## Details\n\n${head}\n|---|---|\n${row}\n`;
+  expectSafety([
+    [table("| Patient | Ward |", "| Maria Beispiel | 3 |"), []],
+    [table("| Patient | Date of birth |", "| Maria Beispiel | 12.03.1961 |"), []],
+    [table("| Date of birth | Age |", "| 12 March 1961 | 65 |"), []],
+    [table("| Patient | Ward |", "| Max Beispiel | 3 |"), ["several-patients"]],
+    [table("| Ward | Patient |", "| 3 | Max Beispiel |"), ["several-patients"]],
+    [table("| Patient | Date of birth |", "| Max Beispiel | 01.01.1960 |"), ["several-patients", "several-birth-dates"]],
+    [table("| Date of birth | Age |", "| 1 January 1960 | 66 |"), ["several-birth-dates"]],
+    // `Name` stays a header-only key in a column table too.
+    [table("| Name | Phone |", "| Stefan Kern | +43 660 000 0101 |"), []],
+    // A lab report with a second table is refused as `several-tables` already.
+  ], [rehabLf(), referral]);
+});
+
+test("a next-line value with a birth clause after DOB is read as the patient line, as on one line", () => {
+  expectSafety([
+    ["\nPatient:\nMax Beispiel DOB: 01.01.1960\n", ["several-patients", "several-birth-dates"]],
+    ["\nPatient:\nMaria Beispiel DOB: 12.03.1961\n", []],
+    ["\nPatient:\nMax Beispiel born: 1 January 1960\n", ["several-patients", "several-birth-dates"]],
+  ]);
+});
+
+test("a backslash hard break, an HTML block, or a dash also put the value on the next line", () => {
+  expectSafety([
+    ["\nPatient:\\\nMaria Beispiel\n", []],
+    ["\nPatient:\\\nMax Beispiel\n", ["several-patients"]],
+    ["\nPatient:\n<div>Maria Beispiel</div>\n", []],
+    ["\nPatient:\n<div>Max Beispiel</div>\n", ["several-patients"]],
+    ["\nPatient:\n\n<div>\nMax Beispiel\n</div>\n", ["several-patients"]],
+    ["\nPatient -\nMaria Beispiel\n", []],
+    ["\nPatient -\nMax Beispiel\n", ["several-patients"]],
+  ]);
+});

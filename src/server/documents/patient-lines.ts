@@ -73,14 +73,45 @@ function keyValue(keyPart: string, valuePart: string, header: boolean): KeyLine 
   return { key, norm, value, header };
 }
 
-/** Link text instead of the link, no HTML tags, straight apostrophes, and ASCII colons. */
+/** Link text instead of the link, no HTML tags, straight apostrophes, ASCII colons, and no `\` hard break at the end. */
 const unmark = (text: string) =>
   text
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/<[^>]*>/g, " ")
     .replace(/[’‘ʼ´`]/g, "'")
     .replace(/[：﹕]/g, ":")
+    .replace(/\\\s*$/, "")
     .trim();
+
+/** `12.03.1961`, `1961-03-12`, `12 March 1961`, or `March 12, 1961`, also an impossible date such as `31.02.1961`. */
+const DATE_SHAPE = /^(?:\d{1,4}[./-] ?\d{1,2}[./-] ?\d{2,4}|\d{1,2}\.? \p{L}{3,}\.? \d{4}|\p{L}{3,}\.? \d{1,2},? \d{4})$/u;
+const looksLikeDate = (text: string) => DATE_SHAPE.test(text.replace(/\s+/g, " ").trim().replace(/[.,;]$/, ""));
+const NAME_WORD = /^\p{L}[\p{L}'.-]*$/u;
+/** `Maria Beispiel` or `BEISPIEL Maria`: a few words of letters, the first and last capitalised, not a sentence. */
+function looksLikeName(text: string, minWords: number): boolean {
+  const words = text.trim().split(/\s+/);
+  return (
+    words.length >= minWords &&
+    words.length <= 5 &&
+    words.every((w) => NAME_WORD.test(w)) &&
+    /^\p{Lu}/u.test(words[0]) &&
+    /^\p{Lu}/u.test(words[words.length - 1]) &&
+    !/[.!?;:]$/.test(text.trim())
+  );
+}
+
+/**
+ * The value reads as a value for this identity key, not as a sentence or another key: a date for a birth date key,
+ * and for a patient key a name of two to five words, optionally with a birth clause. Only a value the scan takes from
+ * another place than the key's own line must pass: the next line, or the header row of a two-column table.
+ */
+function plausibleValue(norm: string, value: string): boolean {
+  if (IDENTITY_KEYS.has(value.toLowerCase().replace(/[*_:]/g, "").trim())) return false;
+  if (BIRTH_KEYS.has(norm) || HEADER_BIRTH_KEYS.has(norm)) return looksLikeDate(value);
+  if (FIRST_KEYS.has(norm) || LAST_KEYS.has(norm)) return looksLikeName(value, 1);
+  const split = splitPatientValue(value);
+  return split !== null && looksLikeName(split.name, 2) && (split.birth === null || looksLikeDate(split.birth));
+}
 
 /**
  * `**Patient name:** Max`, `Patient’s name: Max`, `- Patient:Max`, `Patient： Max`, `[Patient: Max](#)`, or
@@ -97,30 +128,45 @@ export function toKeyLine(line: string, header = true): KeyLine | null {
 }
 
 /**
- * `Patient:`, `**Date of birth:**`, or `## Patient name:` with nothing after the colon: a key that identifies the
- * patient, with its value on the next line. Other keys are not read this way.
+ * `Patient:`, `**Date of birth:**`, `## Patient name:`, or `Patient -` with nothing after the separator: a key that
+ * identifies the patient, with its value on the next line. Other keys are not read this way.
  */
 export function isBareIdentityKey(line: string): boolean {
-  const clean = unmark(line).replace(/[\s*_]+$/, "");
-  const kl = clean.endsWith(":") ? keyValue(clean.slice(0, -1), "-", true) : null;
+  const m = unmark(line)
+    .replace(/[\s*_]+$/, "")
+    .match(/^(.+?)(?::|\s[-–—])$/);
+  const kl = m ? keyValue(m[1], "-", true) : null;
   return kl !== null && IDENTITY_KEYS.has(kl.norm);
 }
 
+/** `Max Beispiel DOB` as the key of `Max Beispiel DOB: 01.01.1960`: a name with a birth clause, not a key. */
+const ENDS_IN_BIRTH_KEY = /\s(?:born|dob|d\.o\.b|date of birth)$/;
+
 /**
- * The rows of a key/value table as key lines, such as `| Patient | Max Beispiel |` or `| **Date of birth:** | 01.01.1960 |`.
- * Only a table with exactly two columns is one, and only a row whose first cell is a key counts, the header row too.
- * A lab result table has more columns, and the first column of a two-column one names tests, never the patient.
+ * The rows of a two-column table as key lines. A lab result table has more columns, and the first column of a
+ * two-column one names tests, never the patient. The header row decides the layout:
+ * - Key/value, such as `| Patient | Max Beispiel |` or `| Ward | 3 |`: every row whose first cell is a key, the header
+ *   row too, such as `| **Date of birth:** | 01.01.1960 |`.
+ * - Columns, when the second header cell is an identity key, or the first is one and the second is no value for it,
+ *   such as `| Patient | Ward |` or `| Date of birth | Age |`: each data row gives each column's key with its cell.
  */
 export function keyValueRows(rows: string[][], header: boolean): KeyLine[] {
   if (!rows.length || rows.some((cells) => cells.length !== 2)) return [];
-  return rows.flatMap(([key, value]) => keyValue(unmark(key).replace(/[\s*_]*:[\s*_]*$/, ""), unmark(value), header) ?? []);
+  const cells = rows.map((r) => r.map((c) => unmark(c)));
+  const keyCell = (cell: string) => cell.replace(/[\s*_]*:[\s*_]*$/, "");
+  const [k0, k1] = cells[0].map((c) => keyValue(keyCell(c), "-", header));
+  const columns = (k1 && IDENTITY_KEYS.has(k1.norm)) || (k0 && IDENTITY_KEYS.has(k0.norm) && !plausibleValue(k0.norm, cells[0][1]));
+  if (columns) return cells.slice(1).flatMap((row) => [k0, k1].flatMap((k, j) => (k && keyValue(k.key, row[j], header)) || []));
+  return cells.flatMap(([key, value]) => keyValue(keyCell(key), value, header) ?? []);
 }
 
 /**
- * Every key line: paragraphs, headings, list items, code blocks, HTML blocks, and the rows of key/value tables.
+ * Every key line: paragraphs, headings, list items, code blocks, HTML blocks, and the rows of two-column tables.
  * A key that identifies the patient alone on its line takes the next line as its value, in the same block or as the
- * first line of the next paragraph, unless that line is a key line itself. A table follows `headerBlock()`: the header
- * block ends at it, so `| Name | Stefan Kern |` never counts, while `| Patient | … |` counts anywhere.
+ * first line of the next paragraph or HTML block, but only a value that reads as one (`plausibleValue()`), so
+ * `Patient:` over a sentence names no one. A key line is never that value, except one whose key ends in a birth key,
+ * such as `Max Beispiel DOB: 01.01.1960`. A table follows `headerBlock()`: the header block ends at it, so
+ * `| Name | Stefan Kern |` never counts, while `| Patient | … |` counts anywhere.
  */
 export function keyLines(markdown: string): KeyLine[] {
   const lines: KeyLine[] = [];
@@ -142,13 +188,15 @@ export function keyLines(markdown: string): KeyLine[] {
     } else if (t.type === "inline" && row) row.push(t.content);
     if (table || t.type === "hr") bare = null;
     if (table || !["inline", "fence", "code_block", "html_block"].includes(t.type)) return;
-    // Only a paragraph gives the value of a key above it, never a heading or a block further down.
-    if (t.type !== "inline" || tokens[i - 1]?.type !== "paragraph_open") bare = null;
-    for (const line of t.content.split("\n").filter((l) => l.trim())) {
+    // Only a paragraph or an HTML block gives the value of a key above it, never a heading or a code block.
+    if (t.type !== "html_block" && (t.type !== "inline" || tokens[i - 1]?.type !== "paragraph_open")) bare = null;
+    for (const line of t.content.split("\n").filter((l) => unmark(l))) {
       const isBare = isBareIdentityKey(line);
-      const kl = toKeyLine(line, header.open) ?? (bare && !isBare ? toKeyLine(`${bare.line} ${line}`, bare.header) : null);
+      const own = toKeyLine(line, header.open);
+      const joined = bare && !isBare && (!own || ENDS_IN_BIRTH_KEY.test(own.norm)) ? toKeyLine(`${bare.line} ${line}`, bare.header) : null;
+      const kl = joined && plausibleValue(joined.norm, joined.value) ? joined : own;
       if (kl) lines.push(kl);
-      bare = isBare ? { line, header: header.open } : null;
+      bare = isBare ? { line: unmark(line), header: header.open } : null;
     }
   });
   return lines;
