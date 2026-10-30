@@ -2,7 +2,7 @@ import type { LabResult, PersonLine, RehabReport } from "@/server/documents/type
 import { isSubset, nameWords } from "@/server/identity/names";
 
 import { ehvd, type EhvdClient } from "./client";
-import { ELGA_ROLE, findOrganisation, GTELV_ROLE, hasCode, isActive, isPerson, SPECIALTY } from "./directory";
+import { ELGA_ROLE, findOrganisation, GTELV_ROLE, hasCode, isActive, isPerson, sameOrganisationName, SPECIALTY } from "./directory";
 import type { GdaDescriptor } from "./soap";
 
 // The release check when an answer arrives, after the patient check (docs/IDENTITY.md, "Who may release a document",
@@ -33,7 +33,7 @@ export type ReleaseHoldReason =
 
 export type ReleaseCheck =
   | { verdict: "pass"; via: "claim" | "search"; practitioner: GdaDescriptor; organisation: GdaDescriptor }
-  /** `reason` for the audit log, `sentence` for the held notice (docs/ARCHITECTURE.md, "Matrix bot"). */
+  /** `reason` as a code, `sentence` for the held notice (docs/ARCHITECTURE.md, "Matrix bot"). */
   | { verdict: "hold"; reason: ReleaseHoldReason; sentence: string };
 
 export type ReleaseInput = {
@@ -44,7 +44,7 @@ export type ReleaseInput = {
   sender: { givenName: string; familyName: string; gdaOid: string | null };
 };
 
-/** Persons per name search. The service-wide maximum, so a common name does not turn into fault 6005. */
+/** Persons per name search: the service-wide maximum, so only a very common family name turns into fault 6005. */
 const PERSON_RESULTS = 200;
 
 const displayName = (person: PersonLine) => [...person.titles, person.given, person.family].filter(Boolean).join(" ");
@@ -60,17 +60,13 @@ const sameName = (document: NameWords, other: { given: string; family: string })
 
 const entryName = (gda: GdaDescriptor) => ({ given: gda.firstname ?? "", family: gda.surname });
 
-const sameOrganisationName = (a: string, b: string) => {
-  const [x, y] = [nameWords(a), nameWords(b)];
-  return x.size > 0 && x.size === y.size && isSubset(x, y);
-};
-
 /** What the document type needs of the responsible person (docs/IDENTITY.md, "The release check"). */
 const hasRequiredRole = (type: "lab-result" | "rehab-report", gda: GdaDescriptor) =>
   type === "lab-result"
     ? hasCode(gda.roles.role, GTELV_ROLE, ["158", "159"]) && hasCode(gda.roles.specialisation, SPECIALTY, ["19"])
     : hasCode(gda.roles.elgaRole, ELGA_ROLE, ["700"]);
 
+/** `person` is null when the hold is about the organisation, so the sentence names the organisation. */
 function sentence(reason: ReleaseHoldReason, input: ReleaseInput, person: PersonLine | null): string {
   const name = person ? displayName(person) : "";
   const { org, document } = input;
@@ -119,7 +115,11 @@ function judge(type: "lab-result" | "rehab-report", person: GdaDescriptor, organ
 export async function checkRelease(input: ReleaseInput, client: EhvdClient = ehvd): Promise<ReleaseCheck> {
   const { document, org, sender } = input;
   const person = document.type === "lab-result" ? document.validatedBy : document.writtenBy;
-  const hold = (reason: ReleaseHoldReason): ReleaseCheck => ({ verdict: "hold", reason, sentence: sentence(reason, input, person) });
+  const hold = (reason: ReleaseHoldReason, about: PersonLine | null = person): ReleaseCheck => ({
+    verdict: "hold",
+    reason,
+    sentence: sentence(reason, input, about),
+  });
 
   if (!person) return hold("no_responsible_person");
   const name: NameWords = { given: nameWords(person.given), family: nameWords(person.family) };
@@ -129,7 +129,7 @@ export async function checkRelease(input: ReleaseInput, client: EhvdClient = ehv
   const lookup = await findOrganisation(client, org);
   if (!lookup.ok) {
     const reason = ({ not_listed: "organisation_not_listed", several: "several_organisations", not_searchable: "not_searchable", ehvd_unreachable: "ehvd_unreachable" } as const)[lookup.reason];
-    return hold(reason);
+    return hold(reason, null);
   }
   const { organisation } = lookup;
   if (document.type === "rehab-report" && !hasCode(organisation.roles.role, GTELV_ROLE, ["300", "301"])) return hold("organisation_not_hospital");
@@ -140,30 +140,33 @@ export async function checkRelease(input: ReleaseInput, client: EhvdClient = ehv
     if (!result.ok) return hold(result.failure.kind === "bad_request" ? "not_searchable" : "ehvd_unreachable");
     const entry = result.value;
     if (!entry || !isPerson(entry)) return hold("not_listed");
-    if (!sameName(name, entryName(entry))) return hold("claim_differs");
+    if (entry.id.id !== sender.gdaOid || !sameName(name, entryName(entry))) return hold("claim_differs");
     const reason = judge(document.type, entry, organisation.id.id);
     return reason ? hold(reason) : { verdict: "pass", via: "claim", practitioner: entry, organisation };
   }
 
-  // Otherwise the name is the only link: exactly one active member of the organisation with that name. The hits are
-  // compared with the document's name here too, so the decision never rests on how the eHVD matches names.
-  const result = await client.gdaSearch({
-    firstname: person.given,
-    surname: person.family,
-    maxResults: PERSON_RESULTS,
-    ehvdstatus: "Aktiv",
-  });
+  // Otherwise the name is the only link: exactly one active member of the organisation with that name. The search asks
+  // for the family name only, so a given name the eHVD writes differently, such as "Johanna Maria" for "Johanna", still
+  // comes back. It keeps inactive entries, so the notice can say that a physician is not active. Only a family name too
+  // common for one answer (6005) adds the given name. Every hit is compared with the document's name here, so the
+  // decision never rests on how the eHVD matches names.
+  const search = (firstname?: string) => client.gdaSearch({ ...(firstname ? { firstname } : {}), surname: person.family, maxResults: PERSON_RESULTS });
+  let result = await search();
+  if (!result.ok && result.failure.kind === "fault" && result.failure.code === 6005) result = await search(person.given);
   if (!result.ok) {
     const { failure } = result;
     if (failure.kind === "bad_request") return hold("not_searchable");
     if (failure.kind === "fault" && failure.code === 6005) return hold("several_matches");
     return hold("ehvd_unreachable");
   }
-  const people = result.value.filter((gda) => isPerson(gda) && isActive(gda) && sameName(name, entryName(gda)));
+  const people = result.value.filter((gda) => isPerson(gda) && sameName(name, entryName(gda)));
   if (people.length === 0) return hold("not_listed");
   const members = people.filter((gda) => gda.relations.memberof.includes(organisation.id.id));
   if (members.length === 0) return hold("not_member");
-  if (members.length > 1) return hold("several_matches");
-  const reason = judge(document.type, members[0], organisation.id.id);
-  return reason ? hold(reason) : { verdict: "pass", via: "search", practitioner: members[0], organisation };
+  const active = members.filter(isActive);
+  if (active.length > 1) return hold("several_matches");
+  // No active member: judge gives not_active for the inactive one.
+  const practitioner = active[0] ?? members[0];
+  const reason = judge(document.type, practitioner, organisation.id.id);
+  return reason ? hold(reason) : { verdict: "pass", via: "search", practitioner, organisation };
 }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
+import { createServer, type ServerResponse } from "node:http";
 import { after, before, test } from "node:test";
 
 import { createEhvdClient, type EhvdClient } from "./client";
@@ -98,6 +98,59 @@ test("the firewall's empty 403, a closed port, and a timeout are unreachable", a
     await firewall.close();
     silent.closeAllConnections();
     await new Promise<void>((resolve) => silent.close(() => resolve()));
+  }
+});
+
+/** A server that answers every request with `answer`, for the cases the mock never produces. */
+async function answering(answer: (response: ServerResponse) => void) {
+  const server = createServer((_, response) => answer(response));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as { port: number };
+  return { client: createEhvdClient({ url: `http://127.0.0.1:${port}/` }), close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
+}
+const soap = (body: string) =>
+  `<?xml version="1.0" encoding="UTF-8"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body>${body}</s:Body></s:Envelope>`;
+
+test("answers that are not the SOAP the WSDL describes are bad responses, never hits", async () => {
+  const cases: [string, (response: ServerResponse) => void, string][] = [
+    ["HTTP 500 with an HTML page", (r) => r.writeHead(500, { "content-type": "text/html" }).end("<html><body>Error</body></html>"), "bad_response"],
+    ["HTTP 400 without a fault", (r) => r.writeHead(400).end(soap(`<GdaIndexResponseList xmlns="eHVD"/>`)), "bad_response"],
+    ["an answer over 4 MiB", (r) => r.writeHead(200).end(soap(`<GdaIndexResponseList xmlns="eHVD">${" ".repeat(5 * 1024 * 1024)}</GdaIndexResponseList>`)), "bad_response"],
+    ["bytes that are not UTF-8", (r) => r.writeHead(200).end(Buffer.from([0x3c, 0xff, 0xfe, 0x3e])), "bad_response"],
+    ["a gda in no namespace", (r) => r.writeHead(200).end(soap(`<GdaIndexResponseList xmlns="eHVD"><gda xmlns=""><surname>Brandl</surname></gda></GdaIndexResponseList>`)), "bad_response"],
+    ["a redirect", (r) => r.writeHead(302, { location: "http://127.0.0.1:9/" }).end(), "unreachable"],
+  ];
+  for (const [label, answer, kind] of cases) {
+    const server = await answering(answer);
+    try {
+      const result = await server.client.gdaSearch({ surname: "Brandl", maxResults: 10 });
+      assert.equal(!result.ok && result.failure.kind, kind, label);
+    } finally {
+      await server.close();
+    }
+  }
+});
+
+test("a deeply nested answer is refused at once", async () => {
+  const deep = `<GdaIndexResponseList xmlns="eHVD">${"<a>".repeat(40_000)}${"</a>".repeat(40_000)}</GdaIndexResponseList>`;
+  const server = await answering((r) => r.writeHead(200).end(soap(deep)));
+  try {
+    const started = performance.now();
+    const result = await server.client.gdaSearch({ surname: "Brandl", maxResults: 10 });
+    assert.equal(!result.ok && result.failure.kind, "bad_response");
+    assert.ok(performance.now() - started < 1000, "the parser stops at the depth limit");
+  } finally {
+    await server.close();
+  }
+});
+
+test("a fault without the number in soap:Detail gets it from the handbook's message", async () => {
+  const fault = `<s:Fault><s:Code><s:Value>s:Receiver</s:Value></s:Code><s:Reason><s:Text xml:lang="en">No compliance found!</s:Text></s:Reason></s:Fault>`;
+  const server = await answering((r) => r.writeHead(500).end(soap(fault)));
+  try {
+    assert.deepEqual(await server.client.getGda({ id: "1.2.40.0.34.3.2.99.1.2" }), { ok: true, value: null });
+  } finally {
+    await server.close();
   }
 });
 

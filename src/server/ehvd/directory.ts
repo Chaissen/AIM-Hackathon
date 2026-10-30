@@ -1,3 +1,5 @@
+import { isSubset, nameWords } from "@/server/identity/names";
+
 import type { EhvdClient, EhvdFailure } from "./client";
 import type { GdaDescriptor } from "./soap";
 
@@ -18,13 +20,20 @@ export const isActive = (gda: GdaDescriptor) => gda.status.ehvdstatus === "Aktiv
 /** One of `codes` from `system` in `values`, which the eHVD writes as `<code system OID>:<code>`. */
 export const hasCode = (values: string[], system: string, codes: string[]) => codes.some((code) => values.includes(`${system}:${code}`));
 
+/** The same name words, both ways. Used for organisations, whose names have no given and family part. */
+export const sameOrganisationName = (a: string, b: string) => {
+  const [x, y] = [nameWords(a), nameWords(b)];
+  return x.size > 0 && x.size === y.size && isSubset(x, y);
+};
+
 export type OrganisationLookup =
   | { ok: true; organisation: GdaDescriptor }
   | { ok: false; reason: "not_listed" | "several" | "not_searchable" | "ehvd_unreachable"; failure?: EhvdFailure };
 
 /**
  * The one active organisation with this name (docs/EHVD.md, "How ordy uses the eHVD"). The search compares the whole
- * name, so "Labor Kanal" does not find Labor Kanalstraße. Persons with the same surname do not count.
+ * name, so "Labor Kanal" does not find Labor Kanalstraße. Persons with the same surname do not count, and every hit is
+ * compared with the name here too, so the result never rests on how the eHVD matches names.
  */
 export async function findOrganisation(client: EhvdClient, name: string): Promise<OrganisationLookup> {
   const result = await client.gdaSearch({ surname: name.trim(), maxResults: 10, ehvdstatus: "Aktiv" });
@@ -34,7 +43,7 @@ export async function findOrganisation(client: EhvdClient, name: string): Promis
     if (failure.kind === "fault" && failure.code === 6005) return { ok: false, reason: "several", failure };
     return { ok: false, reason: "ehvd_unreachable", failure };
   }
-  const found = result.value.filter((gda) => isOrganisation(gda) && isActive(gda));
+  const found = result.value.filter((gda) => isOrganisation(gda) && isActive(gda) && sameOrganisationName(gda.surname, name));
   if (found.length === 0) return { ok: false, reason: "not_listed" };
   if (found.length > 1) return { ok: false, reason: "several" };
   return { ok: true, organisation: found[0] };

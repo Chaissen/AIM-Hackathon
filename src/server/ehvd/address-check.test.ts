@@ -28,6 +28,13 @@ test("M1: labor-kanaI.example with a capital I is a mismatch, with the warning f
   assert.equal(addressWarning(check, "Labor Kanalstraße"), "The address domain labor-kanaI.example does not match Labor Kanalstraße (labor-kanal.example).");
 });
 
+test("only one plain address with an ASCII domain can pass", async () => {
+  // Each of these would end in labor-kanal.example if the check only lowercased the part after the last @.
+  for (const address of ["eva@labor-\u212Aanal.example", "eva@evil.example, x@labor-kanal.example", "eva@evil.example@labor-kanal.example", "eva@labor-kanal.example\n"]) {
+    assert.deepEqual(await checkAddress(email(address), client), { result: "unchecked", reason: "invalid_address" }, JSON.stringify(address));
+  }
+});
+
 test("an SMS has no address check and needs no eHVD", async () => {
   assert.deepEqual(await checkAddress({ channel: "sms", address: "+43 660 000 0101", org: "Reha Waldblick" }, down), { result: "pass" });
 });

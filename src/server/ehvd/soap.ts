@@ -90,6 +90,16 @@ export type GdaDescriptor = {
 export const FAULT_CODES = [6001, 6002, 6003, 6004, 6005, 6006] as const;
 export type FaultCode = (typeof FAULT_CODES)[number];
 
+/** The messages from the handbook (docs/EHVD.md, "Faults"), for a fault whose number is not where the mock puts it. */
+const FAULT_MESSAGES: Record<string, FaultCode> = {
+  "Content is not valid!": 6001,
+  "No compliance found!": 6002,
+  "A general error occurred!": 6003,
+  "Attribute not found!": 6004,
+  "Maximum numbers of compliances exceeded!": 6005,
+  "User/Role is not allowed to use this webservice interface!": 6006,
+};
+
 export type SoapAnswer = { kind: "gdas"; gdas: GdaDescriptor[] } | { kind: "fault"; code: FaultCode | null; message: string };
 
 export class SoapError extends Error {}
@@ -158,13 +168,16 @@ function readDescriptor(gda: XmlElement): GdaDescriptor {
   };
 }
 
-/** The eHVD fault number from `soap:Detail` (docs/EHVD.md, "Our choices"), or null if there is none. */
+/**
+ * The eHVD fault number from `soap:Detail`, where the mock puts it (docs/EHVD.md, "Our choices"). The real layout is not
+ * public, so without one the message from the handbook gives the number. Null if neither does.
+ */
 function readFault(fault: XmlElement): SoapAnswer {
   const reason = childrenNamed(fault, SOAP_ENVELOPE, "Reason")[0];
   const message = reason ? (childrenNamed(reason, SOAP_ENVELOPE, "Text")[0]?.text.trim() ?? "") : "";
   const detail = childrenNamed(fault, SOAP_ENVELOPE, "Detail")[0];
   const number = detail ? Number(child(detail, "code")[0]?.text.trim()) : NaN;
-  const code = (FAULT_CODES as readonly number[]).includes(number) ? (number as FaultCode) : null;
+  const code = (FAULT_CODES as readonly number[]).includes(number) ? (number as FaultCode) : (FAULT_MESSAGES[message] ?? null);
   return { kind: "fault", code, message };
 }
 
@@ -188,6 +201,9 @@ export function readResponse(operation: Operation, xml: string): SoapAnswer {
 
   const expected = OPERATIONS[operation].response;
   if (content.uri !== EHVD_NAMESPACE || content.local !== expected) throw new SoapError(`Expected ${expected}`);
+  // Anything else in the response, such as a gda in no namespace, would otherwise read as fewer hits.
+  const unexpected = content.children.find((element) => element.uri !== EHVD_NAMESPACE || element.local !== "gda");
+  if (unexpected) throw new SoapError(`Unexpected element ${unexpected.local} in ${expected}`);
   const gdas = child(content, "gda").map(readDescriptor);
   if (operation === "GetGDA" && gdas.length > 1) throw new SoapError("GdaIndexResponse with more than one gda");
   return { kind: "gdas", gdas };

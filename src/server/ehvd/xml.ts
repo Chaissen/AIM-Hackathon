@@ -14,8 +14,14 @@ export type XmlElement = {
 export class XmlError extends Error {}
 
 /**
- * Parses one XML document. Throws an XmlError for XML that is not well-formed with namespaces, and for any DOCTYPE:
- * a SOAP message must not have one, and refusing it rules out entity tricks.
+ * The deepest nesting a document may have. A real eHVD answer is about six levels deep. saxes resolves namespaces by
+ * walking the open elements, so without a limit a deeply nested answer would take minutes to parse.
+ */
+export const MAX_DEPTH = 32;
+
+/**
+ * Parses one XML document. Throws an XmlError for XML that is not well-formed with namespaces, for any DOCTYPE
+ * (a SOAP message must not have one, and refusing it rules out entity tricks), and past MAX_DEPTH.
  */
 export function parseXml(xml: string): XmlElement {
   const parser = new SaxesParser({ xmlns: true });
@@ -29,6 +35,7 @@ export function parseXml(xml: string): XmlElement {
     throw new XmlError("A SOAP message must not have a DOCTYPE");
   });
   parser.on("opentag", (tag) => {
+    if (stack.length >= MAX_DEPTH) throw new XmlError(`The document is nested deeper than ${MAX_DEPTH} levels`);
     const element: XmlElement = { uri: tag.uri ?? "", local: tag.local ?? tag.name, children: [], text: "" };
     const parent = stack.at(-1);
     if (parent) parent.children.push(element);

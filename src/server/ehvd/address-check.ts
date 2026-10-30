@@ -12,13 +12,17 @@ export type AddressCheck =
    * The eHVD could not confirm the address. The request waits for Send anyway too, because an unchecked address is
    * never a pass, but nothing was caught, so no `misdelivery_caught`.
    */
-  | { result: "unchecked"; reason: "organisation_not_listed" | "several_organisations" | "no_mail" | "not_searchable" | "ehvd_unreachable" };
+  | {
+      result: "unchecked";
+      reason: "invalid_address" | "organisation_not_listed" | "several_organisations" | "no_mail" | "not_searchable" | "ehvd_unreachable";
+    };
 
-/** The part after the last `@`, as typed. */
-const domainOf = (address: string) => {
-  const at = address.lastIndexOf("@");
-  return at > 0 && at < address.length - 1 ? address.slice(at + 1).trim() : null;
-};
+/**
+ * The domain of one plain address, as typed, or null for anything else: several `@`, a list, spaces, or a domain that is
+ * not ASCII letters, digits, dots, and hyphens. Lowercasing a non-ASCII domain could turn it into the organisation's,
+ * such as the Kelvin sign into `k`.
+ */
+const domainOf = (address: string) => /^[^\s@,;<>]+@([A-Za-z0-9.-]+)$/.exec(address)?.[1] ?? null;
 // Domain names compare case-insensitively, and a trailing dot names the same domain.
 const sameDomain = (a: string, b: string) => a.toLowerCase().replace(/\.$/, "") === b.toLowerCase().replace(/\.$/, "");
 
@@ -29,7 +33,7 @@ export async function checkAddress(
   if (request.channel === "sms") return { result: "pass" };
   const domain = domainOf(request.address);
   // The request procedure accepts only valid email addresses, so this is only a guard.
-  if (!domain) return { result: "unchecked", reason: "not_searchable" };
+  if (!domain) return { result: "unchecked", reason: "invalid_address" };
 
   const lookup = await findOrganisation(client, request.org);
   if (!lookup.ok) {
@@ -45,6 +49,8 @@ export async function checkAddress(
 export function addressWarning(check: Exclude<AddressCheck, { result: "pass" }>, org: string): string {
   if (check.result === "mismatch") return `The address domain ${check.domain} does not match ${org} (${check.expectedDomain}).`;
   switch (check.reason) {
+    case "invalid_address":
+      return "The address is not a single plain email address, so it could not be checked.";
     case "organisation_not_listed":
       return `The eHVD does not list ${org} as an active organisation, so the address could not be checked.`;
     case "several_organisations":
