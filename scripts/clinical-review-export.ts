@@ -21,6 +21,7 @@ const OUT = values.out!;
 const MARIA: ExpectedPatient = { family: "Beispiel", given: ["Maria"], birthDate: "1961-03-12" };
 const PATIENT = { reference: "Patient/maria-beispiel" };
 const ISSUER = "http://localhost:8080/realms/idaustria-sim";
+const DEMO_FHIR_BASE_URL = "http://localhost:8090/fhir";
 
 // eHVD OIDs from docs/EHVD.md, "Directory content". The release check (T15) finds the responsible person by these.
 const EHVD = {
@@ -175,6 +176,7 @@ for (const answer of ANSWERS) {
     filedAt: FILED_AT,
     acceptedByRequester: false,
     findings: [`The eHVD confirms ${fullName(responsible)} as responsible for the content at ${answer.organisation.name}${via}.`],
+    fhirBaseUrl: DEMO_FHIR_BASE_URL,
   });
   const target = path.join(OUT, `${answer.name}.bundle.json`);
   await writeFile(target, `${fixUuids(JSON.stringify(bundle, null, 2))}\n`);
