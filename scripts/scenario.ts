@@ -125,20 +125,19 @@ const steps: Step[] = [
       for (const [name, c] of Object.entries({ database: h.database, fhir: h.fhir, matrix: h.matrix })) if (!c.ok) fail(`${name}: ${c.detail}`);
       await reachable("ordy", `${env.PUBLIC_URL}/api/healthz`);
       await reachable("Keycloak", env.OIDC_METADATA_URL);
-      await reachable("Mailpit", `${env.MAILPIT_API_URL}/api/v1/info`);
       ctx.since = await databaseNow();
       ctx.roomId = (await (await getBotClient()).resolveAlias(roomAlias())) ?? fail(`room ${roomAlias()} not found`);
       ctx.matrixMark = (await roomMessages(ctx.roomId, 1)).chunk[0]?.event_id ?? fail(`room ${roomAlias()} has no events`);
-      return `Postgres, HAPI, Synapse, ordy, Keycloak, and Mailpit answer; the run starts at ${ctx.since.toISOString()} on the Postgres clock`;
+      return `Postgres, HAPI, Synapse, ordy, and Keycloak answer; the run starts at ${ctx.since.toISOString()} on the Postgres clock`;
     },
   },
   {
     id: "request-1",
     title: "Request 1: Dr. Hofer asks Dr. Brandl for the lab result by email",
-    needs: "#3 (request.create), #4 (email to Mailpit)",
+    needs: "#3 (request.create), #4 (request email)",
     todo:
       `Call request.create through createCaller as ${mxid(env.MATRIX_HOFER_USER)} with the request 1 fields from docs/ARCHITECTURE.md ("Widget"). ` +
-      "Set ctx.r1 and read the link from the Mailpit message to eva.brandl@labor-kanal.example.",
+      "Set ctx.r1 and read the link from the email to eva.brandl@labor-kanal.example in the team inbox.",
     verify: async (ctx) => {
       const sent = await expectEvent(ctx, need(ctx.r1, "request 1"), "request_sent");
       return `request ${sent.requestId} sent by ${sent.actor}`;
@@ -150,7 +149,7 @@ const steps: Step[] = [
     needs: "#11 (address check), #14 or createCaller (Send anyway), #6 (login), #7 (identity check)",
     todo:
       "Send request 1 again to eva.brandl@labor-kanaI.example and set ctx.m1. Expect awaiting_confirmation, then Send anyway. " +
-      "Open the link from Mailpit, log in as anna.huber / demo-anna, and set ctx.m1Page to the HTML of the page after the login.",
+      "Open the link from the email in the team inbox, log in as anna.huber / demo-anna, and set ctx.m1Page to the HTML of the page after the login.",
     // Caught if the person cannot see the patient or the document type, cannot answer, and the failed identity check is logged.
     verify: async (ctx) => {
       const m1 = need(ctx.m1, "the M1 request");
