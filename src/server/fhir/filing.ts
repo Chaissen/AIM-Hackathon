@@ -249,9 +249,10 @@ export type Filing = { bundle: Bundle; refs: FilingRefs };
 
 function narrative(filing: AnswerFiling, levels: string): string {
   const { parties, sentAt } = filing;
+  const { responsibleKey } = DOCUMENT_TYPES[filing.request.docType];
   const sentences = [
     `Sent by ${displayName(parties.sender)} on ${viennaDay.format(sentAt)} at ${viennaTime.format(sentAt)}.`,
-    ...(parties.author ? [`Written by ${displayName(parties.author)} for ${parties.organization.name}.`] : []),
+    ...(parties.author ? [`${responsibleKey} ${displayName(parties.author)} for ${parties.organization.name}.`] : []),
     `Identity checked with ${parties.identityProvider.name}${levels ? `, ${levels}` : ""}.`,
     ...(filing.acceptedByRequester ? [`${displayName(parties.requester)} accepted the held answer.`] : []),
     ...(filing.findings ?? []),

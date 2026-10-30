@@ -251,12 +251,25 @@ test("request 2: Dr. Leitner is the author, Stefan Kern the informant without an
   assert.notEqual(filing.prepared.author.reference, filing.prepared.sender.reference);
   assert.deepEqual(provenance.policy, ["urn:aim-t2:identity-policy:rehab-report:v1"]);
   assert.deepEqual(provenance.target, [{ reference: "urn:uuid:document-reference" }]);
-  assert.match(provenance.text?.div ?? "", /Sent by Stefan Kern on 29 October 2026 at 14:11\. Written by Dr\. Johanna Leitner for Reha Waldblick\. Identity checked with ID Austria \(simulation\), full function\./);
+  assert.equal(
+    provenance.text?.div,
+    '<div xmlns="http://www.w3.org/1999/xhtml">Sent by Stefan Kern on 29 October 2026 at 14:11. Written by Dr. Johanna Leitner for Reha Waldblick. Identity checked with ID Austria (simulation), full function.</div>',
+  );
 
   const { resource: task } = only<Task>(bundle, "Task");
   assert.equal(task.description, "Request for a rehab discharge report");
   assert.equal(task.owner?.reference, filing.prepared.sender.reference);
   assert.deepEqual(task.output?.[0]?.valueReference, { reference: "urn:uuid:document-reference" });
+});
+
+test("a lab result sent by someone else names Dr. Brandl under Validated by", () => {
+  const parties: Parties = { ...labParties, sender: { given: "Sophie", family: "Lindner-Pichler", ehvdOid: null }, author: labParties.sender };
+  const prepared = prepareParties(parties, { requestId: 1, uploadSha256: LAB_SHA });
+  const { bundle } = buildFilingBundle(labFiling({ parties, prepared, clinical: labClinical(prepared.author) }));
+  assert.equal(
+    only<Provenance>(bundle, "Provenance").resource.text?.div,
+    '<div xmlns="http://www.w3.org/1999/xhtml">Sent by Sophie Lindner-Pichler on 29 October 2026 at 14:02. Validated by Dr. Eva Brandl for Labor Kanalstraße. Identity checked with ID Austria (simulation), full function, level high.</div>',
+  );
 });
 
 test("a held answer Dr. Hofer accepted carries the accepted-by-requester policy", () => {
