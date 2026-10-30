@@ -53,6 +53,7 @@ export async function acceptAnswer(deps: AnswerDeps, requestId: number, accepted
       organisation: { name: locked.org, ehvdOid: null },
       idToken: held.idToken,
       sentAt: held.sentAt,
+      uploadSha256: held.sha256,
       acceptedByRequester: true,
       findings: [held.reason],
     }),

@@ -87,6 +87,17 @@ const confirmed = (input: ReleaseCheckInput): ReleaseCheckResult => {
 
 const hold = (sentence: string) => (): ReleaseCheckResult => ({ verdict: "hold", reason: "not_member", sentence });
 
+const FILED = {
+  output: "DiagnosticReport/1",
+  targets: ["DiagnosticReport/1"],
+  provenance: "Provenance/2",
+  task: "Task/ordy-request-1",
+  sender: "Practitioner/3",
+  author: "Practitioner/3",
+  organization: "Organization/4",
+  resources: ["DiagnosticReport/1", "Provenance/2", "Practitioner/3", "Organization/4", "Task/ordy-request-1"],
+};
+
 /** Stand-ins that record what the flow asked for. */
 function fakes(release: (input: ReleaseCheckInput) => ReleaseCheckResult | Promise<ReleaseCheckResult> = confirmed) {
   const filed: AnswerToFile[] = [];
@@ -101,7 +112,7 @@ function fakes(release: (input: ReleaseCheckInput) => ReleaseCheckResult | Promi
     },
     fileAnswer: async (answer) => {
       filed.push(answer);
-      return { resources: ["DiagnosticReport/1", "Provenance/2", "Practitioner/3"], provenance: "Provenance/2", sender: "Practitioner/3" };
+      return FILED;
     },
     notify: async (_request, notice) => {
       notices.push(notice);
@@ -127,7 +138,7 @@ test("request 1: Dr. Brandl's lab result is filed with answer_sent and answer_fi
   assert.equal(sent.actorKind, "outside_person");
   assert.deepEqual(Object.keys(sent.detail).sort(), ["sha256", "size"], "the hash and size only, never the document");
   assert.equal(filedEntry.actor, "ordy");
-  assert.deepEqual(filedEntry.detail, { resources: ["DiagnosticReport/1", "Provenance/2", "Practitioner/3"], provenance: "Provenance/2" });
+  assert.deepEqual(filedEntry.detail, FILED);
 
   assert.deepEqual(releaseInputs[0].sender, { givenName: "Eva", familyName: "Brandl", gdaOid: EVA.gdaOid });
   assert.equal(releaseInputs[0].org, request.org);
@@ -139,6 +150,7 @@ test("request 1: Dr. Brandl's lab result is filed with answer_sent and answer_fi
   assert.deepEqual(answer.organisation, { name: request.org, ehvdOid: "1.2.40.0.34.3.1.99.1.2" });
   assert.equal(answer.idToken, idToken, "her own login signs the Provenance");
   assert.equal(answer.acceptedByRequester, false);
+  assert.equal(answer.uploadSha256, sent.detail.sha256, "the upload hash identifies the answer for a retry");
   assert.equal(answer.document.type, "lab-result");
   assert.deepEqual(answer.findings, [
     `The eHVD confirms Dr. Eva Brandl as responsible for the content at ${request.org}, found by the eHVD OID in the ID Austria login.`,

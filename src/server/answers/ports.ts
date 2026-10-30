@@ -1,3 +1,4 @@
+import type { AnswerFiledDetail } from "@/server/audit/record";
 import type { LabResult, RehabReport } from "@/server/documents/types";
 import type { RequestRow } from "@/server/requests/service";
 
@@ -66,24 +67,20 @@ export type AnswerToFile = {
   idToken: string;
   /** When the sender pressed send. */
   sentAt: Date;
+  /** SHA-256 of the upload. With the request id it identifies the answer, so filing it again files nothing new. */
+  uploadSha256: string;
   /** True when Dr. Hofer accepted a held answer. */
   acceptedByRequester: boolean;
   /** Extra sentences for the Provenance narrative, for example the outcome of the release check. */
   findings: string[];
 };
 
-/** The server ids of a filed answer, for `answer_filed` and the `bindings` table. */
-export type FiledAnswer = {
-  /** Every resource the transaction created or reused, for example `DiagnosticReport/12`. */
-  resources: string[];
-  /** For example `Provenance/17`. */
-  provenance: string;
-  /** The sender's Practitioner, for example `Practitioner/9`. */
-  sender: string;
-};
+/** The server ids of a filed answer, the `answer_filed` detail. `sender` also goes into the `bindings` table. */
+export type FiledAnswer = Omit<AnswerFiledDetail, "acceptedBy">;
 
 /**
- * Files one answer as one FHIR transaction: all of it or nothing. Throws when the FHIR server refuses it.
+ * Files one answer as one FHIR transaction: all of it or nothing. Throws when the FHIR server refuses it. Filing the
+ * same answer again (same request and upload hash) files nothing new and returns the same ids.
  * It writes no audit entry; the answer flow writes `answer_filed` in the transaction that sets the request to `filed`.
  */
 export type FileAnswer = (answer: AnswerToFile) => Promise<FiledAnswer>;

@@ -168,6 +168,7 @@ export async function submitAnswer(deps: AnswerDeps, upload: AnswerUpload): Prom
       organisation: { name: locked.org, ehvdOid: release.organisation.id.id },
       idToken,
       sentAt,
+      uploadSha256: sha256,
       acceptedByRequester: false,
       findings: [releaseFinding(responsible, locked.org, release.via)],
     }));

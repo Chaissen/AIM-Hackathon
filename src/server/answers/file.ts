@@ -82,7 +82,7 @@ export async function fileAndRecord(
         requestId,
         actor: SERVICE_ACTOR,
         outcome: "filed",
-        detail: { resources: filed.resources, provenance: filed.provenance, ...(acceptedBy && { acceptedBy }) },
+        detail: { ...filed, ...(acceptedBy && { acceptedBy }) },
       });
       // docs/IDENTITY.md, "Person number binding": the first filed answer binds the person number to the requested name.
       // The Practitioner id is kept only for people the eHVD does not list; the others are found by their eHVD OID.
