@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 
+import { recordAudit } from "@/server/audit/record";
 import { heldAnswers, keptAnswers } from "@/server/db/schema";
 import { parseDocument } from "@/server/documents/parse";
 import { TransitionError } from "@/server/requests/lifecycle";
@@ -16,9 +17,17 @@ export class NoHeldAnswer extends Error {
   }
 }
 
+/** An Accept's filing outcome is unknown: the FHIR server may have the answer, so only Accept again may end it. */
+export class FilingOutcomeOpen extends Error {
+  constructor(readonly requestId: number) {
+    super(`The filing of the answer to request ${requestId} has an open outcome`);
+  }
+}
+
 /**
  * Files the held answer of a request in `answer_held` and sets it to `filed`. `acceptedBy` is the Matrix ID of the
- * network member who accepts; it must be the one who sent the request, and `answer_filed` records it. The Organization
+ * network member who accepts; it must be the one who sent the request, and `request_decided` and `answer_filed` record
+ * it. The Organization
  * and the responsible person carry the eHVD OIDs the release check found before it held, if any. The sender's login
  * claim names the sender only when the sender is not the responsible person; otherwise the check's entry decides,
  * so a claim the eHVD contradicted (`claim_differs`) is never filed.
@@ -80,9 +89,10 @@ export async function acceptAnswer(deps: AnswerDeps, requestId: number, accepted
 }
 
 /**
- * Rejects a held answer: the request is `cancelled` and the answer is deleted. `rejectedBy` must be the network member
- * who sent the request. Null when the request is not `answer_held`, was sent by someone else, or an Accept's filing
- * outcome is still open: the FHIR server may have the answer, so Accept again first.
+ * Rejects a held answer: the request is `cancelled`, the answer is deleted, and `request_decided` names `rejectedBy`.
+ * `rejectedBy` must be the network member who sent the request. Null when the request is not `answer_held` or was sent
+ * by someone else. Throws FilingOutcomeOpen while an Accept's filing outcome is open: the FHIR server may have the
+ * answer, so Accept again first.
  */
 export async function rejectAnswer(deps: Pick<AnswerDeps, "db">, requestId: number, rejectedBy: string): Promise<RequestRow | null> {
   const request = await getRequest(deps.db, requestId);
@@ -90,14 +100,19 @@ export async function rejectAnswer(deps: Pick<AnswerDeps, "db">, requestId: numb
   // hold, and every other state refuses `reject`, so the check still holds when the event runs.
   if (request?.state !== "answer_held" || request.requester !== rejectedBy) return null;
   try {
-    return await applyEvent(deps.db, requestId, "reject", async (tx) => {
+    return await applyEvent(deps.db, requestId, "reject", async (tx, changed, from) => {
       const [kept] = await tx.select({ requestId: keptAnswers.requestId }).from(keptAnswers).where(eq(keptAnswers.requestId, requestId));
-      if (kept) throw new NotRejected();
+      if (kept) throw new FilingOutcomeOpen(requestId);
+      await recordAudit(tx, {
+        event: "request_decided",
+        requestId,
+        actor: { kind: "network_member", id: rejectedBy },
+        outcome: "rejected",
+        detail: { from, to: changed.state },
+      });
     });
   } catch (error) {
-    if (error instanceof NotRejected || error instanceof TransitionError) return null;
+    if (error instanceof TransitionError) return null;
     throw error;
   }
 }
-
-class NotRejected extends Error {}

@@ -6,7 +6,7 @@ import { type AuditActor, type AuditEntry, recordAudit } from "@/server/audit/re
 import type { Db, Tx } from "@/server/db";
 import { bindings, heldAnswers, keptAnswers, requests } from "@/server/db/schema";
 import type { LoginTransition } from "@/server/identity/login";
-import { initialState, isOpen, MAX_FAILED_CHECKS, OPEN_STATES, type RequestEvent, transition, TransitionError } from "./lifecycle";
+import { initialState, isOpen, MAX_FAILED_CHECKS, OPEN_STATES, type RequestEvent, type RequestState, transition, TransitionError } from "./lifecycle";
 import { hashLinkToken, isLinkToken, LINK_TTL_MS, newLinkToken } from "./link-token";
 import { mirrorTask } from "./task";
 
@@ -144,16 +144,17 @@ export type NonLoginEvent = Exclude<RequestEvent, (typeof LOGIN_EVENT)[keyof typ
  * `applyLoginTransition` below. Locks the row, so two events on one request run one after the other.
  * Returns null for an unknown request and throws a TransitionError if the state does not accept the event.
  *
- * `then` runs in the same transaction with the updated request: write the audit entry that belongs to the change there,
- * so the state and the log never disagree. It may update more columns and return the request it read back. Inside a
- * transaction (`db` is a Tx), the event runs in a savepoint, so a failed event leaves the outer transaction usable.
- * The Task follows after the commit; inside a transaction, the caller's commit is still to come, so the caller mirrors.
+ * `then` runs in the same transaction with the updated request and the state it changed from: write the audit entry that
+ * belongs to the change there, so the state and the log never disagree. It may update more columns and return the request
+ * it read back. If it throws, the state change rolls back. Inside a transaction (`db` is a Tx), the event runs in a
+ * savepoint, so a failed event leaves the outer transaction usable. The Task follows after the commit; inside a
+ * transaction, the caller's commit is still to come, so the caller mirrors.
  */
 export async function applyEvent(
   db: Db | Tx,
   id: number,
   event: NonLoginEvent,
-  then?: (tx: Tx, request: RequestRow) => Promise<RequestRow | void>,
+  then?: (tx: Tx, request: RequestRow, from: RequestState) => Promise<RequestRow | void>,
 ): Promise<RequestRow | null> {
   const result = await db.transaction(async (tx) => {
     await expireDueRequests(tx, id);
@@ -163,7 +164,7 @@ export async function applyEvent(
     if ((Object.values(LOGIN_EVENT) as RequestEvent[]).includes(event)) throw new TransitionError(row.state, event);
     const state = transition(row.state, event, row.failedChecks);
     const [updated] = await tx.update(requests).set({ state }).where(eq(requests.id, id)).returning();
-    const result = (await then?.(tx, updated)) ?? updated;
+    const result = (await then?.(tx, updated, row.state)) ?? updated;
     // A held answer lives only while the request is `answer_held`: Accept files it, Reject, Cancel, and expiry drop it.
     // A kept answer lives while an upload or an Accept may still file it: filing ends that, and so do Cancel and expiry.
     if (state !== "answer_held") await tx.delete(heldAnswers).where(eq(heldAnswers.requestId, id));

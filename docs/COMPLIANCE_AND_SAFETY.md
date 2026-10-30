@@ -33,7 +33,7 @@ The check compares whole words. A substring check would block every message, bec
 - The outside person sees nothing about the patient or the document type until the identity check passes. That includes page titles, error messages, and file names.
 - Error pages for a failed check say only that the request is for someone else.
 - If Keycloak or the eHVD cannot be reached, the request service holds the request. It never treats a missing answer as a pass.
-- A held identity or a held answer needs Dr. Hofer to click **Accept** in the widget. The audit log records who accepted and when.
+- A held identity or a held answer needs Dr. Hofer to click **Accept** in the widget. The audit log records who accepted and when, as `request_decided`.
 - Three failed identity checks lock the link.
 
 ## Data we keep

@@ -10,7 +10,6 @@ import { auditLog } from "@/server/db/schema";
 import type { AnswerFiled } from "@/server/fhir/file-answer";
 import type { RequestState } from "@/server/requests/lifecycle";
 
-// The six audit events with who, what, and when. docs/ARCHITECTURE.md, "Audit log".
 // Each event has its own outcome and detail fields: ids, hashes, and check results. Never document text or patient data.
 
 export type AuditEvent = (typeof auditLog.$inferInsert)["event"];
@@ -32,6 +31,7 @@ type Entries = {
     | { outcome: "wrong_person"; detail: { checks: IdentityCheck[] } }
     // Only the upload's hash and which part did not match. The upload itself is discarded.
     | { outcome: "patient_mismatch"; detail: { sha256: string; size: number; nameMatches: boolean; birthDateMatches: boolean } };
+  request_decided: { outcome: "accepted" | "rejected" | "cancelled"; detail: { from: RequestState; to: RequestState } };
 };
 
 export type MisdeliveryReason = Entries["misdelivery_caught"]["outcome"];

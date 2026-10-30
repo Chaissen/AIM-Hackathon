@@ -89,6 +89,8 @@ const toKept = ({ document, requester, sender, author, organisation, idToken, se
  * or Accept gets in between. When the FHIR server certainly has nothing (NotFiled), the kept answer is dropped, and the
  * next upload or Accept builds the answer anew.
  *
+ * With `acceptedBy`, Dr. Hofer's Accept of a held answer, `request_decided` is logged before `answer_filed`.
+ *
  * Returns null when the request no longer accepts `event`, for example because Dr. Hofer cancelled it in between.
  * Throws when the filing fails; the request then stays as it was.
  */
@@ -105,13 +107,23 @@ export async function fileAndRecord(
     const [kept] = await outer.select().from(keptAnswers).where(eq(keptAnswers.requestId, requestId));
     let answer: AnswerToFile | undefined;
     try {
-      const request = await applyEvent(outer, requestId, event, async (tx, locked) => {
+      const request = await applyEvent(outer, requestId, event, async (tx, locked, from) => {
         const [binding] = await tx
           .select()
           .from(bindings)
           .where(and(eq(bindings.given, locked.given), eq(bindings.family, locked.family), eq(bindings.org, locked.org)));
         const known = binding && binding.personNumber === locked.personNumber ? binding.practitionerId : null;
         answer = kept ? { ...kept.answer, request: locked, sentAt: new Date(kept.answer.sentAt) } : { request: locked, ...build(locked, known) };
+        // Dr. Hofer's Accept is her decision, logged as the widget's other decisions are (T05). Filing completes it.
+        if (acceptedBy) {
+          await recordAudit(tx, {
+            event: "request_decided",
+            requestId,
+            actor: { kind: "network_member", id: acceptedBy },
+            outcome: "accepted",
+            detail: { from, to: locked.state },
+          });
+        }
         const filed = await deps.fileAnswer(answer);
         await recordAudit(tx, {
           event: "answer_filed",

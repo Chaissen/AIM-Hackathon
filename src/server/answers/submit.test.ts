@@ -14,7 +14,7 @@ import { fhirFetch } from "@/server/fhir/client";
 import type { Notice } from "@/server/matrix/notices";
 import { applyEvent, applyLoginTransition, createRequest, expireDueRequests, getRequest, type NewRequest, saveIdToken } from "@/server/requests/service";
 import type { AnswerDeps } from "./deps";
-import { acceptAnswer, rejectAnswer } from "./held";
+import { acceptAnswer, FilingOutcomeOpen, rejectAnswer } from "./held";
 import { type AnswerToFile, NotFiled, type ReleaseCheckInput, type ReleaseCheckResult } from "./ports";
 import { submitAnswer } from "./submit";
 
@@ -254,6 +254,13 @@ test("an answer the eHVD does not confirm is held, and Accept files it", { skip:
   assert.deepEqual(filed[0].findings, [reason]);
   const filedEntry = (await auditOf(request.id)).find((e) => e.event === "answer_filed");
   assert.equal(filedEntry?.detail.acceptedBy, HOFER);
+  const decided = (await auditOf(request.id)).filter((e) => e.event === "request_decided");
+  assert.deepEqual(
+    decided.map((e) => [e.actorKind, e.actor, e.outcome, e.detail]),
+    [["network_member", HOFER, "accepted", { from: "answer_held", to: "filed" }]],
+    "the Accept is logged with the filing",
+  );
+  assert.ok(filedEntry && decided[0].id < filedEntry.id, "the decision before the filing");
   assert.equal(filedEntry?.detail.sha256, uploadHash(LAB_MARIA));
   assert.equal((await db.select().from(heldAnswers).where(eq(heldAnswers.requestId, request.id))).length, 0, "filed, so no copy stays");
   assert.equal(notices.at(-1)?.kind, "filed");
@@ -287,7 +294,8 @@ test("an Accept that fails leaves the answer held, and one with an open outcome 
   await assert.rejects(acceptAnswer(timingOut, request.id, HOFER));
   const kept = await keptOf(request.id);
   assert.ok(kept, "the FHIR server may have it");
-  assert.equal(await rejectAnswer(deps, request.id, HOFER), null, "no Reject while the server may have the answer");
+  await assert.rejects(rejectAnswer(deps, request.id, HOFER), FilingOutcomeOpen, "no Reject while the server may have the answer");
+  assert.equal((await getRequest(db, request.id))?.state, "answer_held");
 
   assert.equal((await acceptAnswer(deps, request.id, HOFER))?.state, "filed");
   assert.equal(filed.length, 1);
@@ -302,6 +310,10 @@ test("Reject drops a held answer, only by the one who sent the request", { skip:
 
   assert.equal(await rejectAnswer(deps, request.id, "@someone.else:klinikum.example"), null);
   assert.equal((await rejectAnswer(deps, request.id, HOFER))?.state, "cancelled");
+  assert.deepEqual(
+    (await auditOf(request.id)).filter((e) => e.event === "request_decided").map((e) => [e.actor, e.outcome, e.detail]),
+    [[HOFER, "rejected", { from: "answer_held", to: "cancelled" }]],
+  );
   assert.equal((await db.select().from(heldAnswers).where(eq(heldAnswers.requestId, request.id))).length, 0);
   assert.equal((await getRequest(db, request.id))?.idToken, null, "a closed request keeps no ID token");
 
