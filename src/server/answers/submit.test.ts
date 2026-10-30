@@ -9,12 +9,14 @@ import { UnsecuredJWT } from "jose";
 import { eidSession, type EidSession } from "@/server/auth/eid-session";
 import { db } from "@/server/db";
 import { auditLog, bindings, heldAnswers, keptAnswers, requests } from "@/server/db/schema";
+import { type DocumentReader, HELD_REASON, type ModelReading, readWithCode } from "@/server/documents/fallback";
+import { parseDocument } from "@/server/documents/parse";
 import { uploadHash } from "@/server/documents/patient-check";
 import { fhirFetch } from "@/server/fhir/client";
 import type { Notice } from "@/server/matrix/notices";
 import { applyEvent, applyLoginTransition, createRequest, expireDueRequests, getRequest, type NewRequest, saveIdToken } from "@/server/requests/service";
 import type { AnswerDeps } from "./deps";
-import { acceptAnswer, FilingOutcomeOpen, rejectAnswer } from "./held";
+import { acceptAnswer, FilingOutcomeOpen, modelFinding, rejectAnswer } from "./held";
 import { type AnswerToFile, NotFiled, type ReleaseCheckInput, type ReleaseCheckResult } from "./ports";
 import { submitAnswer } from "./submit";
 
@@ -30,6 +32,11 @@ const LAB_MARIA = doc("lab-result-maria-beispiel.md");
 const LAB_MAX = doc("lab-result-max-beispiel.md");
 const REHAB_MARIA = doc("rehab-report-maria-beispiel.md");
 const maria = { name: "Maria Beispiel", birthDate: "1961-03-12" };
+// Maria's lab result in a format the parser does not know (docs/ARCHITECTURE.md, "AI fallback"), and Max Beispiel's.
+const OTHER_FORMAT = readFileSync(new URL("../documents/fixtures/lab-result-maria-beispiel-other-format.md", import.meta.url), "utf8");
+const MAX_OTHER_FORMAT = OTHER_FORMAT.replace("Patient name: Maria Beispiel", "Patient name: Max Beispiel").replace("12.03.1961", "01.01.1960");
+const LAB_MARIA_OTHER = new TextEncoder().encode(OTHER_FORMAT);
+const LAB_MAX_OTHER = new TextEncoder().encode(MAX_OTHER_FORMAT);
 
 const HOFER = "@lena.hofer:klinikum.example";
 // Dr. Brandl, Dr. Leitner, Labor Kanalstraße, and Reha Waldblick in the synthetic eHVD (docs/EHVD.md).
@@ -137,6 +144,27 @@ function fakes(release: (input: ReleaseCheckInput) => ReleaseCheckResult | Promi
   };
   return { deps, filed, notices, releaseInputs };
 }
+
+/**
+ * A stand-in for the AI fallback's model, never the network. It reads a file as code reads it, so it agrees, and
+ * `change` makes it disagree. It records every file it got.
+ */
+function fakeModel(change: (reading: ModelReading) => void = () => {}) {
+  const calls: string[] = [];
+  const reader: DocumentReader = async (markdown) => {
+    calls.push(markdown);
+    const parsed = parseDocument(markdown);
+    assert.ok(!parsed.ok, "the model reads only files the parser cannot read");
+    const code = readWithCode(markdown, parsed);
+    assert.ok(code.ok, "and only files code can read");
+    const reading = structuredClone(code.reading);
+    change(reading);
+    return { model: "stub-model", output: reading };
+  };
+  return { reader, calls };
+}
+const neverCalled: DocumentReader = async () => assert.fail("the model must not be called");
+const heldOf = async (requestId: number) => (await db.select().from(heldAnswers).where(eq(heldAnswers.requestId, requestId)))[0];
 
 const auditOf = (requestId: number) => db.select().from(auditLog).where(eq(auditLog.requestId, requestId)).orderBy(auditLog.id);
 const events = async (requestId: number) => (await auditOf(requestId)).map((e) => `${e.event}:${e.outcome}`);
@@ -492,4 +520,139 @@ test("two uploads at the same time file once", { skip: noDb }, async () => {
   const results = await Promise.all([1, 2].map(() => submitAnswer(deps, { token, session, file: LAB_MARIA, form: maria })));
   assert.deepEqual(results.map((r) => r.outcome).sort(), ["closed", "filed"]);
   assert.equal(filed.length, 1);
+});
+
+test("AI fallback off: without a model, a file in another format is refused as before", { skip: noDb }, async () => {
+  const { request, token, session } = await verifiedRequest(EVA);
+  const { deps, filed, notices, releaseInputs } = fakes();
+  const parsed = parseDocument(OTHER_FORMAT);
+  assert.ok(!parsed.ok && !parsed.safety.length, "unreadable for its format, not a safety refusal");
+  const asBefore = { outcome: "unreadable", errors: parsed.errors };
+
+  assert.deepEqual(await submitAnswer(deps, { token, session, file: LAB_MARIA_OTHER, form: maria }), asBefore);
+  assert.deepEqual(await submitAnswer({ ...deps, documentReader: null }, { token, session, file: LAB_MARIA_OTHER, form: maria }), asBefore);
+  // Without a model the wide reader does not run either, so Max Beispiel's file in this format is unreadable, as before.
+  const max = parseDocument(MAX_OTHER_FORMAT);
+  assert.ok(!max.ok);
+  assert.deepEqual(await submitAnswer(deps, { token, session, file: LAB_MAX_OTHER, form: maria }), { outcome: "unreadable", errors: max.errors });
+
+  assert.equal(filed.length + notices.length + releaseInputs.length, 0);
+  assert.equal((await getRequest(db, request.id))?.state, "verified");
+  assert.equal(await heldOf(request.id), undefined);
+});
+
+test("AI fallback: a file in another format that the model reads as code does is held for Dr. Hofer", { skip: noDb }, async () => {
+  const { request, token, session } = await verifiedRequest(EVA);
+  const { deps, filed, notices, releaseInputs } = fakes();
+  const model = fakeModel();
+
+  assert.deepEqual(await submitAnswer({ ...deps, documentReader: model.reader }, { token, session, file: LAB_MARIA_OTHER, form: maria }), { outcome: "held" });
+
+  assert.equal(model.calls.length, 1);
+  assert.equal(filed.length, 0, "never filed without Dr. Hofer, also when the eHVD confirms the sender");
+  assert.equal(releaseInputs.length, 1, "the release check still runs, so Accept files with the eHVD's OIDs");
+  assert.equal(releaseInputs[0].document.type, "lab-result");
+  assert.equal((await getRequest(db, request.id))?.state, "answer_held");
+  const held = await heldOf(request.id);
+  assert.equal(held.readByModel, "stub-model");
+  assert.equal(held.sha256, uploadHash(LAB_MARIA_OTHER));
+  assert.ok(held.reason.startsWith(`${HELD_REASON} `), "the hold reason says that a language model read it");
+  assert.match(held.reason, /The eHVD confirms Dr\. Eva Brandl/, "and what the release check found");
+  assert.deepEqual({ organisation: held.organisationOid, practitioner: held.practitionerOid }, { organisation: OID.lab, practitioner: OID.brandl });
+  assert.deepEqual(notices, [{ kind: "held", requestId: request.id, hold: "answer", reason: held.reason }]);
+  assert.doesNotMatch(held.reason, /aPTT|6301-6|1961/, "the notice names no document content");
+  assert.deepEqual(await events(request.id), ["request_sent:sent", "answer_sent:received"]);
+  assert.doesNotMatch(JSON.stringify(await auditOf(request.id)), /aPTT|Analyte|Beispiel|stub-model/, "no document text in the audit log");
+});
+
+test("AI fallback: Max Beispiel's file in another format is discarded before the model sees it, only its hash stays", { skip: noDb }, async () => {
+  const { request, token, session } = await verifiedRequest(EVA);
+  const { deps, filed, notices, releaseInputs } = fakes();
+
+  assert.deepEqual(await submitAnswer({ ...deps, documentReader: neverCalled }, { token, session, file: LAB_MAX_OTHER, form: maria }), {
+    outcome: "patient_mismatch",
+    part: "document",
+  });
+
+  assert.equal((await getRequest(db, request.id))?.state, "verified");
+  const entries = await auditOf(request.id);
+  const caught = entries.find((e) => e.event === "misdelivery_caught");
+  assert.equal(caught?.outcome, "patient_mismatch");
+  assert.deepEqual(caught?.detail, { sha256: uploadHash(LAB_MAX_OTHER), size: LAB_MAX_OTHER.byteLength, nameMatches: false, birthDateMatches: false });
+  assert.doesNotMatch(JSON.stringify(entries), /Max|1960/, "nothing about the other patient in the audit log");
+  assert.equal(filed.length + releaseInputs.length, 0);
+  assert.equal(await heldOf(request.id), undefined);
+  assert.deepEqual(notices, [{ kind: "patient-mismatch", requestId: request.id, patient: "Maria Beispiel" }]);
+});
+
+test("AI fallback: a model that disagrees with code, or fails, keeps and files nothing", { skip: noDb }, async () => {
+  const { request, token, session } = await verifiedRequest(EVA);
+  const { deps, filed, notices, releaseInputs } = fakes();
+  const parsed = parseDocument(OTHER_FORMAT);
+  assert.ok(!parsed.ok);
+  const asBefore = { outcome: "unreadable", errors: parsed.errors };
+  const upload = { token, session, file: LAB_MARIA_OTHER, form: maria };
+
+  const disagreeing = fakeModel((r) => (r.rows[1].valueText = "44"));
+  assert.deepEqual(await submitAnswer({ ...deps, documentReader: disagreeing.reader }, upload), asBefore);
+  assert.equal(disagreeing.calls.length, 1);
+  const otherPatient = fakeModel((r) => (r.patientName = "Max Beispiel"));
+  assert.deepEqual(await submitAnswer({ ...deps, documentReader: otherPatient.reader }, upload), asBefore);
+  const offline: DocumentReader = () => Promise.reject(new Error("fetch failed"));
+  assert.deepEqual(await submitAnswer({ ...deps, documentReader: offline }, upload), asBefore);
+  const offSchema: DocumentReader = async () => ({ model: "stub-model", output: { type: "lab-result" } });
+  assert.deepEqual(await submitAnswer({ ...deps, documentReader: offSchema }, upload), asBefore);
+
+  assert.equal(filed.length + notices.length + releaseInputs.length, 0, "no release check, no notice, nothing filed");
+  assert.equal((await getRequest(db, request.id))?.state, "verified", "the sender can upload the document again");
+  assert.equal(await heldOf(request.id), undefined);
+  assert.equal(await keptOf(request.id), undefined);
+  assert.doesNotMatch(JSON.stringify(await auditOf(request.id)), /"44"|Max/, "the model's values never reach the audit log");
+});
+
+test("AI fallback: a safety refusal never reaches the model", { skip: noDb }, async () => {
+  const { token, session } = await verifiedRequest(EVA);
+  const { deps } = fakes();
+  const twoPatients = OTHER_FORMAT.replace("Patient name: Maria Beispiel", "Patient name: Maria Beispiel\n**Patient:** Max Beispiel");
+  const result = await submitAnswer({ ...deps, documentReader: neverCalled }, { token, session, file: new TextEncoder().encode(twoPatients), form: maria });
+  assert.equal(result.outcome, "unreadable");
+});
+
+test("AI fallback: Accept files exactly the record that was held, without asking the model again", { skip: noDb }, async () => {
+  const { request, token, session, idToken } = await verifiedRequest(EVA);
+  const { deps, filed, notices } = fakes();
+  const model = fakeModel();
+  assert.deepEqual(await submitAnswer({ ...deps, documentReader: model.reader }, { token, session, file: LAB_MARIA_OTHER, form: maria }), { outcome: "held" });
+  const held = await heldOf(request.id);
+
+  const accepted = await acceptAnswer({ ...deps, documentReader: neverCalled }, request.id, HOFER);
+  assert.equal(accepted?.state, "filed");
+  assert.equal(model.calls.length, 1, "the model read the file once, before the hold");
+  const parsed = parseDocument(OTHER_FORMAT);
+  assert.ok(!parsed.ok);
+  const code = readWithCode(OTHER_FORMAT, parsed);
+  assert.ok(code.ok);
+  const [answer] = filed;
+  assert.deepEqual(answer.document, code.document, "code's record, which the model agreed with");
+  assert.ok(answer.document.type === "lab-result");
+  assert.deepEqual(
+    answer.document.rows.map((r) => [r.test, r.value, r.ucum, r.loinc, r.interpretation]),
+    [
+      ["INR (prothrombin time)", 1, null, "6301-6", "N"],
+      ["aPTT", 31, "s", "14979-9", "N"],
+      ["Platelets", 245, "10*9/L", "777-3", "N"],
+      ["Fibrinogen", 3.1, "g/L", "3255-7", "N"],
+    ],
+  );
+  assert.equal(answer.acceptedByRequester, true);
+  assert.equal(answer.idToken, idToken);
+  assert.equal(answer.uploadSha256, uploadHash(LAB_MARIA_OTHER));
+  assert.deepEqual(answer.organisation, { name: request.org, ehvdOid: OID.lab });
+  assert.equal(answer.sender.ehvdOid, OID.brandl);
+  assert.equal(answer.author, null, "she validated it and sent it");
+  assert.deepEqual(answer.findings, [modelFinding("stub-model"), held.reason.slice(HELD_REASON.length + 1)], "the Provenance names the model");
+  assert.match(answer.findings[1], /^The eHVD confirms Dr\. Eva Brandl/);
+  assert.deepEqual((await events(request.id)).slice(-2), ["request_decided:accepted", "answer_filed:filed"]);
+  assert.equal(await heldOf(request.id), undefined);
+  assert.deepEqual(notices.at(-1), { kind: "filed", docType: "lab-result", patient: "Maria Beispiel", sender: "Dr. Eva Brandl", values: { within: 4, outside: 0 } });
 });

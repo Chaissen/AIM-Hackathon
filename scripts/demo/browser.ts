@@ -1,5 +1,5 @@
-// The outside person's browser for `pnpm demo:seed`: opens a request link, logs in at the simulated ID Austria, and
-// uploads an answer, through the same code the web server runs. Nothing here skips a check.
+// The outside person's browser for `pnpm demo:seed` and `pnpm scenario`: opens a request link, logs in at the simulated
+// ID Austria, and uploads an answer, through the same code the web server runs. Nothing here skips a check.
 //
 // - Opening the link calls `findPublicRequest`, as the landing page /r/{token} does, so `link_opened` is logged.
 // - The login calls the route handlers of POST /auth/login and GET /auth/callback in this process. Between them, it
@@ -8,6 +8,8 @@
 //   ID token, and the callback verifies it and runs the identity checks, exactly as for a browser. Nothing needs the
 //   web server on port 3010: the redirect URI only has to be the one the realm allows.
 // - The upload calls `portal.answer` through `createCaller` with the session the callback set.
+// - Only `viewPage` needs the web server: it fetches the page the callback sent the person to, as the browser would
+//   follow the redirect, so `pnpm scenario` can check the HTML the portal really sends (M1).
 //
 // It never prints a link token, an ID token, a person number, or a patient's name (docs/COMPLIANCE_AND_SAFETY.md).
 import { NextRequest } from "next/server";
@@ -18,8 +20,9 @@ import { env } from "@/env";
 import { createCaller } from "@/server/api/root";
 import { createContext } from "@/server/api/trpc";
 import { EID_SESSION_COOKIE, type EidSession, loginTransactionCookie, readEidSession } from "@/server/auth/eid-session";
+import type { AnswerOutcome } from "@/server/answers/submit";
 import type { LoginPage } from "@/server/identity/login";
-import { findPublicRequest } from "@/server/portal/data";
+import { findAnswerContext, findPublicRequest } from "@/server/portal/data";
 
 /** A test citizen from docs/IDENTITY.md. The passwords are the documented demo passwords of the simulated ID Austria. */
 export type Citizen = { username: string; password: string; ip: string };
@@ -70,7 +73,14 @@ async function keycloakLogin(authorizationUrl: string, citizen: Citizen): Promis
   return callback;
 }
 
-export type Login = { page: LoginPage; session: EidSession | null };
+export type Login = {
+  page: LoginPage;
+  session: EidSession | null;
+  // Where the callback sent the person, as path and query. It holds the link token: never print it.
+  landing: string;
+  // The ID Austria session cookie the callback set, as `name=value`, for the next request of this browser.
+  cookie: string | null;
+};
 
 /**
  * The ID Austria login for one request link, as a browser does it: POST /auth/login, Keycloak, GET /auth/callback.
@@ -93,15 +103,75 @@ export async function logIn(token: string, citizen: Citizen): Promise<Login> {
   }
   const page = PAGES[landing.pathname.split("/")[3] ?? ""];
   if (!page) throw new Error(`The callback sent ${citizen.username} to an unknown page`);
-  return { page, session: await readEidSession(finished.cookies.get(EID_SESSION_COOKIE)?.value) };
+  const sessionCookie = finished.cookies.get(EID_SESSION_COOKIE)?.value;
+  return {
+    page,
+    session: await readEidSession(sessionCookie),
+    landing: landing.pathname + landing.search,
+    cookie: sessionCookie ? `${EID_SESSION_COOKIE}=${sessionCookie}` : null,
+  };
 }
 
+/** A step of the outside person that did not end as expected. Its message names usernames, pages, and outcomes only. */
+export class BrowserError extends Error {}
+
+/** Opens the link and logs in, and fails unless the callback sent the person to the `expected` page. */
+export async function visit(token: string, citizen: Citizen, expected: LoginPage): Promise<Login> {
+  if (!(await openLink(token, citizen))) throw new BrowserError(`the link did not open for ${citizen.username}`);
+  const login = await logIn(token, citizen);
+  if (login.page !== expected) throw new BrowserError(`${citizen.username} landed on ${login.page}, expected ${expected}`);
+  return login;
+}
+
+/** The target of a `<meta http-equiv="refresh">`: Next.js streams a redirect that way once the page has started. */
+function metaRefresh(html: string): string | null {
+  const tag = /<meta\b[^>]*http-equiv="refresh"[^>]*>/i.exec(html)?.[0];
+  const url = tag && /content="\d*;\s*url=([^"]+)"/i.exec(tag)?.[1];
+  return url ? url.replaceAll("&amp;", "&") : null;
+}
+
+/**
+ * GET of the page the login ended on, from the web server at `webUrl`, with the cookie the callback set: the HTML a
+ * browser gets when it follows the callback's redirect, scripts and the React Server Components data included. With
+ * `path`, another page of the portal in the same browser, such as the answer page the person then tries. Follows HTTP
+ * redirects and up to three streamed ones, as a browser does, and returns the HTML of the page it ends on.
+ */
+export async function viewPage(webUrl: string, login: Login, path = login.landing): Promise<string> {
+  let url = new URL(path, webUrl);
+  for (let hops = 0; ; hops++) {
+    const response = await fetch(url, {
+      headers: login.cookie ? { cookie: login.cookie } : {},
+      signal: AbortSignal.timeout(60_000),
+    }).catch(() => {
+      throw new BrowserError(`the web server at ${url.origin} did not answer for a portal page`);
+    });
+    if (!response.ok) throw new BrowserError(`the web server answered ${response.status} for a portal page`);
+    const html = await response.text();
+    const next = metaRefresh(html);
+    if (!next || hops === 3) return html;
+    url = new URL(next, response.url);
+  }
+}
+
+/** A document the outside person uploads. */
+export type Upload = { name: string; bytes: Uint8Array<ArrayBuffer> };
+
 /** The answer page's upload: the file and the patient's name and birth date as the sender types them. */
-export async function upload(token: string, session: EidSession, file: { name: string; bytes: Uint8Array<ArrayBuffer> }, form: { name: string; birthDate: string }) {
+export async function upload(token: string, session: EidSession, file: Upload, form: { name: string; birthDate: string }) {
   const data = new FormData();
   data.set("token", token);
   data.set("file", new File([file.bytes], file.name, { type: "text/markdown" }));
   data.set("patientName", form.name);
   data.set("birthDate", form.birthDate);
   return createCaller(createContext({ kind: "eid", session })).portal.answer(data);
+}
+
+/** Uploads a document, typing the patient's name and birth date as the answer page shows them, and checks the outcome. */
+export async function answer(token: string, session: EidSession | null, doc: Upload, expected: AnswerOutcome["outcome"]): Promise<AnswerOutcome> {
+  if (!session) throw new BrowserError("no ID Austria session to answer with");
+  const page = await findAnswerContext(token, session);
+  if (!page) throw new BrowserError("the answer page did not open");
+  const outcome = await upload(token, session, doc, { name: page.patient.name, birthDate: page.patient.birthDate });
+  if (outcome.outcome !== expected) throw new BrowserError(`the upload ended as ${outcome.outcome}, expected ${expected}`);
+  return outcome;
 }

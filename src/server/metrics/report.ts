@@ -62,7 +62,8 @@ export function effortMetric(seconds: number | null): Metric {
   const shown = Math.round(seconds);
   return {
     ...base,
-    result: `${shown} s from link_opened to the answer_sent that was filed (automated run; the stopwatch test is #20)`,
+    // An automated run measures machine time. A person's effort comes from the timed test with someone new.
+    result: `automated run: ${shown} s from link_opened to the answer_sent that was filed, machine time, not a person (a person's effort: docs/clinical-review/TIMED_TEST_20.md)`,
     status: shown < 120 ? "met" : "missed",
   };
 }

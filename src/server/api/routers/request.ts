@@ -11,7 +11,7 @@ import { answerDeps, readFhirPatient } from "@/server/answers/deps";
 import { logReason } from "@/server/answers/file";
 import { acceptAnswer, FilingOutcomeOpen, NoHeldAnswer, rejectAnswer } from "@/server/answers/held";
 import { auditActor, recordAudit } from "@/server/audit/record";
-import type { Db } from "@/server/db";
+import type { Db, Tx } from "@/server/db";
 import { auditLog, heldAnswers, keptAnswers } from "@/server/db/schema";
 import { checkAddress, checkRecipient } from "@/server/ehvd/address-check";
 import { FhirError } from "@/server/fhir/client";
@@ -21,6 +21,7 @@ import { IncompletePatient, MessageRefused, sendRequestEmail } from "@/server/ma
 import { displayName } from "@/server/matrix/client";
 import { taskStatus, TransitionError } from "@/server/requests/lifecycle";
 import { LINK_TTL_MS } from "@/server/requests/link-token";
+import { notifyRequest } from "@/server/requests/notify";
 import { pendingDecision } from "@/server/requests/pending";
 import {
   type AddressCheck,
@@ -31,6 +32,7 @@ import {
   type RequestRow,
   sendAnyway,
 } from "@/server/requests/service";
+import { NoSmsGateway, sendRequestSms } from "@/server/requests/sms";
 
 // What network members see of a request. An allowlist, so the link hash never leaves the server.
 const summary = (r: RequestRow) => ({
@@ -138,13 +140,15 @@ function message(requester: string, expiresAt: Date, channel: RequestRow["channe
   return channel === "email" ? requestEmail(content) : { subject: null, ...requestSms(content) };
 }
 
-export const linkDeps = { readPatient: readFhirPatient, sendRequestEmail };
+/** What sending a link uses. Tests swap these for stand-ins, so they send nothing and post nothing in Matrix. */
+export const linkDeps = { readPatient: readFhirPatient, sendRequestEmail, sendRequestSms, notify: notifyRequest };
 
 const MailFailure = z.object({ code: z.string().optional(), responseCode: z.number().optional(), cause: z.object({ code: z.string() }).optional() });
 
 /** Codes only. Nodemailer puts the SMTP server's response in the message, and the response can echo an address or a name. */
 function notSentReason(error: unknown): string {
   if (error instanceof MessageRefused) return `refused for ${error.categories.join(", ")}`;
+  if (error instanceof NoSmsGateway) return "no SMS gateway in this build";
   if (error instanceof IncompletePatient) return "refused for an incomplete patient record";
   if (error instanceof FhirError) return `the FHIR server answered ${error.status}`;
   const failure = MailFailure.catch({}).parse(error);
@@ -152,31 +156,46 @@ function notSentReason(error: unknown): string {
   return failure.responseCode ? `${code}, SMTP ${failure.responseCode}` : code;
 }
 
-async function sendLink(request: RequestRow, token: string) {
+/**
+ * Sends the link by email, or by SMS into the demo outbox (`sendRequestSms`), inside the transaction `tx` that stores the
+ * request as sent. Both run the content check first. Never logs the link: it holds the token.
+ */
+async function sendLink(tx: Tx, request: RequestRow, token: string) {
   const link = `${env.PUBLIC_URL}/r/${token}`;
-  if (request.channel === "sms") {
-    if (env.NODE_ENV === "development") console.info(`Request ${request.id}: ${link}`);
-    return;
-  }
   const patient = await linkDeps.readPatient(request.patientId).catch((error: unknown) => notSent(request, "reading the patient", error));
-  await linkDeps
-    .sendRequestEmail({ to: request.address, requester: request.requesterName, clinic: env.CLINIC_NAME, link, expiresAt: request.expiresAt, patient })
-    .catch((error: unknown) => notSent(request, "sending", error));
+  const content = { to: request.address, requester: request.requesterName, clinic: env.CLINIC_NAME, link, expiresAt: request.expiresAt, patient };
+  const sent = request.channel === "sms" ? linkDeps.sendRequestSms(tx, { requestId: request.id, ...content }) : linkDeps.sendRequestEmail(content);
+  await sent.catch((error: unknown) => notSent(request, "sending", error));
 }
 
 function notSent(request: RequestRow, stage: string, error: unknown): never {
-  console.error(`The email for request ${request.id} was not sent while ${stage}: ${notSentReason(error)}`);
+  const kind = request.channel === "sms" ? "SMS" : "email";
+  console.error(`The ${kind} for request ${request.id} was not sent while ${stage}: ${notSentReason(error)}`);
+  if (error instanceof NoSmsGateway) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "This installation has no SMS gateway, so ordy cannot send an SMS. Send the request by email. The request did not go out.",
+    });
+  }
   if (error instanceof MessageRefused) {
-    throw new TRPCError({ code: "PRECONDITION_FAILED", message: `The email would contain ${error.categories.join(", ")}, so it was not sent. The request did not go out.` });
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: `The ${kind} would contain ${error.categories.join(", ")}, so it was not sent. The request did not go out.` });
   }
   if (error instanceof IncompletePatient) {
     throw new TRPCError({
       code: "PRECONDITION_FAILED",
-      message: "The patient's record on the FHIR server lacks a given name, a family name, or a full birth date, so ordy cannot check the email. The request did not go out.",
+      message: `The patient's record on the FHIR server lacks a given name, a family name, or a full birth date, so ordy cannot check the ${kind}. The request did not go out.`,
     });
   }
-  throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "The email could not be sent. The request did not go out; try again in a few minutes." });
+  throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `The ${kind} could not be sent. The request did not go out; try again in a few minutes.` });
 }
+
+/**
+ * The "Request … sent" notice in Dr. Hofer's room, after the request is stored as sent. It starts the request's thread:
+ * `notifyRequest` stores its room and event id in `matrix_room` and `matrix_event`. It never throws, so a failed notice
+ * leaves the sent request as it is. Names the requested person and organisation, never the patient.
+ */
+const sentNotice = (request: RequestRow) =>
+  linkDeps.notify(request, { kind: "sent", requestId: request.id, recipient: `${request.given} ${request.family}`, org: request.org, channel: request.channel });
 
 export const requestRouter = createTRPCRouter({
   create: clinicProcedure.input(requestInput).mutation(async ({ ctx, input }) => {
@@ -208,6 +227,7 @@ export const requestRouter = createTRPCRouter({
       stored(check),
       sendLink,
     );
+    if (request.state === "sent") await sentNotice(request);
     return { ...summary(request), addressWarning: check.result === "pass" ? null : addressWarning(check, input.org) };
   }),
 
@@ -256,6 +276,7 @@ export const requestRouter = createTRPCRouter({
   sendAnyway: ownRequestProcedure.mutation(async ({ ctx }) => {
     const sent = await sendAnyway(ctx.db, ctx.request.id, auditActor(ctx.actor), sendLink).catch(conflict);
     if (!sent) throw notFound(ctx.request.id);
+    await sentNotice(sent.request);
     return summary(sent.request);
   }),
 

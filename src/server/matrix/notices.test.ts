@@ -37,6 +37,13 @@ test("the documented notices for request 1", () => {
   );
 });
 
+test("the sent notice names the requested person, the organisation, and the channel, never the patient", () => {
+  const sent = noticeText({ kind: "sent", requestId: 2, recipient: "Stefan Kern", org: "Reha Waldblick", channel: "sms" });
+  assert.equal(sent, "Request 2 sent to Stefan Kern (Reha Waldblick) by SMS.");
+  // The notice type has no field for the patient or the document type, so neither can reach the text.
+  assert.equal(/Maria|Beispiel|rehab|report/i.test(sent.replace("Reha Waldblick", "")), false);
+});
+
 test("a held notice gives the caller's reason and points to the widget", () => {
   assert.equal(
     noticeText({

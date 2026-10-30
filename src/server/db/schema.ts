@@ -63,11 +63,26 @@ export const requests = pgTable("requests", {
   matrixEvent: text("matrix_event"),
 });
 
+// Demo only: the SMS the request service "sent", shown on /sms and /inbox like a mail catcher shows email. The body holds
+// the link token, the one exception to "the database keeps only the link hash", so only a build with the demo tools
+// writes it (`demoToolsEnabled`), and a request's SMS is deleted when the request closes. docs/ARCHITECTURE.md, "Storage".
+export const smsOutbox = pgTable("sms_outbox", {
+  id: serial("id").primaryKey(),
+  requestId: integer("request_id")
+    .notNull()
+    .references(() => requests.id, { onDelete: "cascade" }),
+  // The mobile number, as the request names it.
+  to: text("to").notNull(),
+  // The SMS text from `requestSms`, after the content check.
+  body: text("body").notNull(),
+  sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 /** The sender of a held answer, as ID Austria named them at login. */
 export type HeldAnswerSender = { givenName: string; familyName: string; gdaOid: string | null };
 
-// An answer that passed the patient check but waits for Dr. Hofer, because the release check did not pass.
-// Accept files it and deletes the row, Reject deletes it. docs/ARCHITECTURE.md, "Storage".
+// An answer that passed the patient check but waits for Dr. Hofer, because the release check did not pass or the AI
+// fallback read it. Accept files it and deletes the row, Reject deletes it. docs/ARCHITECTURE.md, "Storage".
 export const heldAnswers = pgTable("held_answers", {
   requestId: integer("request_id")
     .primaryKey()
@@ -86,6 +101,10 @@ export const heldAnswers = pgTable("held_answers", {
   practitionerOid: text("practitioner_oid"),
   // When the sender pressed send.
   sentAt: timestamp("sent_at", { withTimezone: true }).notNull(),
+  // The model that agreed with code's reading when the parser could not read the format (AI fallback), as the provider
+  // named it, for example `claude-opus-5-5`. Null when the parser read it. Accept then reads the text again with code
+  // alone (`readAgain()`), and the Provenance names the model. The model's reading itself is not kept.
+  readByModel: text("read_by_model"),
 });
 
 // An answer whose filing has an unknown outcome: the FHIR server may have filed it while the response was lost. Until

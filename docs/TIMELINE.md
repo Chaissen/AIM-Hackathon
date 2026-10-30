@@ -37,8 +37,8 @@ The task ids go into branch names and commit messages.
 | T02 | Keycloak realm: client, user profile, mappers, test citizens, citizen script, simulation label | Dev 1 | T01 | 2 |
 | T03 | Synapse config, Matrix users, Element config, room and widget bootstrap. Done. | Dev 3 | T01 | 2 |
 | T04 | Request service: Postgres tables `requests` and `bindings` (Drizzle), request states, audit log writer | Dev 1 | T01 | 3 |
-| T05 | Widget actions with the Matrix OpenID token (request form, **Send anyway**, **Accept**, **Reject**, **Cancel**) and the Matrix notices. `!status` is done. | Dev 3 | T03, T04 | 3 |
-| T06 | Email over SMTP to Mailpit or through Gmail to the team inboxes, outgoing message check. No SMS. | Dev 1 | T04 | 3 |
+| T05 | Widget actions with the Matrix OpenID token (request form, **Send anyway**, **Accept**, **Reject**, **Cancel**) and the Matrix notices. The "Request … sent" notice starts each request's thread, and later notices join it. `!status` is done. | Dev 3 | T03, T04 | 3 |
+| T06 | Email over SMTP to Mailpit or through Gmail to the team inboxes, outgoing message check. The SMS goes into the demo SMS outbox that `/sms` and `/inbox` show; there is no SMS gateway, and a production build refuses SMS requests. | Dev 1 | T04 | 3 |
 | T07 | Login with openid-client in Next.js route handlers, ID token check, session cookie | Dev 1 | T02, T04 | 3 |
 | T08 | Identity checks: level, name match, person number binding | Dev 3 | T07 | 3 |
 | T09 | Answer form and upload | Dev 1 | T07 | 3 |
@@ -49,12 +49,12 @@ The task ids go into branch names and commit messages.
 | T14 | Rehab mapper: DocumentReference | Dev 2 | T10, T13 | 4 |
 | T15 | eHVD client in ordy: role check, address check before sending ([eHVD](EHVD.md#how-ordy-uses-the-ehvd-t15)) | Dev 3, data by Doc 1 | T05, T23 | 4 |
 | T16 | Test documents: new outside people, wrong patients, odd names | Doc 1 | none | 4 |
-| T17 | Misdelivery runs M1, M2, M3 and the audit check | Doc 1, Dev 2 | T08, T11, T15 | 4 |
+| T17 | Misdelivery runs M1, M2, M3 and the audit check. `pnpm scenario` drives all three and the audit check against the running stack. | Doc 1, Dev 2 | T08, T11, T15 | 4 |
 | T18 | `scripts/validate.ts` (`pnpm validate`) and 0 validator errors | Dev 2 | T13, T14 | 5 |
 | T19 | Timed test with someone new | Doc 2 | T09 | 5 |
 | T20 | README: run instructions, architecture, design answers, metric results | Doc 2, Dev 1 | T17, T18, T19 | 5 |
 | T21 | Demo script and video | Doc 2 | Milestone 5 | 6 |
-| T22 | AI fallback parser (optional) | Dev 3 | T10 | none |
+| T22 | AI fallback parser (optional), connected to the answer flow and off without `ANTHROPIC_API_KEY` ([AI fallback](ARCHITECTURE.md#ai-fallback-optional-cut-first)). Done. | Dev 3 | T10 | none |
 | T23 | eHVD mock service: own container, real WSDL, synthetic directory ([eHVD](EHVD.md#our-mock-t23)). Done. | Dev 3 | T01 | 3 |
 
 The critical path runs T01, T02, T07, T08, T09, T13, T18, T21. When two tasks compete for one person, the task on the critical path wins.

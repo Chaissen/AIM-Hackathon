@@ -6,7 +6,7 @@ This is our entry for [Track 2 of the AIM hackathon](https://github.com/AIM-Aust
 
 ## Status
 
-Historical metric evidence on `main` at commit `06abdc9`, 30 October 2026, 03:20 CET. Request 1 with M1 to M3, and the rehab request, run end to end by hand, with one gap in the flow: ordy did not send the email or the SMS yet, so the links came from the `pnpm dev` log. The metric results in [Metrics](#metrics) come from that run. Since then, #4 sends the request email. The SMS is still not sent: in development, `pnpm dev` prints an SMS request's link in its log, and that link stands in for the message.
+Historical metric evidence on `main` at commit `06abdc9`, 30 October 2026, 03:20 CET. Request 1 with M1 to M3, and the rehab request, run end to end by hand, with one gap in the flow: ordy did not send the email or the SMS yet, so the links came from the `pnpm dev` log. The metric results in [Metrics](#metrics) come from that run. Since then, #4 sends the request email. ordy has no SMS gateway: outside a production build each SMS goes into a demo outbox, and the SMS screen at `/sms` shows it with its working link.
 
 The feature table describes this checkout. The workspace gateway and hostname migration are documented below; the public deployment is a separate action.
 
@@ -18,13 +18,13 @@ The feature table describes this checkout. The workspace gateway and hostname mi
 | Address check before sending, against the eHVD | **Works.** An email domain that does not match the organisation's domain in the eHVD holds the request until Dr. Hofer clicks **Send anyway** (M1). |
 | Outside portal: landing page, ID Austria login, identity checks, answer page, upload | **Works.** The landing page shows only the requesting doctor and clinic. A wrong person (M1, M2) is refused at login and sees neither the patient nor the document type. The right person uploads the document and confirms the patient's name and birth date. |
 | Answer: parser, patient check, eHVD release check, FHIR filing | **Works.** A document about another patient (M3) is not filed. The release check confirms the responsible physician in the eHVD; if it cannot, the answer waits for Dr. Hofer's **Accept**. The lab result is filed as four Observations and a DiagnosticReport, the rehab report as a DocumentReference, each in one transaction Bundle with Provenance, Task, Practitioner, and Organization. |
-| Matrix notices | **Works** for a wrong person, a wrong patient, a held identity or answer, and a filed answer. Nothing posts a "request sent" notice yet, so each notice is a new message in the room, not in a thread. |
+| Matrix notices | **Works.** "Request … sent" starts each request's thread when the request goes out, and the notices for a wrong person, a wrong patient, a held identity or answer, and a filed answer join it. A failed notice never stops a request. |
 | Matrix bot | **Works.** `!help` and `!status` |
 | Simulated ID Austria (Keycloak) and eHVD mock | **Works.** The real ID Austria claim names, five test citizens, `pnpm citizen` for more. The eHVD mock speaks SOAP 1.2 with the real eHVD WSDL and synthetic entries. |
 | Request email | **Works.** The request form and **Send anyway** send the link by email through Gmail, and only to the team inboxes. A check refuses an email that names the patient, the birth date, or a document type. A refused or failed email stores nothing. |
-| SMS, and the SMS screen's message list | **Not built.** The SMS screen stays empty. |
-| AI fallback parser (optional) | **Built, not connected.** Tested with a stand-in for the model. The answer flow uses the rule-based parser only. |
-| Metric runner | **Partly.** `pnpm validate` and `pnpm audit:check` work on the filed data. `pnpm scenario` checks that the stack is up, but its flow steps have no code yet that drives them, so it reports them as blocked. |
+| SMS, and the SMS screen's message list | **Works, as a demo.** There is no SMS gateway: the request form puts each SMS into a demo outbox that the SMS screen at `/sms` and `/inbox` shows, with its working link, after the same content check as the email. A production build keeps no outbox and refuses SMS requests. |
+| AI fallback parser (optional) | **Connected, off without `ANTHROPIC_API_KEY`.** Without the key the answer flow uses the rule-based parser only, as before. With it, an upload in a format the parser does not know is read by code, passes the patient check, is read again by the model, and is always held for Dr. Hofer's **Accept**. Tested with a stand-in for the model only, never against the API. |
+| Metric runner | **Yes.** `pnpm scenario` drives request 1, M1 to M3, and request 2 against the running stack and measures the four metrics; its effort is machine time, not a person. `pnpm validate` and `pnpm audit:check` work on the filed data. |
 
 [Timeline](docs/TIMELINE.md) has the tasks and owners.
 
@@ -79,7 +79,7 @@ Check that it works:
 | `pnpm db:studio` | Browse the database |
 | `pnpm fhir:seed` · `pnpm matrix:bootstrap` | Load the three synthetic patients; create the room and pin the widget |
 | `pnpm demo:seed` | Fill Dr. Hofer's workspace with eleven synthetic requests in every state, through the real code paths ([Demo](docs/DEMO.md#a-populated-workspace)) |
-| `pnpm scenario` · `pnpm validate` · `pnpm audit:check` | All four metrics in one run, once its flow steps have code that drives them (today they report blocked); the HL7 validator on the filed resources; the six audit events per request |
+| `pnpm scenario` · `pnpm validate` · `pnpm audit:check` | All four metrics in one run against the running stack; the HL7 validator on the filed resources; the six audit events per request |
 
 ## Architecture
 
@@ -112,7 +112,7 @@ Dr. Hofer signs in to the ordy workspace with her existing Matrix account. An en
 | HL7 validator | Reused | Validates every filed resource |
 | Anthropic API, model `claude-opus-5-5` | Reused, optional | Second reader for the AI fallback parser, synthetic documents only |
 
-The main flow uses no AI model. Parsing, the identity checks, and the patient check are deterministic. Only when the parser cannot read a document does the optional AI fallback step in: a more lenient code reader reads every value, a model (Anthropic, `claude-opus-5-5`, off without `ANTHROPIC_API_KEY`) reads the document independently, and the two readings must agree. The model can only stop a record, never choose a value. Every answer it read waits for Dr. Hofer ([AI rules](docs/COMPLIANCE_AND_SAFETY.md#ai-rules)). The fallback is built and tested, but the answer flow does not call it yet.
+The main flow uses no AI model. Parsing, the identity checks, and the patient check are deterministic. Only when the parser cannot read a document does the optional AI fallback step in: a more lenient code reader reads every value, a model (Anthropic, `claude-opus-5-5`, off without `ANTHROPIC_API_KEY`) reads the document independently, and the two readings must agree. The model can only stop a record, never choose a value. Every answer it read waits for Dr. Hofer ([AI rules](docs/COMPLIANCE_AND_SAFETY.md#ai-rules)). The answer flow calls it only with `ANTHROPIC_API_KEY` set, and only after the patient check passed on code's reading, so a file about another patient never goes to the provider. A reading that disagrees files and keeps nothing.
 
 Simulated in the demo: ID Austria (Keycloak, without the phone-app confirmation) and the eHVD (our mock). Email goes through Gmail, and only to the team inboxes. SMS would go to the SMS screen, but ordy does not send SMS yet. Each can be replaced by the real service, and every other part we did not build, such as HAPI FHIR or Synapse, by another product of its kind. [Whitepaper](docs/WHITEPAPER.md#what-is-real-and-what-is-simulated) says what each part becomes in production, and [Architecture](docs/ARCHITECTURE.md) has the details.
 
@@ -130,7 +130,7 @@ Simulated in the demo: ID Austria (Keycloak, without the phone-app confirmation)
 | Matrix | `src/server/matrix/client.ts` | small client-server API client, no E2EE (not required by the track) |
 | Bot | `src/bot/` | separate process for `!help` and `!status`. Requests go through the widget. |
 | Client | `src/trpc/` | `@trpc/tanstack-react-query`, superjson |
-| AI fallback | `src/server/documents/fallback.ts` | optional, off without `ANTHROPIC_API_KEY`. Provider Anthropic, model `claude-opus-5-5` (`AI_FALLBACK_MODEL`), no server-side fallback model, `@anthropic-ai/sdk` 1.1. Synthetic documents only; every answer it reads is held for Dr. Hofer. |
+| AI fallback | `src/server/documents/fallback.ts` | optional, off without `ANTHROPIC_API_KEY`. Provider Anthropic, model `claude-opus-5-5` (`AI_FALLBACK_MODEL`), no server-side fallback model, `@anthropic-ai/sdk` 1.1. Synthetic documents only; every answer it reads is held for Dr. Hofer. The model name the API returns is kept with the held answer and named in the Provenance. |
 | Requests | `src/server/requests/`, `src/server/api/routers/request.ts` | request core: lifecycle, link tokens, `request.create`, and the ports the identity checks use |
 | Login | `src/app/auth/`, `src/server/auth/` | ID Austria login over OpenID Connect and the outside person's session cookie |
 | Audit | `src/server/audit/record.ts` | writes the audit entries |
@@ -140,7 +140,7 @@ Dependencies must be public for at least 7 days (`minimumReleaseAge` in `pnpm-wo
 
 ## Design answers
 
-Short answers to the five questions of the track. They describe our design, and `main` runs it, except that ordy does not send the SMS yet and the AI fallback is not connected. [Status](#status) says what runs, and the [Whitepaper](docs/WHITEPAPER.md#design-answers) has the full answers and the reasons.
+Short answers to the five questions of the track. They describe our design, and `main` runs it, except that ordy has no SMS gateway, so the SMS goes to the demo SMS screen, and the AI fallback is off without an API key. [Status](#status) says what runs, and the [Whitepaper](docs/WHITEPAPER.md#design-answers) has the full answers and the reasons.
 
 ### 1. How does an outside person prove who they are if they are in no directory?
 
@@ -183,7 +183,7 @@ At the clinic, next to the Matrix server and the FHIR server it already runs. Pa
 
 ## Metrics
 
-We measure the four track metrics on the scenario. `pnpm scenario` is meant to run it against the running stack, but its steps have no code yet that drives the flow, so it reports them as blocked. The results below come from one run by hand on `main` at commit `06abdc9`, on 30 October 2026: `pnpm reset`, the requests created as Dr. Hofer by a script that makes the same `request.create` call as the widget's form, the links from the `pnpm dev` log, the logins and uploads in a browser, then `pnpm validate` and `pnpm audit:check`. [Whitepaper](docs/WHITEPAPER.md#how-we-measure-the-metrics) has the method in full.
+We measure the four track metrics on the scenario. `pnpm scenario` runs it against the running stack and writes the table to `out/metrics/metrics.md`. The results below come from one run by hand on `main` at commit `06abdc9`, on 30 October 2026: `pnpm reset`, the requests created as Dr. Hofer by a script that makes the same `request.create` call as the widget's form, the links from the `pnpm dev` log, the logins and uploads in a browser, then `pnpm validate` and `pnpm audit:check`. [Whitepaper](docs/WHITEPAPER.md#how-we-measure-the-metrics) has the method in full.
 
 | Metric | Target | How we measure | Result |
 |---|---|---|---|

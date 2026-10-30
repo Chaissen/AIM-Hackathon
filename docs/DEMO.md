@@ -5,15 +5,14 @@ A draft click path for the 2-minute video and the live demo, written for the pit
 The steps follow the documented target behaviour in [Architecture](ARCHITECTURE.md) and [Identity and misdelivery](IDENTITY.md). The screen texts are the ones in the code where they exist. Each step has a state:
 
 - **Ready**: works on `main` today.
-- **Ready with the log link**: works, but the link comes from the `pnpm dev` log, because ordy does not send the SMS yet.
 - **Partly**: some of it is built (the row says what), but the step cannot be shown as written yet.
 - **Not built**: no code on `main` does it yet. [Timeline](TIMELINE.md) has the tasks and owners.
 
-States as of 30 October 2026, 03:20, on `main` at commit `06abdc9`, checked in one run by hand through request 1, M1 to M3, and the rehab request. #4 then connected the email: the email steps below are marked from a check through the router (`request.create` and `sendAnyway`, with the local mail server ordy used then), not from a new run by hand. Email now goes through Gmail, and no check through Gmail is recorded yet. Check them again on the frozen build before recording. Cut every step that is still not built, or replace it with one spoken sentence. If you show a screen from `prototype/ordy-app`, label it on screen as a design mock-up, not the running app.
+States as of 30 October 2026, 03:20, on `main` at commit `06abdc9`, checked in one run by hand through request 1, M1 to M3, and the rehab request. #4 then connected the email: the email steps below are marked from a check through the router (`request.create` and `sendAnyway`, with the local mail server ordy used then), not from a new run by hand. Email now goes through Gmail, and no check through Gmail is recorded yet. The SMS screen and the "Request … sent" notice with its thread came later and are marked from the router tests (`src/server/api/routers/request.test.ts`), not from a run by hand. Check them again on the frozen build before recording. Cut every step that is still not built, or replace it with one spoken sentence. If you show a screen from `prototype/ordy-app`, label it on screen as a design mock-up, not the running app.
 
-ordy sends the request email through Gmail to the team inboxes. It does not send the SMS yet, and no task builds it. Until then `pnpm dev` prints each new SMS request's link in its log as `Request <id>: http://localhost:3010/r/<token>`. Every portal step works with that link.
+ordy sends the request email through Gmail to the team inboxes. It has no SMS gateway: each SMS goes into a demo outbox, and the SMS screen at http://localhost:3010/sms (and on http://localhost:3010/inbox) shows it with its working link, newest first. An SMS leaves the screen when its request is filed, cancelled, locked, or expired. `pnpm dev` does not print links.
 
-Nothing posts the "Request … sent" notice yet: T05 did not build it, and no open task does. So a request has no thread in the room, and every later notice about it is the newest message in the room.
+When a request goes out, the bot posts "Request … sent" in the room, and every later notice about that request goes into its thread. The workspace's **Messages** view shows thread notices in the room's timeline too, so each new notice is still the newest message there.
 
 The notices name the outside person as typed in the form when someone else logs in ("not Eva Brandl"). Once the answer is filed, they take the title from the document's `Validated by` line ("from Dr. Eva Brandl"). The texts below are the ones the run by hand produced, with the request numbers of the scene order.
 
@@ -38,10 +37,10 @@ The notices number the requests in the order they are created after `pnpm reset`
 
 ## Before recording
 
-1. Record on the frozen build. If upgrading an installation that served Element on 8081, follow the [gateway migration](DEPLOYMENT.md#migrate-an-existing-element-entry) first. Run `pnpm reset`, then `pnpm dev`. Do not run `pnpm test` or `pnpm demo:seed` after the reset: the request tests move the request ids on, and the [demo seed](#a-populated-workspace) fills the workspace that the recording starts empty. Keep the `pnpm dev` terminal off camera: until the SMS exists, request 2's link comes from its log. If a login returns to the landing page with `?login=failed`, read the `pnpm dev` log. If it says "A private ORDY_SECRET … is required", run `pnpm exec tsx scripts/init-env.ts` and restart `pnpm dev`. The email needs the Gmail app password in `.env`, as [Send email through Gmail](DEVELOPMENT.md#send-email-through-gmail) describes. `pnpm reset` does not empty the Gmail inbox, so delete the rehearsal emails there. Their links now say "This link does not work".
+1. Record on the frozen build. If upgrading an installation that served Element on 8081, follow the [gateway migration](DEPLOYMENT.md#migrate-an-existing-element-entry) first. Run `pnpm reset`, then `pnpm dev`. Do not run `pnpm test` or `pnpm demo:seed` after the reset: the request tests move the request ids on, and the [demo seed](#a-populated-workspace) fills the workspace that the recording starts empty. If a login returns to the landing page with `?login=failed`, read the `pnpm dev` log. If it says "A private ORDY_SECRET … is required", run `pnpm exec tsx scripts/init-env.ts` and restart `pnpm dev`. The email needs the Gmail app password in `.env`, as [Send email through Gmail](DEVELOPMENT.md#send-email-through-gmail) describes. `pnpm reset` does not empty the Gmail inbox, so delete the rehearsal emails there. Their links now say "This link does not work".
 2. `pnpm reset` keeps the Matrix room and the notices from rehearsals. For a clean room, set a new `MATRIX_ROOM_ALIAS` in `.env`, run `pnpm matrix:bootstrap`, restart `pnpm dev`, and select the new room in the workspace's **Messages** view. Room administration is outside the workspace; use optional Element on port 8082 if needed.
 3. Open these tabs: the ordy workspace at http://localhost:8081 logged in as `lena.hofer` / `hofer-demo-2026`, with "Dr. Hofer · Outside documents" selected in **Messages**, the team's Gmail inbox, the SMS screen at http://localhost:3010/sms, the recipient's inbox at http://localhost:3010/inbox, and HAPI FHIR's web UI at http://localhost:8090. The recipient's inbox shows the SMS screen and a button that opens Gmail for the first team inbox, and the workspace's **Demo tools** card opens it. It is not in a production build. The base URL http://localhost:8090/fhir alone shows only an error, so use the search links in scenes 6 and 7.
-4. Every notice is a new message in the room until the "request sent" notice exists. Tests and rehearsals post into the same room, so use a clean room (step 2).
+4. Each request's notices form a thread under its "Request … sent" notice. Rehearsals and `pnpm demo:seed` post into the same room, so use a clean room (step 2).
 5. Private windows of one browser share their cookies. Close every private window before you switch to the next outside person, or use a separate browser profile for each person.
 6. Keep the files ready: `track/scenario/documents/lab-result-maria-beispiel.md`, `lab-result-max-beispiel.md`, and `rehab-report-maria-beispiel.md`.
 7. Fill forms off camera or speed up typing in the edit. Two minutes leave no time for typing.
@@ -59,7 +58,7 @@ Say: Outside labs still answer by fax. ordy gives Dr. Hofer one workspace for re
 
 | Click | What you see | State |
 |---|---|---|
-| In the workspace, open **New request** and pick **Lab result**, patient Maria Beispiel, Eva Brandl, Labor Kanalstraße, `eva.brandl@labor-kanal.example`, then **Send request** | The form, then the notice "Request 1 sent to Dr. Eva Brandl (Labor Kanalstraße) by email." in the room | Partly: the workspace sends the request and shows request 1 below the form with the state "Sent". The room notice is not built. |
+| In the workspace, open **New request** and pick **Lab result**, patient Maria Beispiel, Eva Brandl, Labor Kanalstraße, `eva.brandl@labor-kanal.example`, then **Send request** | The form, then the notice "Request 1 sent to Eva Brandl (Labor Kanalstraße) by email." in the room | Ready: the workspace sends the request and shows request 1 with the state "Sent", and the notice starts request 1's thread. |
 | Open the email in the team's Gmail inbox | "Secure request from Klinikum Beispielstadt", the link, the expiry date. No patient name, no birth date, no document type. | Ready (#4). It names Dr. Hofer by her Matrix display name, which `pnpm matrix:bootstrap` sets to "Dr. Lena Hofer". |
 
 Say: The email names only Dr. Hofer and the clinic, never the patient.
@@ -70,7 +69,7 @@ Say: The email names only Dr. Hofer and the clinic, never the patient.
 |---|---|---|
 | In a private window, open the link from the email | "Dr. Lena Hofer at Klinikum Beispielstadt sent you a request" and **Log in with ID Austria**. Nothing about the patient. | Ready |
 | Log in as `thomas.wagner` / `demo-thomas`, Dr. Brandl's colleague | "This request is for someone else. Nothing was shared with you." | Ready |
-| Open **Messages** in the workspace and look at the newest message in the room | "Request 1 was opened by someone who is not Eva Brandl (ID Austria name: Thomas Wagner). Nothing was shown or filed. Check the address." | Ready, as a new message, not in a thread. The workspace's **Requests** view shows the same catch on request 1: "Identity checked" with `fail` and "Misdelivery caught" with `wrong_person`. |
+| Open **Messages** in the workspace and look at the newest message in the room | "Request 1 was opened by someone who is not Eva Brandl (ID Austria name: Thomas Wagner). Nothing was shown or filed. Check the address." | Ready. The notice is in request 1's thread, under the sent notice. The workspace's **Requests** view shows the same catch on request 1: "Identity checked" with `fail` and "Misdelivery caught" with `wrong_person`. |
 
 Say: A forwarded link is useless. Only the person Dr. Hofer named can open it.
 
@@ -106,9 +105,9 @@ Say: Dr. Hofer gets structured values she can trend and reuse, not a scan, and t
 
 | Click | What you see | State |
 |---|---|---|
-| In the workspace, open **New request** and pick **Rehab discharge report**, Stefan Kern, Reha Waldblick, `+43 660 000 0101`, send | The form switches to SMS. The notice "Request 2 sent to Stefan Kern (Reha Waldblick) by SMS." | Partly: the form switches to SMS and sends the request. The room notice is not built. |
-| Open the SMS screen and the link in it | The SMS on a phone frame, then the landing page | Not built: the SMS screen stays empty. Open the log link instead and say that the SMS is not sent yet. |
-| Log in as `stefan.kern` / `demo-stefan`, upload `rehab-report-maria-beispiel.md`, enter Maria Beispiel and 12 March 1961, send | The answer page, then "Thank you, your document is filed" | Ready with the log link |
+| In the workspace, open **New request** and pick **Rehab discharge report**, Stefan Kern, Reha Waldblick, `+43 660 000 0101`, send | The form switches to SMS. The notice "Request 2 sent to Stefan Kern (Reha Waldblick) by SMS." | Ready |
+| Open the SMS screen and the link in it | The SMS on a phone frame, then the landing page | Ready. Say that ordy has no SMS gateway, so the screen shows the SMS it would send. |
+| Log in as `stefan.kern` / `demo-stefan`, upload `rehab-report-maria-beispiel.md`, enter Maria Beispiel and 12 March 1961, send | The answer page, then "Thank you, your document is filed" | Ready |
 | Open **Messages** in the workspace and look at the newest message | "Rehab discharge report for Maria Beispiel from Stefan Kern is filed. Identity checked with ID Austria." | Ready |
 | Open http://localhost:8090/fhir/DocumentReference?subject=Patient/maria-beispiel&_revinclude=Provenance:target&_pretty=true | A DocumentReference with the report attached, and its Provenance | Ready |
 
@@ -130,18 +129,18 @@ Say: ordy warns before sending, and even if Dr. Hofer sends anyway, the stranger
 | Click | What you see | State |
 |---|---|---|
 | Open **Audit log** in the workspace navigation and scroll: it lists every audit entry, newest first, with its request | At the top, request 3's entries for M1, with "Identity checked" and outcome `fail` and the "Misdelivery caught" entries. Further down, request 1's six event types, from "Answer filed" at the top to "Request sent" at the bottom: "Answer filed", "Answer sent", "Misdelivery caught", "Identity checked", "Link opened", and "Request sent" | Ready |
-| Show the metric results from the README | FHIR validation, effort, misdeliveries, and audit coverage | Ready for three metrics, from the run by hand. Effort waits for the stopwatch test. Do not show `pnpm scenario`: it still reports its steps as blocked. |
+| Show the metric results from the README | FHIR validation, effort, misdeliveries, and audit coverage | Ready for three metrics, from the run by hand. Effort waits for the stopwatch test. `pnpm scenario` now drives all its steps, but do not run it in the demo: it adds three requests to the workspace, and its effort is machine time, not a person. Run it well before the demo, then `pnpm reset`, so the scenes' request numbers hold; `out/metrics/` keeps its results. |
 | Or open **Metrics** in the workspace navigation | The four metrics with their sources, the tests M1 to M3, and the last `pnpm validate` and `pnpm scenario` results | Ready. It does not run the page check or the Matrix notice check, so `pnpm scenario` stays the measurement of record. |
 
 Say, filled in from the frozen build and the README status, in about 17 s: "Works today: …. Built but not connected: …. Not built: …."
 
-With #4 that would be: "Works today: both requests and all three misdeliveries, with the request email, FHIR filing, Provenance, and the audit log. Built but not connected: the AI fallback. Not built yet: the SMS."
+Today that would be: "Works today: both requests and all three misdeliveries, with the request email, the SMS on a demo SMS screen, FHIR filing, Provenance, and the audit log. Built, and off without an API key: the AI fallback. Not built: a real SMS gateway."
 
 ## Scene 10: disclaimer (8 s)
 
 Show the disclaimer from [Compliance and safety](COMPLIANCE_AND_SAFETY.md#disclaimer) as a closing card, with the repository link. The video must show it.
 
-Say: ID Austria and the eHVD are simulated. ordy does not send the SMS yet. Real ID Austria also asks for a confirmation in the phone app.
+Say: ID Austria and the eHVD are simulated, and the SMS screen stands in for an SMS gateway. Real ID Austria also asks for a confirmation in the phone app.
 
 ## If the time runs short
 
@@ -149,13 +148,13 @@ Cut in this order and say in the video what was cut:
 
 1. The Matrix notice in scene 3. The M1 notice in scene 8 shows the same kind of notice.
 2. The Matrix notice in scene 6. The filed notice in scene 7 shows that Dr. Hofer is told, and the HAPI view shows the filing.
-3. Shorten scene 7 to the login with the log link and the filed notice. Keep request 2 in the video, because the track judges the flow on both requests.
+3. Shorten scene 7 to the SMS screen, the login, and the filed notice. Keep request 2 in the video, because the track judges the flow on both requests.
 
 Never cut the HAPI view in scene 6. It is the only place the video shows the FHIR resources and the Provenance.
 
-## If the SMS is still not sent at the freeze
+## If the SMS screen fails at the freeze
 
-Record scene 7 with the log link. Cut the SMS screen in scene 7, and use the freed seconds for the HAPI view in scene 6. Name the missing SMS again in the spoken part of scene 9.
+The SMS screen reads the demo SMS outbox in Postgres. If it shows no SMS for request 2, check that the build is not a production build (`pnpm dev`, not `pnpm start`), and that `pnpm db:migrate` ran since the outbox was added. Without a working screen, cut scene 7 to the filed notice and the HAPI view, and say in scene 9 that the SMS screen did not work.
 
 ## A populated workspace
 
@@ -175,7 +174,7 @@ The recording starts from `pnpm reset`, with an empty workspace. To show the wor
 | 10 | Petra Probst | Stefan Kern, by SMS | expired | Stefan Kern opens the link and does not answer. See below. |
 | 11 | Johann Muster | Dr. Eva Brandl, by email | locked | `thomas.wagner`, `eva.brandl2` (another person number than the bound Eva Brandl), and `anna.huber` fail the identity check |
 
-Everything goes through the code the widget, the portal, and the login use, so the audit log, the bindings, the held answer, the Tasks, and the filed Bundles on HAPI agree, and the notices reach Dr. Hofer's room. Dr. Hofer's steps are tRPC calls through `createCaller`. Each outside person opens the link (`link_opened`) and logs in through the route handlers of `POST /auth/login` and `GET /auth/callback`, which the script calls in its own process. Between the two, it posts the username and password to Keycloak's real login form and catches the redirect to the callback without following it. So Keycloak checks the password and signs the ID token, and the callback verifies it and runs the identity checks, as for a browser. Uploads go through `portal.answer` with the session the callback set. The seed sends no email: each request email is built and passes the content check, and nodemailer then hands it to an SMTP server inside the script instead of Gmail, so Gmail gets nothing and no app password is needed. The script reads the email links from there. SMS links come from the line the request service prints in development, which the script catches, so it never prints a link.
+Everything goes through the code the widget, the portal, and the login use, so the audit log, the bindings, the held answer, the Tasks, and the filed Bundles on HAPI agree, and the notices reach Dr. Hofer's room. Dr. Hofer's steps are tRPC calls through `createCaller`. Each outside person opens the link (`link_opened`) and logs in through the route handlers of `POST /auth/login` and `GET /auth/callback`, which the script calls in its own process. Between the two, it posts the username and password to Keycloak's real login form and catches the redirect to the callback without following it. So Keycloak checks the password and signs the ID token, and the callback verifies it and runs the identity checks, as for a browser. Uploads go through `portal.answer` with the session the callback set. The seed sends no email: each request email is built and passes the content check, and nodemailer then hands it to an SMTP server inside the script instead of Gmail, so Gmail gets nothing and no app password is needed. The script reads the email links from there. SMS links come from the demo SMS outbox that the SMS screen shows, so the script never prints a link. Its data rules also check that no closed request keeps an SMS there.
 
 Two things differ from a real run:
 

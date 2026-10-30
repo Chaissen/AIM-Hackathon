@@ -8,7 +8,7 @@ import { env } from "@/env";
 import { demoToolsEnabled } from "@/lib/demo-tools";
 
 // GET /inbox: what the outside person received. The emails are in the team's Gmail inbox, and the SMS screen shows
-// every SMS with its working link to whoever opens this page, so a production build answers 404
+// every SMS in the demo outbox with its working link to whoever opens this page, so a production build answers 404
 // (docs/COMPLIANCE_AND_SAFETY.md).
 
 export default function InboxPage() {

@@ -8,6 +8,7 @@ import { bindings, heldAnswers, keptAnswers, requests } from "@/server/db/schema
 import type { LoginTransition } from "@/server/identity/login";
 import { initialState, isOpen, MAX_FAILED_CHECKS, OPEN_STATES, type RequestEvent, type RequestState, transition, TransitionError } from "./lifecycle";
 import { hashLinkToken, isLinkToken, LINK_TTL_MS, newLinkToken } from "./link-token";
+import { deleteSms } from "./sms";
 import { mirrorTask } from "./task";
 
 // Reads and state changes of requests. Every caller goes through here: the tRPC router, the portal pages, the login,
@@ -46,13 +47,18 @@ export type AddressCheck =
   /** The eHVD could not confirm the address. The request waits too, but nothing was caught. */
   | { passed: false; unchecked: true };
 
-export type SendLink = (request: RequestRow, token: string) => Promise<void>;
+/**
+ * Sends the link by email or SMS. It runs in the transaction that stores the request as sent, and gets it as `tx`: the
+ * demo SMS outbox writes there, so a rollback takes the SMS with it. If it throws, nothing is stored as sent.
+ */
+export type SendLink = (tx: Tx, request: RequestRow, token: string) => Promise<void>;
 
 /**
  * Stores a new request, with its audit entry in the same transaction. If the address check passed, the request is
  * `sent` with `request_sent`. Otherwise it waits in `awaiting_confirmation`: with `misdelivery_caught: address_mismatch`
  * for another domain, and with no entry yet for an address the eHVD could not confirm, until Send anyway logs
- * `request_sent`. Returns the link token, which exists only here: the database keeps its hash.
+ * `request_sent`. Returns the link token, which exists only here and in the email or SMS: the database keeps its hash,
+ * except for the demo SMS outbox outside a production build (src/server/requests/sms.ts).
  */
 export async function createRequest(db: Db, input: NewRequest, addressCheck: AddressCheck, sendLink: SendLink) {
   const { token, hash } = newLinkToken();
@@ -62,7 +68,7 @@ export async function createRequest(db: Db, input: NewRequest, addressCheck: Add
     const actor: AuditActor = { kind: "network_member", id: row.requester };
     if (addressCheck.passed) {
       await recordAudit(tx, requestSent(row, actor, false));
-      await sendLink(row, token);
+      await sendLink(tx, row, token);
     } else if ("domain" in addressCheck) {
       await recordAudit(tx, {
         event: "misdelivery_caught",
@@ -87,7 +93,7 @@ export async function sendAnyway(db: Db, id: number, actor: AuditActor, sendLink
   const request = await applyEvent(db, id, "send_anyway", async (tx) => {
     const [row] = await tx.update(requests).set({ linkHash: hash, expiresAt: newExpiry() }).where(eq(requests.id, id)).returning();
     await recordAudit(tx, requestSent(row, actor, true));
-    await sendLink(row, token);
+    await sendLink(tx, row, token);
     return row;
   });
   return request && { request, token };
@@ -109,6 +115,7 @@ export async function expireDueRequests(db: Db | Tx, id?: number): Promise<numbe
   if (ids.length) {
     await db.delete(heldAnswers).where(inArray(heldAnswers.requestId, ids));
     await db.delete(keptAnswers).where(inArray(keptAnswers.requestId, ids));
+    await deleteSms(db, ids);
     // Not awaited: this may run inside a transaction that holds row locks. If it rolls back, the next read expires the
     // request again, and `expired` is final, so an early or repeated PUT tells nothing wrong.
     for (const row of expired) void mirrorTask(row);
@@ -183,8 +190,10 @@ export async function applyEvent(
     if (state !== "answer_held") await tx.delete(heldAnswers).where(eq(heldAnswers.requestId, id));
     if (state !== "verified" && state !== "answer_held") await tx.delete(keptAnswers).where(eq(keptAnswers.requestId, id));
     // A closed request needs no ID token any more; a filed answer carries it in the Provenance.
+    // Its demo SMS goes too: the link in it no longer works.
     if (!isOpen(state)) {
       await tx.update(requests).set({ idToken: null }).where(eq(requests.id, id));
+      await deleteSms(tx, [id]);
       return { ...result, idToken: null };
     }
     return result;
@@ -230,6 +239,8 @@ export async function applyLoginTransition(db: Db, id: number, change: LoginTran
       .set({ state: to, ...("personNumber" in change && to === change.to ? { personNumber: change.personNumber } : {}) })
       .where(eq(requests.id, id))
       .returning();
+    // A locked link no longer works, so its demo SMS goes.
+    if (to === "locked") await deleteSms(tx, [id]);
     return stored;
   });
   if (!updated) return false;

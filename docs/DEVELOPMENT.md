@@ -70,7 +70,8 @@ Check that everything works:
 | ordy Next.js app, including workspace and outside portal | http://localhost:3010 | the same network account for the workspace |
 | Optional Element compatibility client | http://localhost:8082 | the same Matrix account; enable the `legacy-element` profile |
 | Outside emails: the team inboxes in `MAIL_TEAM_INBOXES`, by default ordysoftware@gmail.com | https://mail.google.com | the team's Google login |
-| Recipient's inbox: a button that opens Gmail for the first team inbox, and the SMS screen, empty until ordy keeps an SMS log | http://localhost:3010/inbox | none. Demo only. A production build answers 404. |
+| Recipient's inbox: a button that opens Gmail for the first team inbox, and the SMS screen with every SMS of an open request and its working link | http://localhost:3010/inbox | none. Demo only. A production build answers 404. |
+| SMS screen alone: the demo SMS outbox (`sms_outbox`), newest first | http://localhost:3010/sms | none. Demo only. A production build answers 404 and refuses SMS requests, because it has no SMS gateway. |
 | HAPI FHIR | http://localhost:8090/fhir | |
 | Synapse | http://localhost:8008 | bot: `ordy` / `ordy-demo-2026` |
 | Postgres | `postgres://ordy:ordy@localhost:5433/ordy` | `ordy` / `ordy` |
@@ -103,7 +104,7 @@ Test citizens for the ID Austria login: `eva.brandl` / `demo-eva`, `stefan.kern`
 | `pnpm citizen --given Peter --family Muster --birthdate 1970-01-01` | Adds a test citizen to the simulated ID Austria and prints the username, password, bPK, and eHVD OID. [Identity and misdelivery](IDENTITY.md#add-a-test-citizen) lists the options. |
 | `pnpm validate` | Runs the HL7 validator on every resource named in an `answer_filed` entry and counts the errors. `--since <time>` takes only the entries from that time on. `pnpm validate <file or folder>` checks hand-made resources instead. Needs Java. [FHIR](FHIR.md#validation) has the details. |
 | `pnpm audit:check` | Lists the six audit event types per request, each with who, what, and when. `--request <id>` checks one request. `--effort` prints the audit timeline and the effort in seconds of the newest request 1, or of `--request <id>`, for the [timed test](clinical-review/TIMED_TEST_20.md). |
-| `pnpm scenario` | Runs request 1, M1 to M3, and request 2 against the running stack and writes the four metric results to `out/metrics/metrics.md`. `--no-validate` skips the validator. [Whitepaper](WHITEPAPER.md#how-we-measure-the-metrics) has the details. |
+| `pnpm scenario` | Runs request 1, M1 to M3, and request 2 against the running stack, through the code paths of `pnpm demo:seed`, and writes the four metric results to `out/metrics/metrics.md` and the steps to `out/metrics/scenario.json`. Needs the containers, `pnpm fhir:seed`, and `pnpm dev`: the logins run in the script, but M1 fetches the page the wrong person sees from the web server. `--web <url>` fetches it from another web server than `PUBLIC_URL`; the logins always use `PUBLIC_URL`, the redirect URI Keycloak allows. It sends no email. Each run adds three requests. Needs Java for the validator; `--no-validate` skips it, and FHIR validation then reads "not measured". [Whitepaper](WHITEPAPER.md#how-we-measure-the-metrics) has the details. |
 | `pnpm clinical-review:export` | Writes the transaction Bundle ordy would file for each scenario and extra document to `docs/clinical-review/19-fhir/`, without any server. Run it after a change to the parser, the mappers, or the filing, and compare. [Review 19](clinical-review/REVIEW_19_FHIR_DATA.md) has the details. |
 | `./scripts/setup.sh` | Full one-time setup, see above |
 

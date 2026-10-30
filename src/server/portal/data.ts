@@ -6,9 +6,10 @@ import { anonymousBrowser, recordAudit } from "@/server/audit/record";
 import { db } from "@/server/db";
 import { fhirFetch } from "@/server/fhir/client";
 import { linkIsLive } from "@/server/requests/lifecycle";
-import { findRequestByToken, type RequestRow } from "@/server/requests/service";
+import { expireDueRequests, findRequestByToken, type RequestRow } from "@/server/requests/service";
+import { readSmsOutbox } from "@/server/requests/sms";
 
-// Data the portal pages need. The SMS log does not exist, so listSms returns nothing. T06 sends email only.
+// Data the portal pages need, and the demo SMS outbox for /sms and /inbox.
 
 /** What the outside person may see before the identity check: the requester and the clinic only. */
 export type PublicRequest = { requester: string; clinic: string; expiresAt: Date };
@@ -19,7 +20,8 @@ export type AnswerContext = PublicRequest & {
   patient: { name: string; birthDate: string };
 };
 
-export type SmsMessage = { id: number; to: string; body: string; sentAt: Date };
+/** An SMS in the demo outbox. `body` is the text as sent, with the working link. */
+export type SmsMessage = { id: number; requestId: number; to: string; body: string; sentAt: Date };
 
 const publicPart = (request: RequestRow): PublicRequest => ({
   requester: request.requesterName,
@@ -74,7 +76,11 @@ export async function findAnswerContext(
   };
 }
 
-// TODO: read the SMS the request service would have sent. No task owns this, because T06 sends email only.
+/**
+ * The SMS the request service sent to the demo outbox, newest first (`sendRequestSms`). Only open requests have one:
+ * expiring the due requests first deletes the SMS of those, as every other close does. Empty in a production build.
+ */
 export async function listSms(): Promise<SmsMessage[]> {
-  return [];
+  await expireDueRequests(db);
+  return readSmsOutbox(db);
 }

@@ -64,7 +64,7 @@ export const metricsFixtures = (store: FixtureStore): RouterFixtures<"metrics"> 
           {
             name: "Effort for the outside person",
             target: "0 installs, 0 accounts, under 2 minutes",
-            result: "74 s from link_opened to the answer_sent that was filed (automated run; the stopwatch test is #20)",
+            result: "automated run: 74 s from link_opened to the answer_sent that was filed, machine time, not a person (a person's effort: docs/clinical-review/TIMED_TEST_20.md)",
             status: "met",
           },
           { name: "Misdeliveries caught", target: "3 of 3", result: "3 of 3", status: "met" },

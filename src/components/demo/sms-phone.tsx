@@ -1,11 +1,12 @@
+import { connection } from "next/server";
 import { Suspense } from "react";
 
 import { Time } from "@/components/time";
 import { cn } from "@/lib/utils";
 import { listSms } from "@/server/portal/data";
 
-// The phone screen of /sms and /inbox: every SMS the request service would have sent (docs/ARCHITECTURE.md). Server
-// only, because it reads listSms().
+// The phone screen of /sms and /inbox: every SMS in the demo outbox, each with its working link (docs/ARCHITECTURE.md,
+// "Outgoing messages"). Server only, because it reads listSms(). Only open requests have one; closing a request deletes it.
 
 const isLink = (word: string) => (word.startsWith("http://") || word.startsWith("https://")) && URL.canParse(word);
 
@@ -44,8 +45,10 @@ export function SmsPhone({ className }: { className?: string }) {
 }
 
 async function Messages() {
+  // The outbox changes with every request, so it is read at request time, never prerendered.
+  await connection();
   const messages = await listSms();
-  if (!messages.length) return <p className="pt-10 text-center text-sm text-muted-foreground">No SMS sent yet.</p>;
+  if (!messages.length) return <p className="pt-10 text-center text-sm text-muted-foreground">No SMS for an open request.</p>;
   return messages.map((m) => (
     <div key={m.id} className="grid gap-1.5">
       <span className="text-center font-mono text-[11px] text-muted-foreground">

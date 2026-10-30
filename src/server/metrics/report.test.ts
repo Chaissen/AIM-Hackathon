@@ -41,9 +41,13 @@ test("effort is met under two minutes and not measured before request 1 is filed
 
 test("the effort status agrees with the shown number of seconds", () => {
   const justUnder = effortMetric(119.4);
-  assert.deepEqual([justUnder.result.split(" s ")[0], justUnder.status], ["119", "met"]);
+  assert.deepEqual([justUnder.result.split(" s ")[0], justUnder.status], ["automated run: 119", "met"]);
   const roundsUp = effortMetric(119.6);
-  assert.deepEqual([roundsUp.result.split(" s ")[0], roundsUp.status], ["120", "missed"]);
+  assert.deepEqual([roundsUp.result.split(" s ")[0], roundsUp.status], ["automated run: 120", "missed"]);
+});
+
+test("the effort result says it is machine time, not a person, and names the timed test", () => {
+  assert.match(effortMetric(74).result, /^automated run: 74 s .*not a person.*TIMED_TEST_20\.md/);
 });
 
 test("audit coverage counts request 1", () => {

@@ -18,14 +18,16 @@ import { startEhvdMock } from "@/server/ehvd/start-mock";
 import { anonymousBrowser } from "@/server/audit/record";
 import { answerDeps, type AnswerDeps } from "@/server/answers/deps";
 import type { AnswerToFile } from "@/server/answers/ports";
-import { auditLog, bindings, heldAnswers, keptAnswers, requests } from "@/server/db/schema";
+import { auditLog, bindings, heldAnswers, keptAnswers, requests, smsOutbox } from "@/server/db/schema";
 import { capabilities, fhirFetch } from "@/server/fhir/client";
-import { findAnswerContext, findPublicRequest } from "@/server/portal/data";
+import { forbiddenContent, requestSms } from "@/server/mail/message";
+import { findAnswerContext, findPublicRequest, listSms } from "@/server/portal/data";
 import { TransitionError } from "@/server/requests/lifecycle";
 import { LINK_TTL_MS } from "@/server/requests/link-token";
 import { runIdentityChecks } from "@/server/identity/login";
-import type { Notice } from "@/server/matrix/notices";
+import { type Notice, noticeText } from "@/server/matrix/notices";
 import { identityCheckPorts } from "@/server/requests/identity-ports";
+import { notifyDeps, notifyRequest } from "@/server/requests/notify";
 import {
   applyEvent,
   applyLoginTransition,
@@ -36,6 +38,7 @@ import {
   type NewRequest,
   sendAnyway,
 } from "@/server/requests/service";
+import { NoSmsGateway, readSmsOutbox, sendRequestSms } from "@/server/requests/sms";
 
 // Runs against the Postgres from DATABASE_URL and deletes its rows afterwards. Skipped when Postgres is not running.
 // Request ids still move on, so run `pnpm reset` before a demo.
@@ -65,7 +68,16 @@ const request1 = {
 
 const maria = async () => ({ family: "Beispiel", given: ["Maria"], birthDate: "1961-03-12", display: "Maria Beispiel" });
 
-Object.assign(linkDeps, { readPatient: maria, sendRequestEmail: async () => {} });
+// No email leaves the tests, and no notice reaches Dr. Hofer's room: `notify` keeps them here. The SMS goes into the demo
+// outbox as in development, and deleting the test requests deletes their SMS.
+const notified: { id: number; notice: Notice }[] = [];
+Object.assign(linkDeps, {
+  readPatient: maria,
+  sendRequestEmail: async () => {},
+  notify: async (request: { id: number }, notice: Notice) => {
+    notified.push({ id: request.id, notice });
+  },
+});
 const noLink = async () => {};
 
 const newRequest: NewRequest = {
@@ -745,4 +757,225 @@ test("applyEvent refuses a login's events, even from a caller that casts", { ski
     await assert.rejects(applyEvent(db, request.id, event as never), TransitionError, event);
   }
   assert.equal((await getRequest(db, request.id))?.state, "sent");
+});
+
+// ---------- The demo SMS outbox and the "Request … sent" notice ----------
+
+// A number of this run's own, so a check that nothing was stored sees only this run.
+const phoneOf = (n: number) => `+43 699 ${parseInt(run, 16) % 10_000_000} ${n}`;
+const kern = (phone: string) => ({ docType: "rehab-report", patient: "maria-beispiel", given: "Stefan", family: "Kern", org: "Reha Waldblick", phone }) as const;
+const smsTo = (phone: string) => db.select().from(smsOutbox).where(eq(smsOutbox.to, phone));
+const requestsTo = (address: string) => db.select({ id: requests.id }).from(requests).where(eq(requests.address, address));
+const tokenIn = (body: string) => body.split(`${env.PUBLIC_URL}/r/`)[1]?.split(" ")[0] ?? "";
+
+/** Runs `run` with stand-ins for what sending a link uses. */
+async function withLinkDeps(stand: Partial<typeof linkDeps>, run: () => Promise<void>) {
+  const real = { ...linkDeps };
+  Object.assign(linkDeps, stand);
+  try {
+    await run();
+  } finally {
+    Object.assign(linkDeps, real);
+  }
+}
+
+/** Runs `run` with every console line kept instead of printed, and returns them. */
+async function consoleLines(run: () => Promise<void>): Promise<string[]> {
+  const lines: string[] = [];
+  const methods = ["log", "info", "warn", "error", "debug"] as const;
+  const real = methods.map((m) => console[m]);
+  for (const m of methods) console[m] = (...args: unknown[]) => void lines.push(args.map(String).join(" "));
+  try {
+    await run();
+  } finally {
+    methods.forEach((m, i) => (console[m] = real[i]));
+  }
+  return lines;
+}
+
+test("an SMS request goes into the demo outbox with its working link, and no log line holds the link", { skip: noDb }, async () => {
+  const phone = phoneOf(1);
+  let id = 0;
+  const lines = await consoleLines(async () => {
+    const request = await clinic.request.create(kern(phone));
+    created.push(request.id);
+    id = request.id;
+  });
+  const outbox = await readSmsOutbox(db, { requestId: id });
+  assert.equal(outbox.length, 1);
+  const [sms] = outbox;
+  assert.equal(sms.to, phone);
+  const token = tokenIn(sms.body);
+  assert.equal((await findRequestByToken(db, token))?.id, id, "the link in the SMS opens this request");
+  const request = (await getRequest(db, id))!;
+  const link = `${env.PUBLIC_URL}/r/${token}`;
+  assert.equal(sms.body, requestSms({ requester: request.requesterName, clinic: env.CLINIC_NAME, link, expiresAt: request.expiresAt }).text);
+  assert.deepEqual(forbiddenContent({ subject: "", text: sms.body }, await maria()), []);
+  assert.ok((await listSms()).some((m) => m.id === sms.id && m.requestId === id && m.body === sms.body), "the SMS screen shows it");
+  assert.equal(lines.filter((line) => line.includes(token)).length, 0, "the link token reaches no log");
+});
+
+test("the content check refuses an SMS that would name the patient, and nothing is stored or sent", { skip: noDb }, async () => {
+  // The clinic name is in every SMS, so a patient with that name cannot get one.
+  const named = async () => ({ ...(await maria()), family: env.CLINIC_NAME.split(" ").at(-1)! });
+  const incomplete = async () => ({ ...(await maria()), birthDate: "1961" });
+  const before = notified.length;
+  await withLinkDeps({ readPatient: named }, async () => {
+    await assert.rejects(
+      clinic.request.create(kern(phoneOf(2))),
+      (e) => e instanceof TRPCError && e.code === "PRECONDITION_FAILED" && e.message === "The SMS would contain patient-name, so it was not sent. The request did not go out.",
+    );
+  });
+  await withLinkDeps({ readPatient: incomplete }, async () => {
+    await assert.rejects(
+      clinic.request.create(kern(phoneOf(3))),
+      (e) => e instanceof TRPCError && e.code === "PRECONDITION_FAILED" && e.message.includes("so ordy cannot check the SMS"),
+    );
+  });
+  for (const phone of [phoneOf(2), phoneOf(3)]) {
+    assert.deepEqual(await smsTo(phone), [], phone);
+    assert.deepEqual(await requestsTo(phone), [], "the request rolled back");
+  }
+  assert.equal(notified.length, before, "no sent notice for a request that did not go out");
+});
+
+test("a production build stores no SMS and refuses the SMS request with a clear error", { skip: noDb }, async () => {
+  // `outbox` is `demoToolsEnabled`, false in a production build.
+  const production: typeof sendRequestSms = (tx, sms) => sendRequestSms(tx, sms, false);
+  await withLinkDeps({ sendRequestSms: production }, async () => {
+    await assert.rejects(
+      clinic.request.create(kern(phoneOf(4))),
+      (e) =>
+        e instanceof TRPCError &&
+        e.code === "PRECONDITION_FAILED" &&
+        e.message === "This installation has no SMS gateway, so ordy cannot send an SMS. Send the request by email. The request did not go out.",
+    );
+  });
+  assert.deepEqual(await smsTo(phoneOf(4)), []);
+  assert.deepEqual(await requestsTo(phoneOf(4)), []);
+  // The content check still runs first, so a gateway can later take the place of the outbox.
+  const sms = { requestId: 0, to: phoneOf(4), requester: "Dr. Lena Hofer", clinic: env.CLINIC_NAME, link: `${env.PUBLIC_URL}/r/x`, expiresAt: new Date() };
+  await assert.rejects(sendRequestSms(db, { ...sms, patient: await maria() }, false), NoSmsGateway);
+  await assert.rejects(sendRequestSms(db, { ...sms, patient: { ...(await maria()), given: ["R."] } }, false), /patient record/);
+});
+
+test("a request's SMS leaves the outbox when the request closes, and stays while its link works", { skip: noDb }, async () => {
+  const sent = async (n: number) => {
+    const request = await clinic.request.create(kern(phoneOf(10 + n)));
+    created.push(request.id);
+    assert.equal((await readSmsOutbox(db, { requestId: request.id })).length, 1);
+    return request.id;
+  };
+  const left = async (id: number) => (await readSmsOutbox(db, { requestId: id })).length;
+
+  const cancelled = await sent(1);
+  await clinic.request.cancel({ id: cancelled });
+  assert.equal(await left(cancelled), 0, "cancelled");
+
+  const filed = await sent(2);
+  assert.equal(await applyLoginTransition(db, filed, { from: "sent", to: "verified", personNumber: "GH:stefan" }), true);
+  assert.equal(await left(filed), 1, "verified: the link still works");
+  assert.equal((await applyEvent(db, filed, "answer_confirmed"))?.state, "filed");
+  assert.equal(await left(filed), 0, "filed");
+
+  const locked = await sent(3);
+  for (let i = 0; i < 3; i++) await incrementFailedChecks(db, locked);
+  assert.equal(await applyLoginTransition(db, locked, { from: "sent", to: "locked" }), true);
+  assert.equal(await left(locked), 0, "locked");
+
+  const expired = await sent(4);
+  await db.update(requests).set({ expiresAt: new Date(Date.now() - 1_000) }).where(eq(requests.id, expired));
+  assert.equal((await listSms()).some((m) => m.requestId === expired), false, "the SMS screen expires the request first");
+  assert.equal((await getRequest(db, expired))?.state, "expired");
+  assert.equal(await left(expired), 0, "expired");
+});
+
+test("Dr. Hofer's room gets the sent notice when a request goes out, also after Send anyway, never naming the patient", { skip: noDb }, async () => {
+  const noticesOf = (id: number) => notified.filter((n) => n.id === id).map((n) => n.notice);
+  const email = await clinic.request.create(request1);
+  created.push(email.id);
+  assert.deepEqual(noticesOf(email.id), [{ kind: "sent", requestId: email.id, recipient: "Eva Brandl", org: "Labor Kanalstraße", channel: "email" }]);
+
+  const sms = await clinic.request.create(kern(phoneOf(20)));
+  created.push(sms.id);
+  assert.deepEqual(noticesOf(sms.id), [{ kind: "sent", requestId: sms.id, recipient: "Stefan Kern", org: "Reha Waldblick", channel: "sms" }]);
+  assert.equal(noticeText(noticesOf(sms.id)[0]), `Request ${sms.id} sent to Stefan Kern (Reha Waldblick) by SMS.`);
+
+  const waiting = await clinic.request.create({ ...request1, email: "eva.brandl@labor-kanaI.example" });
+  created.push(waiting.id);
+  assert.deepEqual(noticesOf(waiting.id), [], "nothing went out yet");
+  await clinic.request.sendAnyway({ id: waiting.id });
+  assert.deepEqual(
+    noticesOf(waiting.id).map((n) => n.kind),
+    ["sent"],
+  );
+
+  for (const { notice } of notified) assert.equal(/Maria|1961/.test(noticeText(notice)), false, noticeText(notice));
+});
+
+/** Runs `run` with a stand-in for Dr. Hofer's room. */
+async function withRoom(post: typeof notifyDeps.post, run: () => Promise<void>) {
+  const real = { ...notifyDeps };
+  Object.assign(notifyDeps, { room: async () => "!hofer:test", post });
+  try {
+    await run();
+  } finally {
+    Object.assign(notifyDeps, real);
+  }
+}
+
+test("the first notice starts the request's thread and stores it, and later notices join it", { skip: noDb }, async () => {
+  const { request } = await seed();
+  const posts: [string, Notice["kind"], string | undefined][] = [];
+  const sent: Notice = { kind: "sent", requestId: request.id, recipient: "Eva Brandl", org: "Labor Kanalstraße", channel: "email" };
+  const wrongPerson: Notice = { kind: "wrong-person", requestId: request.id, recipient: "Eva Brandl", idAustriaName: "Thomas Wagner" };
+  await withRoom(
+    async (room, notice, root) => {
+      posts.push([room, notice.kind, root]);
+      return `$event${posts.length}`;
+    },
+    async () => {
+      await notifyRequest(request, sent);
+      // `request` was read before the thread started; the thread comes from the database.
+      await notifyRequest(request, wrongPerson);
+    },
+  );
+  assert.deepEqual(posts, [
+    ["!hofer:test", "sent", undefined],
+    ["!hofer:test", "wrong-person", "$event1"],
+  ]);
+  const row = await getRequest(db, request.id);
+  assert.deepEqual([row?.matrixRoom, row?.matrixEvent], ["!hofer:test", "$event1"]);
+});
+
+test("a failed sent notice never fails the request, and the next notice starts the thread", { skip: noDb }, async () => {
+  let down = true;
+  const roots: (string | undefined)[] = [];
+  let id = 0;
+  await withLinkDeps({ notify: notifyRequest }, async () => {
+    await withRoom(
+      async (_room, _notice, root) => {
+        if (down) throw new Error("Matrix 502");
+        roots.push(root);
+        return "$wrong-person";
+      },
+      async () => {
+        const request = await clinic.request.create(request1);
+        created.push(request.id);
+        id = request.id;
+        assert.equal(request.state, "sent");
+        down = false;
+        const stale = { id: request.id, matrixRoom: null, matrixEvent: null };
+        await notifyRequest(stale, { kind: "wrong-person", requestId: request.id, recipient: "Eva Brandl", idAustriaName: "Anna Huber" });
+      },
+    );
+  });
+  const row = await getRequest(db, id);
+  assert.equal(row?.state, "sent");
+  assert.deepEqual(roots, [undefined], "the wrong-person notice starts the thread");
+  assert.deepEqual([row?.matrixRoom, row?.matrixEvent], ["!hofer:test", "$wrong-person"]);
+  assert.deepEqual(
+    (await auditOf(id)).map((a) => a.event),
+    ["request_sent"],
+  );
 });

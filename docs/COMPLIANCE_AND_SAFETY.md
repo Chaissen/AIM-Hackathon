@@ -6,8 +6,8 @@ This page sets the team rules for data, messages, identity, and AI, and it holds
 
 1. No real patient data enters the project. That covers the repository, the databases, Keycloak, the team's Gmail inboxes, logs, screenshots, slides, and the video.
 2. Every person, organisation, phone number, email address, eHVD entry, and document is made up. The eHVD mock uses the real OID structure under `1.2.40.0.34.3.1.99.1` and `1.2.40.0.34.3.2.99.1`, but no entry is copied from the real directory. The scenario's `.example` addresses cannot receive mail, and the phone number is made up.
-3. The request service sends email only through Gmail SMTP as ordysoftware@gmail.com, and only to the team inboxes in `MAIL_TEAM_INBOXES`. It sends SMS only to its own SMS screen. It never sends to any other real address or number.
-4. The demo page `/inbox` shows the SMS screen to anyone who can reach the request service. The screen would list every SMS with its working link, but ordy keeps no SMS log yet, so it lists none (`listSms` in `src/server/portal/data.ts`), and `pnpm dev` prints each SMS link in its log instead. The page does not show the emails. Its button opens Gmail, which needs the team's Google login. A production build answers 404 there.
+3. The request service sends email only through Gmail SMTP as ordysoftware@gmail.com, and only to the team inboxes in `MAIL_TEAM_INBOXES`. It sends SMS only to its own SMS screen: there is no SMS gateway, and a production build refuses SMS requests. It never sends to any other real address or number.
+4. The demo pages `/inbox` and `/sms` show the SMS screen to anyone who can reach the request service. It lists every SMS in the demo outbox with its working link (`listSms` in `src/server/portal/data.ts`), so anyone who opens the page can answer as the recipient, after the ID Austria login. That is acceptable for synthetic data only. Only open requests have an SMS there. `/inbox` does not show the emails. Its button opens Gmail, which needs the team's Google login. A production build answers 404 on both pages and keeps no outbox.
 5. If anyone suspects real data somewhere, they post `PRIVACY:` in the team chat. We delete it from the working tree, purge it from git history if it was committed, and note the incident in `docs/privacy_log.md`.
 
 ## What an outgoing email or SMS may contain
@@ -43,10 +43,11 @@ The check compares whole words. A substring check would block every message, bec
 | Data | Where | Why | How long |
 |---|---|---|---|
 | Requests | Postgres `requests`: document type, patient id, requested person, address, requester and their Matrix display name, state, link hash, the person number (bPK) of the person who passed or was held, and the ID token of that person's last login | Lifecycle and link checks. The bPK makes sure only that person can answer. The ID token goes into the Provenance at filing. | Until the demo reset |
+| Demo SMS outbox | Postgres `sms_outbox`: the mobile number and the SMS text as sent, which holds the working link and so the link token. Only outside a production build (`demoToolsEnabled`); a production build stores nothing and refuses the SMS request. | The SMS screen shows the SMS the request service would send, as the brief asks, so request 2 can be answered from it | While the request is open. Filing, cancelling, rejecting, locking, and expiry delete it, and `pnpm reset` empties the table. |
 | Person number bindings | Postgres `bindings` | Only the person who answered before can answer as that person again | Until the demo reset |
 | Audit log | Postgres `audit_log`, including the document type, channel, and recipient address of each sent request | Who did what and when. No document text. | Until the demo reset |
 | Filed answers | HAPI FHIR | The clinical record | Until the demo reset |
-| Held answers, about the right patient | Postgres `held_answers`: the text, its hash, the sender's name and eHVD OID, their ID token, the hold reason, and the eHVD OIDs the release check found | Dr. Hofer decides about an answer the eHVD did not confirm | Until she accepts (then it is in HAPI) or rejects it, or the request is cancelled or expires |
+| Held answers, about the right patient | Postgres `held_answers`: the text, its hash, the sender's name and eHVD OID, their ID token, the hold reason, the eHVD OIDs the release check found, and the name of the model that agreed with the AI fallback's reading. Never the model's reading itself. | Dr. Hofer decides about an answer the eHVD did not confirm or the AI fallback read | Until she accepts (then it is in HAPI) or rejects it, or the request is cancelled or expires |
 | Answers whose filing outcome is unknown | Postgres `kept_answers`: the parsed document, the parties, the sender's ID token, and the upload hash | After a timeout the FHIR server may have filed it, so a retry must file exactly this answer | Until it is filed or the FHIR server refuses it, or the request is cancelled or expires |
 | ID token of the sender | Provenance `signature.data`, and `requests.id_token` for the person the request is bound to | Proof of the identity check that anyone can verify later | With the record. In `requests` only while the request is open: filing, cancelling, rejecting, and expiry clear it |
 | Uploads for the wrong patient | Nowhere. Only the SHA-256 hash and the reason stay in the audit log. | Max Beispiel's data must not end up in Maria's record or anywhere else | Discarded after the check |
@@ -60,21 +61,21 @@ The ID token holds the sender's name, birth date, and person number. That is mor
 
 The eHVD entries that the Contacts view lists or finds are not stored. Only network members can request them (`directory.listed` and `directory.search`), and the widget keeps them in its in-memory query cache, never in browser storage, a file, or the database.
 
-Application logs hold request ids, timings, check results, and validator outcomes, never document text or patient names. The workspace gateway disables access logs and limits nginx errors to critical diagnostics, because request URLs can contain bearer links or clinical query inputs. External proxies must follow the logging guidance in [Deployment](DEPLOYMENT.md).
+Application logs hold request ids, timings, check results, and validator outcomes, never document text, patient names, or a link. The link token lives only in the email, in the SMS, and, outside a production build, in the demo SMS outbox. `pnpm dev` no longer prints SMS links: the SMS screen shows them. `next dev` logs every request path, so `next.config.ts` leaves out the portal's paths `/r/…`, which hold the token. The workspace gateway disables access logs and limits nginx errors to critical diagnostics, because request URLs can contain bearer links or clinical query inputs. External proxies must follow the logging guidance in [Deployment](DEPLOYMENT.md).
 
 Workspace calls explicitly select their clinic cookie with `x-ordy-workspace: 1`. Outside-person requests retain the separate ID Austria path, including when both sessions exist in one browser. Joined-room checks apply to every chat read and send. Existing requester ownership and clinical release rules are unchanged.
 
 `pnpm reset` (`scripts/reset.sh`) empties Postgres and HAPI and reloads the three synthetic patients: Maria Beispiel from `track/scenario/patient.json`, and Johann Muster and Petra Probst from `scripts/fixtures/patients/`. It does not empty the Gmail inbox, and the links in older emails then say "This link does not work". We run it before the pitch.
 
-`pnpm demo:seed` creates only synthetic data: requests about these three patients to the test citizens at `.example` addresses and made-up `+43 660 000 01xx` numbers, with the synthetic documents from `track/scenario/documents/` and `scripts/fixtures/documents/`. It runs the real checks and state changes, the expiry of one request included. It sends no email: each request email passes the content check above, and the seed then keeps it in its own process instead of handing it to Gmail, to read the link. It prints request ids, states, and document types only, and checks the rules above on what it stored before it ends ([Demo](DEMO.md#a-populated-workspace)).
+`pnpm demo:seed` creates only synthetic data: requests about these three patients to the test citizens at `.example` addresses and made-up `+43 660 000 01xx` numbers, with the synthetic documents from `track/scenario/documents/` and `scripts/fixtures/documents/`. It runs the real checks and state changes, the expiry of one request included. It sends no email: each request email passes the content check above, and the seed then keeps it in its own process instead of handing it to Gmail, to read the link. It reads each SMS link from the demo SMS outbox. It prints request ids, states, and document types only, and checks the rules above on what it stored before it ends ([Demo](DEMO.md#a-populated-workspace)).
 
 ## AI rules
 
-AI is optional in this project. If we build the AI fallback parser:
+AI is optional in this project. The AI fallback parser runs only with `ANTHROPIC_API_KEY` set ([Architecture](ARCHITECTURE.md#ai-fallback-optional-cut-first)):
 
-- The model only reads documents. It never decides identity, the patient match, or whether an answer gets filed.
-- Every value and every LOINC code it returns must appear word for word in the document. Otherwise the answer is held.
-- An answer that the model read always waits until Dr. Hofer accepts it in the workspace or optional widget.
+- The model only reads documents. It never decides identity, the patient match, or whether an answer gets filed. The patient check runs on code's reading before the document goes to the model provider, so a file about another patient never reaches it.
+- Every value and every LOINC code it returns must appear word for word in the document. Otherwise the answer is not filed and not kept: the sender gets the same reasons as without the fallback and can upload the document again.
+- An answer that the model read always waits until Dr. Hofer accepts it in the workspace or optional widget. The held notice and the decision panel say that a language model read it, and the Provenance names the model.
 - We send only synthetic documents to the model provider and record the provider and model version in the README.
 
 ## Production alignment
@@ -84,7 +85,7 @@ AI is optional in this project. If we build the AI fallback parser:
 | GDPR Art. 5, data minimisation | Outgoing email and SMS carry no patient data. Matrix chat uses synthetic data only. Uploads for the wrong patient are discarded. Logs hold no document text. |
 | GDPR Art. 9, health data | Production needs a legal basis for healthcare provision and a processing agreement with any hosting party |
 | GDPR Art. 25, privacy by design | The patient appears only after the identity check. The check fails closed. |
-| GDPR Art. 32, security | Signed ID tokens, hashed link tokens, link expiry, a lock after three failed checks, and an audit log |
+| GDPR Art. 32, security | Signed ID tokens, hashed link tokens (only the demo SMS outbox, which a production build does not keep, holds a token), link expiry, a lock after three failed checks, and an audit log |
 | GDPR Art. 35, impact assessment | A data protection impact assessment comes before any pilot with real data |
 | eIDAS | ID Austria at level high is the identity source. We record the level in the Provenance. |
 | EHDS, primary use | FHIR R4 output fits the European move toward exchangeable health records |
