@@ -9,6 +9,8 @@ type LabValues = { within: number; outside: number };
 export type Notice =
   | { kind: "sent"; requestId: number; recipient: string; org: string; channel: "email" | "sms" }
   | { kind: "wrong-person"; requestId: number; recipient: string; idAustriaName: string }
+  // An identity check other than the name failed, so the person may well be the one asked for. The caller writes the reason.
+  | { kind: "identity-failed"; requestId: number; idAustriaName: string; reason: string }
   // The requested patient. The notice never names the patient in the document (M3).
   | { kind: "patient-mismatch"; requestId: number; patient: string }
   | { kind: "held"; requestId: number; hold: "identity" | "answer"; reason: string }
@@ -23,6 +25,8 @@ export function noticeText(notice: Notice): string {
       return `Request ${notice.requestId} sent to ${notice.recipient} (${notice.org}) by ${notice.channel === "sms" ? "SMS" : "email"}.`;
     case "wrong-person":
       return `Request ${notice.requestId} was opened by someone who is not ${notice.recipient} (ID Austria name: ${notice.idAustriaName}). Nothing was shown or filed. Check the address.`;
+    case "identity-failed":
+      return `Request ${notice.requestId} was opened by ${notice.idAustriaName}, but the identity check failed. ${notice.reason} Nothing was shown or filed.`;
     case "patient-mismatch":
       return `The answer to request ${notice.requestId} is about a different patient. Name and birth date do not match ${notice.patient}. Nothing was filed.`;
     case "held":
