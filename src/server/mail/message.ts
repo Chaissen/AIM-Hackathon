@@ -40,17 +40,24 @@ const isDigit = (c: string) => c >= "0" && c <= "9";
 const isWordChar = (c: string) => isDigit(c) || c.toLowerCase() !== c.toUpperCase();
 const graphemes = new Intl.Segmenter("und", { granularity: "grapheme" });
 const wordSegmenter = new Intl.Segmenter("und", { granularity: "word" });
-const isUncasedLetter = (c: string) => !isWordChar(c) && Boolean(wordSegmenter.segment(c).containing(0)?.isWordLike);
+// A mark that joins the character before it, such as an accent from any block, drops out without splitting the word.
+const isMark = (c: string) => Array.from(graphemes.segment(`a${c}`)).length === 1;
+// Spacing modifier letters, such as the apostrophe in "Лукʼян", have no case but belong to names in cased scripts.
+const isModifierLetter = (c: string) => c >= "\u02b0" && c <= "\u02ff";
+const isUncasedLetter = (c: string) => !isWordChar(c) && !isModifierLetter(c) && Boolean(wordSegmenter.segment(c).containing(0)?.isWordLike);
+
+function fold(text: string): string {
+  // Normalize to NFC first, or a decomposed "ü" loses its umlaut instead of becoming "ue".
+  const spelled = Array.from(text.normalize("NFC").toLowerCase(), (c) => FOLD.get(c) ?? c).join("");
+  return spelled.normalize("NFKD").toLowerCase();
+}
 
 function words(text: string): string[] {
-  // Normalize to NFC first, or a decomposed "ü" loses its umlaut instead of becoming "ue".
-  const folded = Array.from(text.normalize("NFC").toLowerCase(), (c) => FOLD.get(c) ?? c).join("");
   const result: string[] = [];
   let word = "";
-  // A grapheme counts as its base character, so accents and other combining marks drop out without splitting the word.
-  for (const { segment } of graphemes.segment(folded.normalize("NFKD").toLowerCase())) {
-    const [c] = segment;
+  for (const c of fold(text)) {
     if (isWordChar(c)) word += c;
+    else if (isMark(c)) continue;
     else if (word) {
       result.push(word);
       word = "";
@@ -88,6 +95,6 @@ export function forbiddenContent({ subject, text }: Email, patient: ExpectedPati
     .filter((term) => occursIn(term.words, message))
     .map((term) => term.category);
   // Whole words need letters with case. A name in a script without case, such as Chinese, could hide inside any word.
-  if (Array.from(patientName(patient).normalize("NFC")).some(isUncasedLetter)) found.unshift("patient-name");
+  if (Array.from(fold(patientName(patient))).some(isUncasedLetter)) found.unshift("patient-name");
   return [...new Set(found)];
 }
