@@ -27,7 +27,7 @@ export async function findAnswerContext(token: string, requestId: number): Promi
   return null;
 }
 
-// TODO(T06): read the SMS the request service would have sent.
+// TODO: read the SMS the request service would have sent. No task owns this, because T06 sends email only.
 export async function listSms(): Promise<SmsMessage[]> {
   return [];
 }

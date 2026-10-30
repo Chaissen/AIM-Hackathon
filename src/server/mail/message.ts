@@ -28,23 +28,28 @@ export function requestEmail({ requester, clinic, link, expiresAt }: RequestEmai
 export type ContentCategory = "patient-name" | "birth-date" | "document-type";
 type Term = { category: ContentCategory; words: string[] };
 
-const SPELL_OUT = new Map([
+// Umlauts are spelled out. The final sigma folds to σ, because lowercasing "ΠΑΥΛΟΣ's" gives σ but "Παύλος" ends in ς.
+const FOLD = new Map([
   ["ä", "ae"],
   ["ö", "oe"],
   ["ü", "ue"],
   ["ß", "ss"],
+  ["ς", "σ"],
 ]);
 const isDigit = (c: string) => c >= "0" && c <= "9";
 const isWordChar = (c: string) => isDigit(c) || c.toLowerCase() !== c.toUpperCase();
-const isCombiningMark = (c: string) => c >= "\u0300" && c <= "\u036f";
+const graphemes = new Intl.Segmenter("und", { granularity: "grapheme" });
+const wordSegmenter = new Intl.Segmenter("und", { granularity: "word" });
+const isUncasedLetter = (c: string) => !isWordChar(c) && Boolean(wordSegmenter.segment(c).containing(0)?.isWordLike);
 
 function words(text: string): string[] {
-  // NFC first: a decomposed "ü" would otherwise lose its umlaut instead of becoming "ue".
-  const spelled = Array.from(text.normalize("NFC").toLowerCase(), (c) => SPELL_OUT.get(c) ?? c).join("");
+  // Normalize to NFC first, or a decomposed "ü" loses its umlaut instead of becoming "ue".
+  const folded = Array.from(text.normalize("NFC").toLowerCase(), (c) => FOLD.get(c) ?? c).join("");
   const result: string[] = [];
   let word = "";
-  for (const c of spelled.normalize("NFKD").toLowerCase()) {
-    if (isCombiningMark(c)) continue;
+  // A grapheme counts as its base character, so accents and other combining marks drop out without splitting the word.
+  for (const { segment } of graphemes.segment(folded.normalize("NFKD").toLowerCase())) {
+    const [c] = segment;
     if (isWordChar(c)) word += c;
     else if (word) {
       result.push(word);
@@ -65,9 +70,11 @@ function birthDateForms(birthDate: IsoDate): string[] {
   return [birthDate, `${day}.${month}.${year}`, utcDate.format(Date.UTC(Number(year), Number(month) - 1, Number(day)))];
 }
 
+const patientName = (patient: ExpectedPatient) => [...patient.given, patient.family].join(" ");
+
 function forbiddenTerms(patient: ExpectedPatient): Term[] {
   return [
-    ...oneWordTerms("patient-name", [...patient.given, patient.family].join(" ")),
+    ...oneWordTerms("patient-name", patientName(patient)),
     ...birthDateForms(patient.birthDate).map((form): Term => ({ category: "birth-date", words: words(form) })),
     ...DOCUMENT_TYPE_TERMS,
   ];
@@ -77,6 +84,10 @@ const occursIn = (term: string[], message: string[]) => message.some((_, i) => t
 
 export function forbiddenContent({ subject, text }: Email, patient: ExpectedPatient): ContentCategory[] {
   const message = words(`${subject}\n${text}`);
-  const found = forbiddenTerms(patient).filter((term) => occursIn(term.words, message));
-  return [...new Set(found.map((term) => term.category))];
+  const found = forbiddenTerms(patient)
+    .filter((term) => occursIn(term.words, message))
+    .map((term) => term.category);
+  // Whole words need letters with case. A name in a script without case, such as Chinese, could hide inside any word.
+  if (Array.from(patientName(patient).normalize("NFC")).some(isUncasedLetter)) found.unshift("patient-name");
+  return [...new Set(found)];
 }
