@@ -62,8 +62,8 @@ const newRequest: NewRequest = {
   requesterName: "Dr. Lena Hofer",
 };
 
-async function seed() {
-  const result = await createRequest(db, newRequest, { passed: true });
+async function seed(overrides: Partial<NewRequest> = {}) {
+  const result = await createRequest(db, { ...newRequest, ...overrides }, { passed: true });
   created.push(result.request.id);
   return result;
 }
@@ -281,6 +281,16 @@ test("failed checks after the identity check are counted but change no state", {
   assert.equal((await getRequest(db, request.id))?.state, "verified");
 });
 
+test("a sent request with three counted failures locks at the next login instead of passing", { skip: noDb }, async () => {
+  const { request } = await seed();
+  // The third failure was counted, but the lock after it never ran, for example after a crash.
+  for (let i = 1; i <= 3; i++) await incrementFailedChecks(db, request.id);
+  assert.equal(await applyLoginTransition(db, request.id, { from: "sent", to: "verified", personNumber: "GH:eva" }), false);
+  const row = await getRequest(db, request.id);
+  assert.equal(row?.state, "locked");
+  assert.equal(row?.personNumber, null);
+});
+
 test("a request is bound to one person and never rebound", { skip: noDb }, async () => {
   const { request } = await seed();
   assert.equal(await applyLoginTransition(db, request.id, { from: "sent", to: "verified", personNumber: "GH:eva" }), true);
@@ -325,12 +335,14 @@ test("Accept keeps the held person, who then gets the patient", { skip: noFhir }
 
 test("a verified request bound to nobody shows no patient", { skip: noDb }, async () => {
   const { request, token } = await seed();
-  await applyEvent(db, request.id, "identity_pass");
+  // The request service never verifies without a bPK, so set the state directly: the answer page has to refuse it anyway.
+  await db.update(requests).set({ state: "verified" }).where(eq(requests.id, request.id));
   assert.equal(await findAnswerContext(token, { requestId: request.id, personNumber: "GH:eva" }), null);
 });
 
 test("the identity checks run on the request service ports", { skip: noDb }, async () => {
-  const { request } = await seed();
+  // An organisation of its own, so a binding left from a demo cannot change the result.
+  const { request } = await seed({ org: `Labor Kanalstraße ${randomBytes(4).toString("hex")}` });
   const notices: Notice[] = [];
   const ports = identityCheckPorts(db, async (_id, notice) => {
     notices.push(notice);
@@ -364,4 +376,14 @@ test("the identity checks run on the request service ports", { skip: noDb }, asy
     notices.map((n) => n.kind),
     ["wrong-person"],
   );
+});
+
+test("the login's audit port writes only the entries the audit types allow", async () => {
+  const { recordAudit: write } = identityCheckPorts(db, async () => {});
+  const entry = { event: "identity_checked", requestId: null, actorKind: "anonymous", actor: "ID Austria login", outcome: "hold" } as const;
+  const checks = [{ check: "service", result: "hold", reason: "keycloak_unreachable" }];
+  await assert.rejects(write({ ...entry, detail: { checks: [{ ...checks[0], birthDate: "1961-03-12" }] } }), { name: "ZodError" });
+  await assert.rejects(write({ ...entry, detail: { checks, reason: "a sentence" } }), { name: "ZodError" });
+  await assert.rejects(write({ ...entry, outcome: "maybe", detail: { checks } }), /does not write identity_checked with maybe/);
+  await assert.rejects(write({ ...entry, event: "answer_sent", detail: { checks } }), /does not write answer_sent/);
 });

@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import * as login from "@/server/identity/login";
+
 import {
   initialState,
   isOpen,
   linkIsLive,
+  MAX_FAILED_CHECKS,
   OPEN_STATES,
   REQUEST_STATES,
   type RequestEvent,
@@ -71,6 +74,11 @@ test("filed, cancelled, expired, and locked are final", () => {
 test("the link works only once it went out and while the request is open", () => {
   const live = REQUEST_STATES.filter(linkIsLive);
   assert.deepEqual(live, ["sent", "identity_held", "verified", "answer_held"]);
+});
+
+test("the login uses the same live states and lock count as the lifecycle", () => {
+  assert.deepEqual([...login.LIVE_STATES].sort(), REQUEST_STATES.filter(linkIsLive).sort());
+  assert.equal(login.MAX_FAILED_CHECKS, MAX_FAILED_CHECKS);
 });
 
 test("the FHIR Task status mirrors each state", () => {
