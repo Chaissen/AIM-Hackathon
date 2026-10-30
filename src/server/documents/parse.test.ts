@@ -293,3 +293,206 @@ test("joined titles need a separator, so a name such as Magdi stays a name", () 
   assert.equal(parsePersonLine("Magdi Hassan, lab physician")?.given, "Magdi");
   assert.deepEqual(parsePersonLine("Univ.-Prof. Dipl.-Ing. Dr.med. Eva Brandl")?.titles, ["Univ.-Prof.", "Dipl.-Ing.", "Dr.med."]);
 });
+
+// #46: a key/value table row and a key with its value on the next line are patient lines too, in every document kind.
+
+const rehabLf = () => scenario("rehab-report-maria-beispiel.md").replace(/\r\n/g, "\n");
+const labLf = () => scenario("lab-result-maria-beispiel.md").replace(/\r\n/g, "\n");
+const referral = "# Praxis Dr. Huber: referral letter\n\nPatient: Maria Beispiel, born 12 March 1961\n\nPlease see the attached findings.\n";
+const kvTable = (...rows: string[]) => `\n## Details\n\n${rows[0]}\n|---|---|\n${rows.slice(1).join("\n")}\n`;
+
+test("a key/value table row names the patient in a rehab report and a generic document", () => {
+  for (const base of [rehabLf(), referral]) {
+    const cases: [string, string[]][] = [
+      [kvTable("| Patient | Max Beispiel |"), ["several-patients"]],
+      [kvTable("| Ward | 3 |", "| **Patient name:** | Max Beispiel |"), ["several-patients"]],
+      [kvTable("| Patient | Max Beispiel, born 1 January 1960 |"), ["several-patients", "several-birth-dates"]],
+      [kvTable("| Ward | 3 |", "| Date of birth | 01.01.1960 |"), ["several-birth-dates"]],
+    ];
+    for (const [extra, safety] of cases) {
+      const result = parseDocument(`${base}${extra}`);
+      assert.ok(!result.ok, extra);
+      assert.deepEqual(result.safety, safety, extra);
+    }
+    // The same patient in the table is fine, and so are the tables the scan does not read as key/value.
+    for (const extra of [
+      kvTable("| Patient | Maria Beispiel |", "| Date of birth | 12.03.1961 |"),
+      kvTable("| Patient name | BEISPIEL Maria, DOB 12.03.1961 |"),
+      "\n## Contact\n\n| Name | Stefan Kern |\n|---|---|\n| Phone | +43 660 000 0101 |\n",
+      "\n## Findings\n\n| Test | Result | Unit |\n|---|---|---|\n| Patient | Max Beispiel | x |\n",
+      "\n## Findings\n\n| Test | Result |\n|---|---|\n| CRP | 3 |\n",
+    ]) {
+      const result = parseDocument(`${base}${extra}`);
+      assert.ok(result.ok, `${extra}: ${result.ok ? "" : result.errors.join("; ")}`);
+      assert.equal(result.document.patient.name, "Maria Beispiel");
+    }
+  }
+  // A lab report with a key/value table has a second table, which is refused already.
+  assert.deepEqual((parseDocument(`${labLf()}${kvTable("| Patient | Maria Beispiel |")}`) as { safety: string[] }).safety, ["several-tables"]);
+});
+
+test("a key with its value on the next line names the patient, in the same paragraph or the next one", () => {
+  for (const base of [labLf(), rehabLf(), referral]) {
+    const cases: [string, string[]][] = [
+      ["\nPatient:\nMax Beispiel\n", ["several-patients"]],
+      ["\n**Patient name:**\n\nMax Beispiel, born 1 January 1960\n", ["several-patients", "several-birth-dates"]],
+      ["\n## Notes\n\nDate of birth:\n01.01.1960\n", ["several-birth-dates"]],
+    ];
+    for (const [extra, safety] of cases) {
+      const result = parseDocument(`${base}${extra}`);
+      assert.ok(!result.ok, extra);
+      assert.deepEqual(result.safety, safety, extra);
+    }
+    for (const extra of [
+      "\nPatient:\nMaria Beispiel\n",
+      "\n**Patient name:**\n\nMaria Beispiel, born 12 March 1961\n",
+      "\n## Notes\n\nDate of birth:\n12.03.1961\n",
+      // A key line or a heading is never the value of the key above it.
+      "\nPatient:\nWard: 3\n",
+      "\nPatient:\n\n## Course notes\n\nMax Beispiel walked with two crutches.\n",
+    ]) {
+      const result = parseDocument(`${base}${extra}`);
+      assert.ok(result.ok, `${extra}: ${result.ok ? "" : result.errors.join("; ")}`);
+    }
+  }
+});
+
+test("image alt text alone on its line names the patient like link text, in every document kind", () => {
+  for (const base of [labLf(), rehabLf(), referral]) {
+    const result = parseDocument(`${base}\n![Patient: Max Beispiel](x.png)\n`);
+    assert.ok(!result.ok);
+    assert.deepEqual(result.safety, ["several-patients"]);
+  }
+});
+
+/** Each extra text against Maria's file: the refusals it must give, or none when it must be accepted. */
+function expectSafety(cases: [string, string[]][], bases = [labLf(), rehabLf(), referral]) {
+  for (const base of bases) {
+    for (const [extra, safety] of cases) {
+      const result = parseDocument(`${base}${extra}`);
+      if (safety.length) assert.deepEqual(result.ok ? [] : result.safety, safety, extra);
+      else assert.ok(result.ok, `${extra}: ${result.ok ? "" : result.errors.join("; ")}`);
+    }
+  }
+}
+
+// #46 review: only a value that reads as one is taken from the next line or a table's header row.
+
+test("a sentence after a bare Patient key is not a patient line", () => {
+  expectSafety([
+    ["\n**Patient:**\n\n72-year-old woman after a total hip replacement on the left.\n", []],
+    ["\n**Patient:**\n72-year-old woman after a total hip replacement on the left.\n", []],
+    ["\nPatient:\nThe patient was admitted on 3 May.\n", []],
+    ["\nPatient:\nAdmitted for rehabilitation\n", []],
+    ["\nDate of birth:\nunknown, see the referral.\n", []],
+  ]);
+});
+
+test("a two-column table with column names in its header is read by column", () => {
+  const table = (head: string, row: string) => `\n## Details\n\n${head}\n|---|---|\n${row}\n`;
+  expectSafety([
+    [table("| Patient | Ward |", "| Maria Beispiel | 3 |"), []],
+    [table("| Patient | Date of birth |", "| Maria Beispiel | 12.03.1961 |"), []],
+    [table("| Date of birth | Age |", "| 12 March 1961 | 65 |"), []],
+    [table("| Patient | Ward |", "| Max Beispiel | 3 |"), ["several-patients"]],
+    [table("| Ward | Patient |", "| 3 | Max Beispiel |"), ["several-patients"]],
+    [table("| Patient | Date of birth |", "| Max Beispiel | 01.01.1960 |"), ["several-patients", "several-birth-dates"]],
+    [table("| Date of birth | Age |", "| 1 January 1960 | 66 |"), ["several-birth-dates"]],
+    // `Name` stays a header-only key in a column table too.
+    [table("| Name | Phone |", "| Stefan Kern | +43 660 000 0101 |"), []],
+    // A lab report with a second table is refused as `several-tables` already.
+  ], [rehabLf(), referral]);
+});
+
+test("a next-line value with a birth clause after DOB is read as the patient line, as on one line", () => {
+  expectSafety([
+    ["\nPatient:\nMax Beispiel DOB: 01.01.1960\n", ["several-patients", "several-birth-dates"]],
+    ["\nPatient:\nMaria Beispiel DOB: 12.03.1961\n", []],
+    ["\nPatient:\nMax Beispiel born: 1 January 1960\n", ["several-patients", "several-birth-dates"]],
+  ]);
+});
+
+test("a backslash hard break, an HTML block, or a dash also put the value on the next line", () => {
+  expectSafety([
+    ["\nPatient:\\\nMaria Beispiel\n", []],
+    ["\nPatient:\\\nMax Beispiel\n", ["several-patients"]],
+    ["\nPatient:\n<div>Maria Beispiel</div>\n", []],
+    ["\nPatient:\n<div>Max Beispiel</div>\n", ["several-patients"]],
+    ["\nPatient:\n\n<div>\nMax Beispiel\n</div>\n", ["several-patients"]],
+    ["\nPatient -\nMaria Beispiel\n", []],
+    ["\nPatient -\nMax Beispiel\n", ["several-patients"]],
+  ]);
+});
+
+// #46 review, round 2.
+
+test("a failed value in a table's first row never makes the table columns", () => {
+  const table = (...rows: string[]) => `\n## Details\n\n${rows[0]}\n|---|---|\n${rows.slice(1).join("\n")}\n`;
+  expectSafety(
+    [
+      [table("| Patient | maria beispiel |", "| Date of birth | 12.03.1961 |", "| Ward | 3 |"), []],
+      [table("| Patient | Maria Beispiel (f) |"), []],
+      [table("| Date of birth | 12.03.1961 (64 y) |", "| Patient | Maria Beispiel |", "| Ward | 3 |"), []],
+      [table("| Patient | Max Beispiel (m) |", "| Ward | 3 |"), ["several-patients"]],
+      [table("| Date of birth | 01.01.1960 (65 y) |", "| Ward | 3 |"), ["several-birth-dates"]],
+    ],
+    [rehabLf(), referral],
+  );
+});
+
+test("a next-line value is read as on one line, unless it is a sentence", () => {
+  const next = (key: string, value: string) => `\n${key}:\n${value}\n`;
+  const max = [
+    "Beispiel, Max",
+    "Max Beispiel, 01.01.1960",
+    "Max Beispiel (01.01.1960)",
+    "Max Beispiel (*01.01.1960)",
+    "Max Beispiel - 01.01.1960",
+    "Max Beispiel; DOB 01.01.1960",
+    "Max Beispiel, b. 01.01.1960",
+    "Max Beispiel, male, 65",
+    "Max Beispiel Jr.",
+    "max beispiel",
+    "Max Josef Karl Peter Paul Beispiel",
+  ];
+  expectSafety([
+    ...max.map((v): [string, string[]] => [next("Patient", v), v.includes(";") ? ["several-patients", "several-birth-dates"] : ["several-patients"]]),
+    [next("Date of birth", "01.01.1960 (65 years)"), ["several-birth-dates"]],
+    [next("Date of birth", "12th March 1961"), ["several-birth-dates"]],
+    [next("Patient", "maria beispiel"), []],
+    [next("Date of birth", "12.03.1961 (64 y)"), []],
+    [next("Patient", "Mobile, walks with crutches."), []],
+  ]);
+});
+
+// #46 review, round 3.
+
+test("a two-column table without an identity key in its header is key/value, not columns", () => {
+  const table = (...rows: string[]) => `\n## Admin\n\n${rows[0]}\n|---|---|\n${rows.slice(1).join("\n")}\n`;
+  expectSafety(
+    [
+      [table("| Field | Status |", "| Patient | Max Beispiel |"), ["several-patients"]],
+      [table("| Type | Discharge |", "| Patient | Max Beispiel |"), ["several-patients"]],
+      [table("| Report | Admission |", "| Date of birth | 01.01.1960 |"), ["several-birth-dates"]],
+      [table("| Field | Status |", "| Patient | Maria Beispiel |"), []],
+    ],
+    [rehabLf(), referral],
+  );
+});
+
+test("a bold, italic, or backticked name on the next line is read as on one line", () => {
+  expectSafety([
+    ["\n**Patient:**\n**Max Beispiel**, 01.01.1960\n", ["several-patients"]],
+    ["\nPatient:\n*Max Beispiel* (01.01.1960)\n", ["several-patients"]],
+    ["\nPatient:\n`Max Beispiel`, 01.01.1960\n", ["several-patients"]],
+    ["\n**Patient:**\n**Maria Beispiel**\n", []],
+  ]);
+});
+
+test("a birth date is read from its start only when an age or sex marker follows", () => {
+  expectSafety([
+    ["\nDate of birth: 12.03.1961 (Max Beispiel)\n", ["several-birth-dates"]],
+    ["\nDate of birth: 12.03.1961 / 1 January 60\n", ["several-birth-dates"]],
+    ...["(64 y)", "(64 years)", ", 64", "(f)", "(m)"].map((m): [string, string[]] => [`\nDate of birth: 12.03.1961 ${m}\n`.replace(" ,", ","), []]),
+  ]);
+});
