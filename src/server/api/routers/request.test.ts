@@ -18,7 +18,7 @@ import { startEhvdMock } from "@/server/ehvd/start-mock";
 import { anonymousBrowser } from "@/server/audit/record";
 import { answerDeps, type AnswerDeps } from "@/server/answers/deps";
 import type { AnswerToFile } from "@/server/answers/ports";
-import { auditLog, bindings, heldAnswers, keptAnswers, requests } from "@/server/db/schema";
+import { auditLog, bindings, heldAnswers, keptAnswers, requests, smsOutbox } from "@/server/db/schema";
 import { capabilities, fhirFetch } from "@/server/fhir/client";
 import { findAnswerContext, findPublicRequest } from "@/server/portal/data";
 import { TransitionError } from "@/server/requests/lifecycle";
@@ -155,6 +155,29 @@ test("an SMS request stores the phone number and is sent without the address che
   const unlisted = await clinic.request.create({ ...sms, org: "Labor Nirgendwo" });
   created.push(unlisted.id);
   assert.deepEqual([unlisted.state, unlisted.addressWarning], ["sent", null]);
+});
+
+test("an SMS request puts its SMS on the SMS screen, and its link opens the request", { skip: noDb }, async () => {
+  const request = await clinic.request.create({
+    docType: "rehab-report",
+    patient: "maria-beispiel",
+    given: "Stefan",
+    family: "Kern",
+    org: "Reha Waldblick",
+    phone: "+43 660 000 0101",
+  });
+  created.push(request.id);
+
+  const stored = await db.select({ to: smsOutbox.to, body: smsOutbox.body }).from(smsOutbox).where(eq(smsOutbox.requestId, request.id));
+  assert.equal(stored.length, 1);
+  assert.equal(stored[0].to, "+43 660 000 0101");
+  const prefix = `${env.PUBLIC_URL}/r/`;
+  const token = stored[0].body.slice(stored[0].body.indexOf(prefix) + prefix.length).split(" ")[0];
+  assert.deepEqual(await findPublicRequest(token, { ip: null }), {
+    requester: request.requesterName,
+    clinic: env.CLINIC_NAME,
+    expiresAt: request.expiresAt,
+  });
 });
 
 test("create refuses a request without a contact or with both", { skip: noDb }, async () => {

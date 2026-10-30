@@ -5,17 +5,11 @@ import { env } from "@/env";
 import { parseEmail, type ReceivedEmail, startFakeSmtp } from "./fake-smtp";
 import { MessageRefused, sendRequestEmail } from "./send";
 
-/** An SMTP server on 127.0.0.1 for this test. `env` sends to it, never to Gmail, until the test ends. */
+/** An SMTP server on 127.0.0.1 for this test. `env` sends to it, never to Mailpit, until the test ends. */
 async function fakeSmtp(t: TestContext): Promise<ReceivedEmail[]> {
   const smtp = await startFakeSmtp();
-  const saved = { SMTP_HOST: env.SMTP_HOST, SMTP_PORT: env.SMTP_PORT, SMTP_USER: env.SMTP_USER, MAIL_FROM: env.MAIL_FROM, MAIL_TEAM_INBOXES: env.MAIL_TEAM_INBOXES };
-  Object.assign(env, {
-    SMTP_HOST: "127.0.0.1",
-    SMTP_PORT: smtp.port,
-    SMTP_USER: "",
-    MAIL_FROM: "ordy · Klinikum Beispielstadt <request-service@ordy.test>",
-    MAIL_TEAM_INBOXES: ["team@ordy.test", "second@ordy.test"],
-  });
+  const saved = { SMTP_HOST: env.SMTP_HOST, SMTP_PORT: env.SMTP_PORT, MAIL_FROM: env.MAIL_FROM };
+  Object.assign(env, { SMTP_HOST: "127.0.0.1", SMTP_PORT: smtp.port, MAIL_FROM: "ordy · Klinikum Beispielstadt <request-service@ordy.test>" });
   t.after(async () => {
     Object.assign(env, saved);
     await smtp.close();
@@ -32,7 +26,7 @@ const request1 = {
   patient: { family: "Beispiel", given: ["Maria"], birthDate: "1961-03-12" },
 };
 
-test("request 1's email goes to the team inboxes as plain text addressed to Dr. Brandl", async (t) => {
+test("request 1's email goes to Dr. Brandl as plain text", async (t) => {
   const received = await fakeSmtp(t);
   await sendRequestEmail(request1);
 
@@ -51,7 +45,7 @@ test("request 1's email goes to the team inboxes as plain text addressed to Dr. 
     },
     {
       sender: "request-service@ordy.test",
-      recipients: ["team@ordy.test", "second@ordy.test"],
+      recipients: ["eva.brandl@labor-kanal.example"],
       from: "=?UTF-8?Q?ordy_=C2=B7_Klinikum_Beispielstadt?= <request-service@ordy.test>",
       to: "eva.brandl@labor-kanal.example",
       subject: "Secure request from Klinikum Beispielstadt",
@@ -72,7 +66,7 @@ test("an email that names the patient never reaches the SMTP server, while the s
   await assert.rejects(sendRequestEmail({ ...request1, requester: "Dr. Maria Hofer" }), (error) => {
     assert.ok(error instanceof MessageRefused);
     assert.deepEqual(error.categories, ["patient-name"]);
-    assert.equal(error.message, "Refused to send the email because it contains patient-name");
+    assert.equal(error.message, "Refused to send the message because it contains patient-name");
     return true;
   });
   assert.equal(received.length, 0);

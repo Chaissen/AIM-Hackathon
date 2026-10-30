@@ -46,7 +46,7 @@ export type AddressCheck =
   /** The eHVD could not confirm the address. The request waits too, but nothing was caught. */
   | { passed: false; unchecked: true };
 
-export type SendLink = (request: RequestRow, token: string) => Promise<void>;
+export type SendLink = (tx: Tx, request: RequestRow, token: string) => Promise<void>;
 
 /**
  * Stores a new request, with its audit entry in the same transaction. If the address check passed, the request is
@@ -62,7 +62,7 @@ export async function createRequest(db: Db, input: NewRequest, addressCheck: Add
     const actor: AuditActor = { kind: "network_member", id: row.requester };
     if (addressCheck.passed) {
       await recordAudit(tx, requestSent(row, actor, false));
-      await sendLink(row, token);
+      await sendLink(tx, row, token);
     } else if ("domain" in addressCheck) {
       await recordAudit(tx, {
         event: "misdelivery_caught",
@@ -87,7 +87,7 @@ export async function sendAnyway(db: Db, id: number, actor: AuditActor, sendLink
   const request = await applyEvent(db, id, "send_anyway", async (tx) => {
     const [row] = await tx.update(requests).set({ linkHash: hash, expiresAt: newExpiry() }).where(eq(requests.id, id)).returning();
     await recordAudit(tx, requestSent(row, actor, true));
-    await sendLink(row, token);
+    await sendLink(tx, row, token);
     return row;
   });
   return request && { request, token };

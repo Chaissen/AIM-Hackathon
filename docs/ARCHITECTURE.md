@@ -8,19 +8,19 @@ This page describes what runs, how the parts talk, and what the request service 
 |---|---|---|---|---|
 | Synapse | Matrix homeserver for `klinikum.example` | Reused | [`matrixdotorg/synapse`](https://hub.docker.com/r/matrixdotorg/synapse) | 8008 |
 | Workspace gateway | Public entry to the ordy workspace; forwards to Next.js | Configured | `nginx:stable-alpine`, template in `docker/workspace/` | 8081 |
-| Element Web (optional) | Legacy Matrix client and embedded widget compatibility | Reused | [`vectorim/element-web`](https://hub.docker.com/r/vectorim/element-web), Compose profile `legacy-element` | 8082 |
+| Element Web | Chat app, as the track suggests, with the ordy widget pinned in Dr. Hofer's room | Reused | [`vectorim/element-web`](https://hub.docker.com/r/vectorim/element-web) | 8082 |
 | Request service (ordy) | Workspace, Messages, outside portal, optional widget, identity checks, parser, FHIR mapper, audit log, SMS screen | Built | TypeScript: [Next.js](https://nextjs.org/docs) 16 (App Router), [tRPC](https://trpc.io/docs) v11, [zod](https://zod.dev/), [Drizzle](https://orm.drizzle.team/), [openid-client](https://github.com/panva/openid-client) (T07), [markdown-it](https://github.com/markdown-it/markdown-it) (T10), [Nodemailer](https://nodemailer.com/) (T06), UI with [shadcn/ui](https://ui.shadcn.com/) on Tailwind CSS | 3010 |
 | Matrix bot | Notices and `!status` in Dr. Hofer's room | Built | TypeScript process in `src/bot/`, small Matrix client on `fetch` in `src/server/matrix/client.ts` | none |
 | Postgres | Requests, bindings, audit log | Reused | [`postgres:17-alpine`](https://hub.docker.com/_/postgres) | 5433, mapped to 5432 in the container |
 | Simulated ID Austria | OpenID Connect login with fake citizens | Configured (T02) | [Keycloak](https://www.keycloak.org/server/containers) | 8080 |
 | eHVD mock | Directory of healthcare people and organisations, same SOAP interface as the real eHVD | Built (T23) | TypeScript service on `node:24-alpine` with [`saxes`](https://github.com/lddubeau/saxes), in `services/ehvd-mock/`, see [eHVD](EHVD.md) | 8095 |
-| Gmail | Sends every outgoing email as ordysoftware@gmail.com, only to the team inboxes, see [Outgoing messages](#outgoing-messages) | Reused | `smtp.gmail.com`, reached with Nodemailer | 465 outgoing |
+| Mailpit | Catches every outgoing email. It accepts any address and delivers nothing, see [Outgoing messages](#outgoing-messages). | Reused | [`axllent/mailpit`](https://hub.docker.com/r/axllent/mailpit) | 1025 SMTP, 8025 web |
 | HAPI FHIR | FHIR R4 server | Reused | [`hapiproject/hapi`](https://hub.docker.com/r/hapiproject/hapi) | 8090, mapped to 8080 in the container |
 | HL7 validator | Validates every filed resource | Reused | [`validator_cli.jar`](https://github.com/hapifhir/org.hl7.fhir.core/releases) | none |
 
 The Matrix bot runs as a second Node.js process next to Next.js, because Next.js does not keep a long-running sync loop. `pnpm dev` starts both. The bot calls tRPC procedures through `createCaller`, inside its own process, so there is no internal HTTP API. Both processes share the Postgres database.
 
-Every reused part can be replaced. Synapse can be any Matrix homeserver, Keycloak can be real ID Austria or another OpenID Connect provider, the eHVD mock can be the real eHVD web service, Gmail can be any SMTP server, and HAPI can be any FHIR R4 server.
+Every reused part can be replaced. Synapse can be any Matrix homeserver, Keycloak can be real ID Austria or another OpenID Connect provider, the eHVD mock can be the real eHVD web service, Mailpit can be any SMTP server, and HAPI can be any FHIR R4 server.
 
 ```
 Dr. Hofer -> workspace gateway -> ordy workspace (Next.js)
@@ -31,7 +31,7 @@ Outside person -> request link -> outside portal (Next.js)
                                     +-> ID Austria -> /auth/callback
                                     +-> tRPC -> the same request service
 
-Optional Element -> Synapse
+Element Web -> Synapse
                  +-> /widget iframe -> tRPC
 ```
 
@@ -140,7 +140,7 @@ Members sign in with an existing account on `MATRIX_SERVER_NAME`. `POST /api/wor
 
 The workspace sends `x-ordy-workspace: 1` on its tRPC calls. This selects only the workspace cookie, without falling through to an outside-person ID Austria session or an OpenID bearer token. Calls without that header retain the existing outside-portal and widget identity paths. Sign-in, sign-out, and workspace mutations require an exact Origin from `WORKSPACE_URL` or `PUBLIC_URL`, including its port. `WORKSPACE_URL` defaults to `http://localhost:8081`; `PUBLIC_URL` remains the outside-link base, normally `http://localhost:3010` locally. Request ownership and clinical release rules are unchanged.
 
-`/widget` remains optional Element compatibility. `pnpm matrix:bootstrap` pins it in Dr. Hofer's room. It uses `matrix-widget-api` to get a Matrix OpenID token after identity-sharing approval. It takes Element's origin from the appended `parentUrl` parameter and sends the token as `Authorization: Bearer`. The server checks it with Synapse and accepts only its configured homeserver. The verified Matrix ID is the audit actor in both entry points.
+`/widget` is the ordy widget in Element Web. `pnpm matrix:bootstrap` pins it in Dr. Hofer's room. It uses `matrix-widget-api` to get a Matrix OpenID token after identity-sharing approval. It takes Element's origin from the appended `parentUrl` parameter and sends the token as `Authorization: Bearer`. The server checks it with Synapse and accepts only its configured homeserver. The verified Matrix ID is the audit actor in both entry points.
 
 Patient, request, document, directory, and audit data come only from these procedures, all built on `clinicProcedure`:
 
@@ -161,7 +161,7 @@ The root, `/widget`, and `/audit` do not embed clinical data in their initial HT
 - **Demo tools**, only outside a production build: a card that opens the recipient's inbox, `/inbox` ([Outside portal](#outside-portal)), in a new tab
 - the initials, display name, and Matrix ID of the signed-in member, plus **Sign out** in workspace mode
 
-From 1024px, the navigation is a sidebar. It is sticky and scrolls on its own; the same layout also fits an optional Element frame. Below 1024px, a sticky top bar takes its place. It holds a menu button, the breadcrumb, a pill with the attention count that links to the **Needs attention** tab, and a **New request** button. The menu button opens `WidgetNav` in a sheet from the left, and any navigation closes it.
+From 1024px, the navigation is a sidebar. It is sticky and scrolls on its own; the same layout also fits the Element Web widget frame. Below 1024px, a sticky top bar takes its place. It holds a menu button, the breadcrumb, a pill with the attention count that links to the **Needs attention** tab, and a **New request** button. The menu button opens `WidgetNav` in a sheet from the left, and any navigation closes it.
 
 Inside a view, the layout follows the width the view really has. `<main>` is a container query root (`@container/main`), so two-column splits and hidden table columns depend on its width, not the window's. That holds in the fixture preview too ([Development](DEVELOPMENT.md#add-a-ui-component)). A toast confirms each action.
 
@@ -308,11 +308,11 @@ The send holds the request's row lock and a database connection. So Nodemailer g
 
 A rollback does not prove that no email exists. If the SMTP server received the email but its answer was lost, for example to a timeout, or if it accepted the email and the commit then failed, an email exists whose link the database never stored. That link says "This link does not work" and shows nothing about the request. A retry sends a new email with a link that works. The send and the commit are two separate steps, so ordy cannot rule this out.
 
-The application log names the request id, the step that failed (reading the patient or sending), and codes only: the kinds of data for a refusal, the HTTP status when the FHIR server answers with an error, the network error code such as `ECONNREFUSED` when it cannot be reached, and for a failed send Nodemailer's `code`, such as `EAUTH`, `ESOCKET`, or `EENVELOPE`, with the SMTP reply code. It never logs the error message, because Nodemailer puts the SMTP server's reply in it, and the reply can echo an address or a name.
+The application log names the request id, the step that failed (reading the patient or sending), and codes only: the kinds of data for a refusal, the HTTP status when the FHIR server answers with an error, the network error code such as `ECONNREFUSED` when it cannot be reached, and for a failed send Nodemailer's `code`, such as `ESOCKET` or `EENVELOPE`, with the SMTP reply code. It never logs the error message, because Nodemailer puts the SMTP server's reply in it, and the reply can echo an address or a name.
 
-ordy sends no SMS. In development, `pnpm dev` prints an SMS request's link in its log as `Request <id>: http://localhost:3010/r/<token>`, so the portal can be tried without it.
+An SMS goes to the SMS screen at `/sms`, as the track suggests for tests. No SMS is really sent. `sendRequestSms` in `src/server/mail/send.ts` renders the SMS, runs the same content check on it, and stores it in `sms_outbox` inside the transaction that stores the request as `sent`. A refused SMS, or a request that rolls back, leaves no SMS. The SMS screen and the recipient's inbox show the newest 50, newest first, each with its working link. A production build answers 404 on both pages.
 
-Every email goes through Gmail as ordysoftware@gmail.com, on `smtp.gmail.com` port 465 with TLS from the start. The scenario's `.example` addresses cannot receive mail, so ordy delivers every email only to the team inboxes in `MAIL_TEAM_INBOXES`, by default ordysoftware@gmail.com itself. The `To` header still names the request's address, so the email for request 1 reads as sent to `eva.brandl@labor-kanal.example`. `src/env.ts` rejects an empty `MAIL_TEAM_INBOXES`, so every email has a team inbox to go to. Delivering to the address typed in the request form, as a clinic's own mail server would, needs a change to `sendRequestEmail`, not only another SMTP server. `pnpm reset` does not empty the Gmail inbox, and the links in its older emails then say "This link does not work". [Development](DEVELOPMENT.md#send-email-through-gmail) has the setup.
+Every email goes to Mailpit, as the track suggests. Mailpit accepts any address and delivers nothing, so the scenario's `.example` addresses, which cannot receive mail, never get a real email. The transport has no login and no TLS, which is what Mailpit wants. A clinic's own mail server would need both.
 
 Before sending, the request service compares the words of the subject and the text with three kinds of forbidden words:
 
@@ -341,7 +341,7 @@ On a hit, nothing is sent. `MessageRefused` names only the kinds of data it foun
 | `GET /r/{token}/unavailable` | Where the login sends a person when ID Austria could not be reached: "The login could not be finished" and a **Try again** link. |
 | `GET /sms` | Shows every SMS the request service would have sent, like a phone screen. |
 | `GET /audit` | Audit UI; data requires a verified Matrix clinic identity. Use the widget's **Audit log** view in Element. |
-| `GET /inbox` | Demo only, and 404 in a production build (`demoToolsEnabled` in `src/lib/demo-tools.ts`). The recipient's inbox names the team inboxes from `MAIL_TEAM_INBOXES`, with a button that opens Gmail for the first one in a new tab, and shows the SMS screen. The recipient opens the link in the email. |
+| `GET /inbox` | Demo only, and 404 in a production build (`demoToolsEnabled` in `src/lib/demo-tools.ts`). The recipient's inbox shows every email in Mailpit, read through its API by `listInboxEmails()` in `src/server/mail/mailpit.ts`, with an **Open as recipient** button for each portal link, and the SMS screen. It says so when Mailpit cannot be reached. |
 
 The pages are Next.js routes. `/auth/login` and `/auth/callback` are route handlers, because they need real redirects and cookies. The answer page loads its data and sends the upload through tRPC (`eidProcedure`, the upload as `FormData`).
 
@@ -447,7 +447,7 @@ If code cannot read the file, the model is not called and the uploader gets the 
 
 ## Storage
 
-The request service keeps five Postgres tables, defined with Drizzle in `src/server/db/schema.ts`. Migrations live in `drizzle/`.
+The request service keeps six Postgres tables, defined with Drizzle in `src/server/db/schema.ts`. Migrations live in `drizzle/`.
 
 | Table | Columns |
 |---|---|
@@ -456,6 +456,7 @@ The request service keeps five Postgres tables, defined with Drizzle in `src/ser
 | `kept_answers` | `request_id`, `answer`, `failed_at` |
 | `bindings` | `given`, `family`, `org`, `person_number`, `practitioner_id`, `first_verified_at` |
 | `audit_log` | `id`, `at`, `event`, `request_id`, `actor_kind`, `actor`, `outcome`, `detail` |
+| `sms_outbox` | `id`, `request_id`, `to`, `body`, `sent_at` |
 
 In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `org` are the person as Dr. Hofer typed them. `requester` is the Matrix ID of the network member who sent the request, and `requester_name` is their Matrix display name at that time, for example "Dr. Lena Hofer", as one line of at most 100 characters. The portal and the messages use it. Members set their display name themselves, so one member could pose as another in a message; the audit log always keeps the Matrix ID. A production version takes the name from a directory the members cannot edit, or sets `enable_set_displayname: false` in Synapse. `link_hash` is the hex SHA-256 of the link token. `person_number` is the bPK of the person who passed the identity check, or who was held; after **Accept** it names the accepted person. Only that person sees the answer page and may answer. `id_token` is the ID token of that person's login, exactly as received, for the Provenance signature; the login stores it with `saveIdToken` only for the bound person, and the answer flow files only with a token whose bPK is `person_number`. A closed request keeps none: `applyEvent` and expiry clear it, and a filed answer carries it in the Provenance. `matrix_room` and `matrix_event` hold the room and the first notice of the request's thread (T05).
 
@@ -464,6 +465,8 @@ In `requests`, `patient_id` is the FHIR Patient id, and `given`, `family`, and `
 `kept_answers` keeps an answer whose filing outcome is unknown, so a retry files exactly it ([The answer](#the-answer), step 7). `answer` is everything the Bundle is built from: the parsed document, the parties with their eHVD OIDs and the Practitioner id from `bindings`, the ID token, the send time, the upload hash, and the Provenance sentences. It exists only while the request is `verified` or, after an **Accept** with an unknown outcome, `answer_held`. Filing it, a refusal by the FHIR server, **Cancel**, and expiry delete it.
 
 `bindings` remembers which ID Austria person number answered as a given person at a given organisation. Its key is `given`, `family`, and `org`, so each person at an organisation has one person number. The first filed answer stores it, with the sender's Practitioner id when the eHVD does not list them. The audit log never holds document text.
+
+`sms_outbox` stands in for the recipient's phone, as Mailpit stands in for the inbox. It holds every SMS the request service would have sent, for the SMS screen. The body holds the link, so it is the only table with a link token in plain text. A real SMS gateway replaces it. Deleting a request deletes its SMS.
 
 `src/server/requests/service.ts` is the only code that writes `requests`: `createRequest`, `sendAnyway`, `applyEvent`, `incrementFailedChecks`, `applyLoginTransition`, `expireDueRequests`, and `saveIdToken`, which the login callback calls for the bound person. After each state change commits, `mirrorTask` PUTs the request's FHIR Task with the status from the lifecycle table ([FHIR](FHIR.md#task)); the filing Bundle writes the `completed` Task itself. The tRPC router `request` and the portal pages use it. `get` and `list` return each request's audit entries, which name the outside person and their person number, and its `pending` decision. Neither returns `link_hash`, `id_token`, or a held answer's text. `accept`, `reject`, and `cancel` write `request_decided` in the transaction that changes the state; on a held answer, `accept` and `reject` go through the answer flow ([The answer](#the-answer)). `sendAnyway` writes `request_sent`.
 
@@ -531,10 +534,8 @@ Configuration is read in `src/env.ts`. Service addresses and demo accounts have 
 | `KEYCLOAK_ADMIN_USER`, `KEYCLOAK_ADMIN_PASSWORD` | `admin`, demo value (`pnpm citizen` only) |
 | `EHVD_URL` | `http://localhost:8095/` |
 | `EHVD_DIRECTORY_OIDS` | The eHVD OIDs the Contacts view lists before any search, comma-separated, at most 50. Default: the eight scenario entries of the eHVD mock. Empty lists none. |
-| `SMTP_HOST`, `SMTP_PORT` | `smtp.gmail.com`, `465`. Port 465 uses TLS from the start. Any other port upgrades with STARTTLS when the server offers it, and requires it when `SMTP_USER` is set. |
-| `SMTP_USER`, `SMTP_PASSWORD` | `ordysoftware@gmail.com`, empty. The password is the account's Gmail app password and goes only into `.env`. An empty `SMTP_USER` sends without a login. |
-| `MAIL_FROM` | `ordy · Klinikum Beispielstadt <ordysoftware@gmail.com>`. Gmail replaces a sender address that is not the account's own. |
-| `MAIL_TEAM_INBOXES` | `ordysoftware@gmail.com`. Comma-separated addresses, at least one. Every email goes only to them. |
+| `SMTP_HOST`, `SMTP_PORT`, `MAILPIT_API_URL` | `localhost`, `1025`, `http://localhost:8025`: Mailpit's SMTP port and its web API. |
+| `MAIL_FROM` | `ordy · Klinikum Beispielstadt <ordy@klinikum.example>` |
 | `ANTHROPIC_API_KEY` | unset, only for the optional AI fallback; unset turns it off |
 | `AI_FALLBACK_MODEL` | `claude-opus-5-5` |
 
@@ -547,10 +548,10 @@ To switch to real ID Austria, change `OIDC_METADATA_URL`, `OIDC_CLIENT_ID`, and 
 Files marked *planned* do not exist yet. The task id says who builds them.
 
 ```
-docker-compose.yml            workspace gateway, Synapse, optional Element, HAPI, Postgres, Keycloak, eHVD mock
+docker-compose.yml            workspace gateway, Synapse, Element Web, HAPI, Mailpit, Postgres, Keycloak, eHVD mock
 .env.example                  all variables with demo values
 docker/workspace/default.conf.template   nginx proxy to the Next.js app
-docker/element/config.json    optional Element config
+docker/element/config.json    Element Web config
 docker/synapse/               generated homeserver.yaml (git ignores it)
 docker/keycloak/idaustria-sim-realm.json   simulated ID Austria: client, mappers, test citizens
 docs/ehvd/eHVD.wsdl           the real eHVD WSDL, version 2 from BRZ
@@ -569,12 +570,12 @@ src/
     api/workspace/session/route.ts   workspace sign-in, session metadata, and logout
     page.tsx                  workspace entry
     workspace/                sign-in, session lifecycle, and Messages UI
-    widget/                   shared workspace views and optional Element widget: app.tsx, shell.tsx and nav.tsx, the hash routes in widget-route.ts, views/, shared parts in components/, request-form.tsx, presets.ts, and the draft in draft.tsx
+    widget/                   shared workspace views and the Element Web widget: app.tsx, shell.tsx and nav.tsx, the hash routes in widget-route.ts, views/, shared parts in components/, request-form.tsx, presets.ts, and the draft in draft.tsx
     r/[token]/                outside portal: landing page, answer page, and the held, refused, and unavailable pages (T09)
     auth/                     ID Austria login and callback route handlers, expired-login page. The callback runs the identity checks (T08)
-    sms/page.tsx              SMS screen, a stub. No task builds the SMS log, because T06 sends email only
+    sms/page.tsx              SMS screen: every SMS in sms_outbox, like a phone. 404 in a production build
     audit/page.tsx            audit UI; authenticated data via clinic.audit
-    inbox/page.tsx            recipient's inbox: the team inboxes with a button to Gmail, and the SMS screen. 404 in a production build
+    inbox/page.tsx            recipient's inbox: the emails in Mailpit and the SMS screen. 404 in a production build
     styleguide/               every UI component with fixture data, and widget/, the whole widget on fixtures (?fixtures=seeded, empty, or failing). 404 in a production build
   components/ui/              shadcn/ui components, added with `pnpm dlx shadcn@4.22.1 add <name>`
   components/                 shared UI such as the portal frame and the SMS phone of /sms and /inbox (demo/sms-phone.tsx)
@@ -607,17 +608,18 @@ src/
     matrix/notices.ts         notice texts and notifyRoom for Dr. Hofer's room
     metrics/                  metrics from audit rows, validator runner, metrics table (T17, T18), the live metrics for the widget (live.ts), and the last runs from out/metrics/ (runs.ts)
     mail/message.ts           request email and SMS templates and the content check (T06)
-    mail/send.ts              sendRequestEmail over SMTP, through Gmail to the team inboxes (T06)
+    mail/send.ts              sendRequestEmail over SMTP to Mailpit (T06)
+    mail/mailpit.ts           the emails in Mailpit with their portal links, for /inbox
     mail/fake-smtp.ts         an SMTP server in the process that keeps emails, for the mail tests and pnpm demo:seed
     auth/eid-session.ts       outside person's session cookie and login cookie
     auth/id-austria.ts        OpenID Connect login: discovery, code swap, Keycloak logout, claims for the identity checks
-    portal/data.ts            data loaders for the portal, the login, and the SMS page. The SMS log is a stub; T06 sends email only
+    portal/data.ts            data loaders for the portal, the login, and the SMS screen
     portal/answer-page.ts     what the answer page shows for a session: the form, held, filed, or closed
     portal/paths.ts           the portal page for each login result
   bot/                        Matrix bot process and commands
 scripts/
   setup.sh                    one-time setup
-  reset.sh                    empty Postgres and HAPI, reload the patients
+  reset.sh                    empty Postgres, HAPI, and Mailpit, reload the patients
   bootstrap-matrix.ts         room, invites, widget
   seed-fhir.ts                the three synthetic patients into HAPI
   demo-seed.ts, demo/         a populated workspace through the real code paths (pnpm demo:seed)
@@ -636,8 +638,8 @@ track/                        track brief, scenario, patient.json, test document
 
 1. `./scripts/setup.sh` once. It creates `.env`, starts the containers, registers the Matrix users, migrates the database, loads the patient, and creates Dr. Hofer's room with the widget.
 2. `pnpm dev` starts Next.js on `http://localhost:3010` and the bot.
-3. Open the ordy workspace at `http://localhost:8081` and log in as `lena.hofer` / `hofer-demo-2026`. Open **Messages**, select "Dr. Hofer · Outside documents", and send `!status`. The optional Element client uses port 8082 and the `legacy-element` profile.
-4. The emails arrive in the team's Gmail inbox. The SMS screen at `http://localhost:3010/sms` is a stub. Outside a production build, `http://localhost:3010/inbox` shows the SMS screen and a button that opens Gmail for the first team inbox.
+3. Open the ordy workspace at `http://localhost:8081` and log in as `lena.hofer` / `hofer-demo-2026`. Open **Messages**, select "Dr. Hofer · Outside documents", and send `!status`. Element Web runs at `http://localhost:8082` with the same account.
+4. Mailpit is at `http://localhost:8025`. The SMS screen at `http://localhost:3010/sms` shows each SMS. Outside a production build, `http://localhost:3010/inbox` shows both, with a button that opens each email's link as the recipient.
 
 ## Sources
 
@@ -645,5 +647,6 @@ track/                        track brief, scenario, patient.json, test document
 - [Keycloak: importing and exporting realms](https://www.keycloak.org/server/importExport) and [server administration guide](https://www.keycloak.org/docs/latest/server_admin/index.html)
 - [openid-client](https://github.com/panva/openid-client)
 - [Next.js documentation](https://nextjs.org/docs), [tRPC](https://trpc.io/docs), [Drizzle ORM](https://orm.drizzle.team/docs/overview)
+- [Mailpit](https://mailpit.axllent.org/)
 - [HAPI FHIR JPA server starter](https://github.com/hapifhir/hapi-fhir-jpaserver-starter)
 - [OpenID Connect Core 1.0](https://openid.net/specs/openid-connect-core-1_0.html)

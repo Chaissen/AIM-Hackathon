@@ -27,10 +27,10 @@ One person can do both, but a separate observer catches more.
 ## Prepare (before the tester arrives)
 
 1. **Stack.** On the computer the tester will use, start the stack as [Development](../DEVELOPMENT.md#start) describes: the containers are up (`./scripts/setup.sh` once, `docker compose start` after a stop) and `pnpm dev` runs. http://localhost:3010 shows three green dots. The `ehvd` container must be up too: http://localhost:8095/healthz shows `{"status":"ok",...}`. `request.create` checks the address against the eHVD at `EHVD_URL`, and without it request 1 waits in `awaiting_confirmation` with "The eHVD could not confirm the address". `pnpm dev` does not start containers; `docker compose up -d --build`, as `setup.sh` runs it, starts any that are missing. Use this same computer for the test: the link points to `localhost:3010` and the login to Keycloak on `localhost:8080`, so a second device would need `PUBLIC_URL` and the Keycloak address changed, which this protocol does not cover.
-2. **Email.** Email goes to the team's Gmail inbox, as [Development](../DEVELOPMENT.md#send-email-through-gmail) describes. Put the Gmail app password into `.env` as `SMTP_PASSWORD`, and check that the inbox the tester will see is in `MAIL_TEAM_INBOXES`, by default ordysoftware@gmail.com. Restart `pnpm dev` after changing `.env`.
-3. **Clean slate.** Run `pnpm reset`. It empties Postgres and HAPI and reloads Maria Beispiel. Then restart `pnpm dev`. `pnpm reset` does not empty the Gmail inbox, so delete the older ordy emails there. Their links now say "This link does not work".
-4. **Rehearse once yourself.** Do steps 6 to 8 and answer the request as the tester would, then run `pnpm audit:check --effort` and check that it prints an effort. Then run `pnpm reset` again, restart `pnpm dev`, and delete the rehearsal email from the inbox. If Gmail warns about the link or hides it, note it: the tester will see the same.
-5. **The tester's screen.** Open a browser window with the team inbox. Close every other tab, especially Element, the widget, and the docs. Use a browser profile that is logged in to Gmail and nothing else of ours.
+2. **Email.** For the test, email goes to Mailpit at http://localhost:8025, which catches every address.
+3. **Clean slate.** Run `pnpm reset`. It empties Postgres, HAPI, and Mailpit and reloads Maria Beispiel. Then restart `pnpm dev`.
+4. **Rehearse once yourself.** Do steps 6 to 8 and answer the request as the tester would, then run `pnpm audit:check --effort` and check that it prints an effort. Then run `pnpm reset` again, restart `pnpm dev`, and delete the rehearsal email from the inbox.
+5. **The tester's screen.** Open a browser window with Mailpit at http://localhost:8025. Close every other tab, especially Element, the widget, and the docs. Use a browser profile that is logged in to nothing of ours.
 6. **The document.** Copy `track/scenario/documents/lab-result-maria-beispiel.md` to the desktop of this computer under the same name. It stands for the report that Dr. Brandl's lab system produced.
 7. **The login card.** Write on a card: "Your ID Austria login: username `eva.brandl`, password `demo-eva`". Real ID Austria would use the phone app. The card is the only stand-in for it.
 8. **Send request 1.** Log in to Element as `lena.hofer` / `hofer-demo-2026` in another browser profile or on another computer, open the ordy widget in "Dr. Hofer · Outside documents", and send request 1 with the fields from [Architecture](../ARCHITECTURE.md#widget): `lab-result`, Maria Beispiel, Eva, Brandl, Labor Kanalstraße, `eva.brandl@labor-kanal.example`. Close Element on the tester's screen. Check that the email is in the inbox, unread, and that it is the only ordy email there.
@@ -74,7 +74,7 @@ Write one row for each hesitation, with the stopwatch time. A hesitation is any 
 
 Name the screen: **Inbox**, **Email**, **Landing** (the ordy page with **Log in with ID Austria**), **ID Austria login** (the Keycloak page), **Answer** (patient, document type, upload, name and birth date), **Refused upload** (the message about a different patient), **Done** ("Thank you, your document is filed"), **Held** (`AnswerHeld`: "Thank you, your document arrived … checks it before it is filed"), or **Other** (anything else, with what it showed).
 
-Also note anything the tester installed or any account they had to create. Logging in with the ID Austria card counts as an existing state ID, not an account with us. The Gmail inbox counts as the tester's own work email.
+Also note anything the tester installed or any account they had to create. Logging in with the ID Austria card counts as an existing state ID, not an account with us. Mailpit stands in for the tester's own work email.
 
 ## Pass criteria
 
@@ -142,7 +142,7 @@ Fill in by hand, commit the file, and copy the summary into the README's metric 
 | Operator, observer | |
 | Tester profile | |
 | Device and browser | |
-| Inbox | Gmail |
+| Inbox | Mailpit |
 | Request id | |
 | Stopwatch (s) | |
 | Laps (s) | |
@@ -168,7 +168,7 @@ Fill in by hand, commit the file, and copy the summary into the README's metric 
 | Operator, observer | |
 | Tester profile | |
 | Device and browser | |
-| Inbox | Gmail |
+| Inbox | Mailpit |
 | Request id | |
 | Stopwatch (s) | |
 | Laps (s) | |
@@ -194,7 +194,7 @@ Fill in by hand, commit the file, and copy the summary into the README's metric 
 | Operator, observer | |
 | Tester profile | |
 | Device and browser | |
-| Inbox | Gmail |
+| Inbox | Mailpit |
 | Request id | |
 | Stopwatch (s) | |
 | Laps (s) | |
@@ -231,7 +231,7 @@ Checked from the code on `main` at `25f0c28`, without a running stack. #44 (`2c1
 | Step | Today |
 |---|---|
 | Send request 1 from the widget | Works (#32, #56). `request.create` runs `checkAddress()` against the eHVD at `EHVD_URL` (`http://localhost:8095/`, the `ehvd` container) first. If the container is down, request 1 waits in `awaiting_confirmation` with "The eHVD could not confirm the address", so check http://localhost:8095/healthz before sending. |
-| Email in the Gmail inbox | Works with the local mail server of that time (#4): `request.create` sends request 1's email through `sendRequestEmail()` from #47, checked through the router against the running stack. Not tried with Gmail yet: the Gmail app password of the team account is needed in `.env`. Gmail is now the only transport. |
+| Email in Mailpit | Works (#4): `request.create` sends request 1's email through `sendRequestEmail()`, checked through the router against the running stack. |
 | Landing page `/r/{token}`, `link_opened` | Works. |
 | ID Austria login and identity checks | Work (#42, #34). A pass sends the tester to the answer page. |
 | Answer page with patient and document type | Works. The upload field and the name and birth date fields are there. |

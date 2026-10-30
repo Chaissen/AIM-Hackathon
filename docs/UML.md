@@ -12,7 +12,7 @@ flowchart LR
     wrong["👤 Wrong recipient<br/>(typo address, colleague)"]
     idp["⚙ ID Austria<br/>(simulated eID)"]
     fhir["⚙ FHIR server<br/>(HAPI)"]
-    gw["⚙ Email / SMS<br/>(Gmail, SMS page)"]
+    gw["⚙ Email / SMS<br/>(Mailpit, SMS page)"]
 
     subgraph SYS["Document request service"]
         direction TB
@@ -195,7 +195,7 @@ flowchart LR
         gateway["Workspace gateway<br/>(8081)"] <--> workspace["ordy workspace<br/>(Next.js)"]
         workspace <--> core["Core service<br/>(tRPC)"]
         core <--> synapse["Synapse<br/>(Matrix)"]
-        element["Optional Element<br/>(8082)"] <--> synapse
+        element["Element Web<br/>(8082)"] <--> synapse
         element <--> widget["Optional request widget<br/>(iframe in Element)"]
         widget <--> core
         synapse <--> bot["Matrix bot<br/>(notices, !status)"]
@@ -205,7 +205,7 @@ flowchart LR
         core <-.-> reg[("Register<br/>(proposed)")]
         portal["Answer portal<br/>(HTTPS, public)"] <--> core
     end
-    core --> mail["Gmail / SMS page"]
+    core --> mail["Mailpit / SMS page"]
     mail -. "link" .-> browser["Outside person's browser"]
     browser --> portal
     portal <--> eid["Simulated ID Austria"]
