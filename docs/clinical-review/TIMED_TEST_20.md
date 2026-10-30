@@ -26,7 +26,7 @@ One person can do both, but a separate observer catches more.
 
 ## Prepare (before the tester arrives)
 
-1. **Stack.** On the computer the tester will use, start the stack as [Development](../DEVELOPMENT.md#start) describes: the containers are up (`./scripts/setup.sh` once) and `pnpm dev` runs. http://localhost:3010 shows three green dots. Use this same computer for the test: the link points to `localhost:3010` and the login to Keycloak on `localhost:8080`, so a second device would need `PUBLIC_URL` and the Keycloak address changed, which this protocol does not cover.
+1. **Stack.** On the computer the tester will use, start the stack as [Development](../DEVELOPMENT.md#start) describes: the containers are up (`./scripts/setup.sh` once, `docker compose start` after a stop) and `pnpm dev` runs. http://localhost:3010 shows three green dots. The `ehvd` container must be up too: http://localhost:8095/healthz shows `{"status":"ok",...}`. `request.create` checks the address against the eHVD at `EHVD_URL`, and without it request 1 waits in `awaiting_confirmation` with "The eHVD could not confirm the address". `pnpm dev` does not start containers; `docker compose up -d --build`, as `setup.sh` runs it, starts any that are missing. Use this same computer for the test: the link points to `localhost:3010` and the login to Keycloak on `localhost:8080`, so a second device would need `PUBLIC_URL` and the Keycloak address changed, which this protocol does not cover.
 2. **Email.** For the test, email goes to the team's Gmail inbox, as [Development](../DEVELOPMENT.md) ("Send email through Gmail", from #47) describes: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `MAIL_FROM`, and `MAIL_TEAM_INBOXES` in `.env`, and the inbox the tester will see is in `MAIL_TEAM_INBOXES`. Restart `pnpm dev` after changing `.env`. Without Gmail, use Mailpit at http://localhost:8025 and note "Mailpit" in the result table.
 3. **Clean slate.** Run `pnpm reset`. It empties Postgres, HAPI, and Mailpit and reloads Maria Beispiel. Then restart `pnpm dev`.
 4. **Rehearse once yourself.** Do steps 6 to 8 and answer the request as the tester would, then run `pnpm audit:check --effort` and check that it prints an effort. Then run `pnpm reset` again, restart `pnpm dev`, and delete the rehearsal email from the inbox. If Gmail warns about the link or hides it, note it: the tester will see the same.
@@ -88,10 +88,10 @@ A tester passes when all of these hold:
 | Audit effort | under 120 s, as `pnpm audit:check --effort` rounds it |
 | Filed | the request has an `answer_filed` entry |
 
-If the tester sees the **Held** page, the answer waits for Dr. Hofer and no `answer_filed` is written yet. Until the release check (#44) is wired into the answer flow's `answerDeps` (#54), every answer is held. What to do then depends on **Accept**:
+If the tester sees the **Held** page, the answer waits for Dr. Hofer and no `answer_filed` is written yet. This happens when the release check (#44) cannot confirm the sender's role, for example when the eHVD cannot be reached. What to do then depends on **Accept**:
 
 - If **Accept** in the widget files a held answer, click it after the stopwatch stopped. `answer_filed` is then written, the audit effort still ends at the tester's send, and you note "held, accepted" in the table.
-- If **Accept** refuses with "Filing a held answer is not built yet." (`main`'s refusal before #54, which replaces it with a call to `acceptAnswer`), `pnpm audit:check --effort` prints "Effort: not measured" and exits with 1. The audit criterion cannot be met, so do not run the test with a real tester yet. See [Readiness](#readiness-on-30-october-2026).
+- If **Accept** refuses with "Filing a held answer is not built yet." (`main`'s refusal before #54, which replaced it with a call to `acceptAnswer`), `pnpm audit:check --effort` prints "Effort: not measured" and exits with 1. The audit criterion cannot be met, so do not run the test with a real tester yet. See [Readiness](#readiness-on-30-october-2026).
 
 ## Fetch the audit times
 
@@ -226,16 +226,16 @@ Where testers hesitated, and what we changed because of it:
 
 ## Readiness on 30 October 2026
 
-Checked from the code on `main` at `dc908a6` and on #54 (`feat/T09-portal-flow`) at `2241043`, without a running stack. Check again when the blockers below land, with the rehearsal in Prepare, step 4.
+Checked from the code on `main` at `25f0c28`, without a running stack. #44 (`2c11410`) and #54 (`900d141`) are merged. Check again when the blocker below lands, with the rehearsal in Prepare, step 4.
 
 | Step | Today |
 |---|---|
-| Send request 1 from the widget | Works (#32, #56). The request is created and `request_sent` written, but no email goes out yet, see the next row. |
+| Send request 1 from the widget | Works (#32, #56). `request.create` runs `checkAddress()` against the eHVD at `EHVD_URL` (`http://localhost:8095/`, the `ehvd` container) first. If the container is down, request 1 waits in `awaiting_confirmation` with "The eHVD could not confirm the address", so check http://localhost:8095/healthz before sending. |
 | Email in the Gmail inbox | **Blocker.** #47 (merged) adds `sendRequestEmail()` and the Gmail settings, but nothing calls it yet. `request.create` and `sendAnyway` in `src/server/api/routers/request.ts` still call `printLink` (`TODO(T06)`), which only prints the link to the `[web]` log in development. The follow-up that calls `sendRequestEmail()` there is needed. The Gmail app password of the team account is needed in `.env`. |
 | Landing page `/r/{token}`, `link_opened` | Works. |
 | ID Austria login and identity checks | Work (#42, #34). A pass sends the tester to the answer page. |
 | Answer page with patient and document type | Works. The upload field and the name and birth date fields are there. |
-| **Send securely**, `answer_sent` | **Blocker until #54 (#13) lands.** On `main` the button only says "Uploading is not connected yet". |
-| Refused upload, Held, refused, and unavailable pages, Done page | Missing on `main`. #54 has them. |
-| `answer_filed` | **Blocker until #54 lands.** #54 holds every answer until #44 is wired into its `answerDeps`, so the tester sees the **Held** page. In #54, **Accept** on a held answer calls `acceptAnswer(answerDeps, …)` (`src/server/api/routers/request.ts`, merged with #56 in `5ebcfa1`) and files it, replacing `main`'s refusal. So after #54 the test runs as "held, accepted": the operator clicks **Accept**, `answer_filed` is written, and `pnpm audit:check --effort` measures. #44 wired into `answerDeps` is needed only so that request 1 is filed without the hold. |
-| `pnpm audit:check --effort` | Works, with tests. Measures nothing until an `answer_filed` entry is written. |
+| **Send securely**, `answer_sent` | Works (#54). |
+| Refused upload, Held, refused, and unavailable pages, Done page | Work (#54). |
+| `answer_filed` | Works. `answerDeps` calls `checkRelease` from #44 (`src/server/answers/deps.ts`), so request 1 is filed directly when the eHVD confirms Dr. Brandl. If the release check cannot confirm her, the answer is held, and **Accept** in the widget files it through `acceptAnswer` ("held, accepted"). |
+| `pnpm audit:check --effort` | Works, with tests. |
