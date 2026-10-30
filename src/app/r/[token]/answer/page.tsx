@@ -2,10 +2,12 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
-import { PortalFrame, PortalMessage } from "@/components/portal/portal-frame";
+import { AnswerFiled, AnswerHeld, LinkClosed } from "@/components/portal/answer-messages";
+import { PortalFrame } from "@/components/portal/portal-frame";
+import { env } from "@/env";
 import { DOCUMENT_TYPES } from "@/lib/document-types";
 import { EID_SESSION_COOKIE, readEidSession } from "@/server/auth/eid-session";
-import { findAnswerContext } from "@/server/portal/data";
+import { loadAnswerPage } from "@/server/portal/answer-page";
 import { AnswerForm } from "./answer-form";
 
 const formatDate = (iso: string) =>
@@ -22,29 +24,46 @@ export default function AnswerPage({ params }: PageProps<"/r/[token]/answer">) {
 
 async function Answer({ params }: { params: PageProps<"/r/[token]/answer">["params"] }) {
   const { token } = await params;
+  const landing = `/r/${encodeURIComponent(token)}`;
   const session = await readEidSession((await cookies()).get(EID_SESSION_COOKIE)?.value);
-  if (!session) redirect(`/r/${encodeURIComponent(token)}`);
+  if (!session) redirect(landing);
+  const page = await loadAnswerPage(token, session);
 
-  const ctx = await findAnswerContext(token, session);
-  if (!ctx) {
-    return (
-      <PortalFrame>
-        <PortalMessage title="This link does not work">Contact the person who sent it to you.</PortalMessage>
-      </PortalFrame>
-    );
+  switch (page.page) {
+    case "login":
+      redirect(landing);
+    case "closed":
+      return (
+        <PortalFrame>
+          <LinkClosed />
+        </PortalFrame>
+      );
+    case "held":
+      return (
+        <PortalFrame>
+          <AnswerHeld />
+        </PortalFrame>
+      );
+    case "filed":
+      return (
+        <PortalFrame>
+          <AnswerFiled clinic={env.CLINIC_NAME} />
+        </PortalFrame>
+      );
   }
 
+  const { context } = page;
   return (
     <PortalFrame aside={`Logged in as ${session.givenName} ${session.familyName}`}>
       <section className="grid gap-2 rounded-xl border bg-card p-6">
         <p className="text-sm text-muted-foreground">
-          {ctx.requester}, {ctx.clinic} asks for
+          {context.requester}, {context.clinic} asks for
         </p>
         <h1 className="text-xl font-semibold text-balance">
-          {DOCUMENT_TYPES[ctx.docType].label} for {ctx.patient.name}, born {formatDate(ctx.patient.birthDate)}
+          {DOCUMENT_TYPES[context.docType].label} for {context.patient.name}, born {formatDate(context.patient.birthDate)}
         </h1>
       </section>
-      <AnswerForm />
+      <AnswerForm token={token} requester={context.requester} clinic={context.clinic} />
     </PortalFrame>
   );
 }

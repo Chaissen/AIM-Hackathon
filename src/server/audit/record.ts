@@ -22,7 +22,8 @@ type Entries = {
   link_opened: { outcome: "shown" | "refused"; detail: { state: RequestState } };
   identity_checked: { outcome: CheckResult; detail: { checks: IdentityCheck[] } };
   answer_sent: { outcome: "received"; detail: { sha256: string; size: number } };
-  answer_filed: { outcome: "filed"; detail: { resources: string[]; provenance: string } };
+  // `acceptedBy` is the network member who accepted a held answer; the entry's `at` says when.
+  answer_filed: { outcome: "filed"; detail: { resources: string[]; provenance: string; acceptedBy?: string } };
   misdelivery_caught:
     | { outcome: "address_mismatch"; detail: { domain: string; expectedDomain: string } }
     // The actor already names the person who failed.

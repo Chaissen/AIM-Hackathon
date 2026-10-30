@@ -1,5 +1,5 @@
 {
-  "id": "eacbc93e-31b0-4f72-8866-be36bfd5c7c6",
+  "id": "9dc7a48f-020c-4518-82b2-9172403ae3a7",
   "prevId": "9b911def-ecf0-4a99-9fbb-1c6b4ad9a2de",
   "version": "7",
   "dialect": "postgresql",
@@ -284,6 +284,12 @@
         },
         "person_number": {
           "name": "person_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "id_token": {
+          "name": "id_token",
           "type": "text",
           "primaryKey": false,
           "notNull": false

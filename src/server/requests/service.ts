@@ -3,7 +3,7 @@ import { and, desc, eq, inArray, lte } from "drizzle-orm";
 import type { DocumentType } from "@/lib/document-types";
 import { type AuditActor, type AuditEntry, recordAudit } from "@/server/audit/record";
 import type { Db, Tx } from "@/server/db";
-import { requests } from "@/server/db/schema";
+import { heldAnswers, requests } from "@/server/db/schema";
 import { initialState, OPEN_STATES, type RequestEvent, transition } from "./lifecycle";
 import { hashLinkToken, isLinkToken, LINK_TTL_MS, newLinkToken } from "./link-token";
 
@@ -74,7 +74,9 @@ export async function expireDueRequests(db: Db | Tx, id?: number): Promise<numbe
     .set({ state: "expired" })
     .where(and(inArray(requests.state, OPEN_STATES), lte(requests.expiresAt, new Date()), id === undefined ? undefined : eq(requests.id, id)))
     .returning({ id: requests.id });
-  return expired.map((r) => r.id);
+  const ids = expired.map((r) => r.id);
+  if (ids.length) await db.delete(heldAnswers).where(inArray(heldAnswers.requestId, ids));
+  return ids;
 }
 
 export async function getRequest(db: Db, id: number): Promise<RequestRow | null> {
@@ -112,6 +114,14 @@ export async function bindPerson(tx: Tx, id: number, personNumber: string): Prom
 }
 
 /**
+ * Stores the ID token of a login exactly as received, for the Provenance signature of the filing. Call it only for the
+ * person the request is bound to, after the identity check passed, so a wrong person's login never replaces it.
+ */
+export async function saveIdToken(db: Db | Tx, id: number, idToken: string): Promise<void> {
+  await db.update(requests).set({ idToken }).where(eq(requests.id, id));
+}
+
+/**
  * Applies a lifecycle event and stores the new state. Locks the row, so two events on one request run one after the other.
  * Returns null for an unknown request and throws a TransitionError if the state does not accept the event.
  * `identity_fail` also counts the failed check, and the third one locks the link.
@@ -132,6 +142,9 @@ export async function applyEvent(
     const failedChecks = row.failedChecks + (event === "identity_fail" ? 1 : 0);
     const state = transition(row.state, event, failedChecks);
     const [updated] = await tx.update(requests).set({ state, failedChecks }).where(eq(requests.id, id)).returning();
-    return (await then?.(tx, updated)) ?? updated;
+    const result = (await then?.(tx, updated)) ?? updated;
+    // A held answer lives only while the request is `answer_held`: Accept files it, Reject, Cancel, and expiry drop it.
+    if (state !== "answer_held") await tx.delete(heldAnswers).where(eq(heldAnswers.requestId, id));
+    return result;
   });
 }

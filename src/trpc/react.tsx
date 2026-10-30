@@ -1,7 +1,7 @@
 "use client";
 
 import { QueryClientProvider } from "@tanstack/react-query";
-import { createTRPCClient, httpBatchLink, loggerLink } from "@trpc/client";
+import { createTRPCClient, httpBatchLink, httpLink, isNonJsonSerializable, loggerLink, splitLink } from "@trpc/client";
 import { createTRPCContext } from "@trpc/tanstack-react-query";
 import { useState } from "react";
 import superjson from "superjson";
@@ -18,10 +18,15 @@ export function TRPCReactProvider({ children, clinicToken }: { children: React.R
     createTRPCClient<AppRouter>({
       links: [
         loggerLink({ enabled: (op) => process.env.NODE_ENV === "development" && typeof window !== "undefined" && op.direction === "down" && op.result instanceof Error }),
-        httpBatchLink({
-          url: "/api/trpc",
-          transformer: superjson,
-          headers: () => (clinicToken ? { Authorization: `Bearer ${clinicToken}` } : {}),
+        // FormData, such as the answer upload, cannot be batched as JSON and goes in a request of its own.
+        splitLink({
+          condition: (op) => isNonJsonSerializable(op.input),
+          true: httpLink({ url: "/api/trpc", transformer: superjson }),
+          false: httpBatchLink({
+            url: "/api/trpc",
+            transformer: superjson,
+            headers: () => (clinicToken ? { Authorization: `Bearer ${clinicToken}` } : {}),
+          }),
         }),
       ],
     }),

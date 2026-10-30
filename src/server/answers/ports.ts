@@ -20,6 +20,8 @@ export type ReleaseCheckInput = {
   sender: Sender;
   /** The organisation the request names, as Dr. Hofer typed it. */
   organisation: string;
+  /** The organisation the document's heading names, for example `Labor Kanalstraße`. */
+  documentOrganisation: string;
 };
 
 /**
