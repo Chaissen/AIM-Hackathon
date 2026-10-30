@@ -165,7 +165,7 @@ Before sending, the request service compares the words of the subject and the te
 
 It compares whole words, not substrings. A substring check would block every message, because the patient's family name "Beispiel" is part of "Klinikum Beispielstadt".
 
-A word is a run of digits and letters that have an upper and a lower case, such as Latin, Greek, or Cyrillic letters. Every other character separates words. So "Maria's", "(Maria)", and "maria.beispiel" all contain the word "maria". Case does not matter. Umlauts are spelled out (ü as ue), and other accents are dropped. A number loses its leading zeros. A birth date counts as its sequence of words, so `12.3.1961` and `12/03/1961` match `12.03.1961`. A name in a script without case, such as Chinese, has no words, so the check cannot catch it.
+A word is a run of digits and letters that have an upper and a lower case, such as Latin, Greek, or Cyrillic letters. Every other character separates words. So "Maria's", "(Maria)", and "maria.beispiel" all contain the word "maria". Case does not matter, and the Greek final sigma ς counts as σ. Umlauts are spelled out (ü as ue), and other accents and combining marks are dropped. A number loses its leading zeros. A birth date counts as its sequence of words, so `12.3.1961` and `12/03/1961` match `12.03.1961`. The check cannot find whole words in a script without case, such as Chinese. So if a patient's name has a letter without case, the check refuses every email for that patient.
 
 On a hit, nothing is sent. `MessageRefused` names only the kinds of data it found: `patient-name`, `birth-date`, or `document-type`. It never names the words, so logging the error cannot leak the patient's name. The link token is random, so in rare cases it holds a forbidden word between `-` or `_`. The email is then refused too. [Compliance and safety](COMPLIANCE_AND_SAFETY.md) has the rule.
 
@@ -335,7 +335,7 @@ src/
     widget/                   request form inside Element. Sending is planned, T04 and T05
     r/[token]/                outside portal: landing page and answer form. Data loading planned, T04, T07, T09
     auth/                     ID Austria login, planned, T07
-    sms/page.tsx              SMS screen. Reading the SMS log planned, T06
+    sms/page.tsx              SMS screen, a stub. No task builds the SMS log, because T06 sends email only
     audit/page.tsx            audit UI; authenticated data via clinic.audit
   components/ui/              shadcn/ui components, added with `pnpm dlx shadcn@4.22.1 add <name>`
   components/                 shared UI such as the portal frame
@@ -361,7 +361,7 @@ src/
     mail/message.ts           request email template and the content check (T06)
     mail/send.ts              sendRequestEmail over SMTP: Mailpit, or Gmail to the team inboxes (T06)
     auth/eid-session.ts       outside person's session cookie
-    portal/data.ts            data loaders for the portal and SMS pages, stubs until T04, T06, T07
+    portal/data.ts            data loaders for the portal and SMS pages, stubs until T04 and T07
   bot/                        Matrix bot process and commands
 scripts/
   setup.sh                    one-time setup
@@ -382,7 +382,7 @@ track/                        track brief, scenario, patient.json, test document
 1. `./scripts/setup.sh` once. It creates `.env`, starts the containers, registers the Matrix users, migrates the database, loads the patient, and creates Dr. Hofer's room with the widget.
 2. `pnpm dev` starts Next.js on `http://localhost:3010` and the bot.
 3. Open Element at `http://localhost:8081` and log in as `lena.hofer` / `hofer-demo-2026`. The room "Dr. Hofer · Outside documents" is there. Send `!status`.
-4. Mailpit is at `http://localhost:8025`, the SMS screen at `http://localhost:3010/sms` (T06).
+4. Mailpit is at `http://localhost:8025`. The SMS screen at `http://localhost:3010/sms` is a stub.
 
 ## Sources
 
