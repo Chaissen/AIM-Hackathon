@@ -3,44 +3,43 @@ import { z } from "zod";
 
 import { parseDateWide, parseStayWide, parseViennaDateTimeWide } from "./dates";
 import { isLoinc, parseDocument, parsePersonLine, toNumber } from "./parse";
+import { BIRTH_KEYS, PATIENT_KEYS, keyLines, patientIdentity, toKeyLine, type KeyLine } from "./patient-lines";
 import type { LabResult, LabRow, ParseResult, ParsedDocument, PersonLine, RehabReport, SafetyRefusal } from "./types";
 
 // AI fallback (docs/ARCHITECTURE.md, "AI fallback"; docs/COMPLIANCE_AND_SAFETY.md, "AI rules").
-// Runs only when parseDocument() cannot read a file for its format, never after a safety refusal. The model copies
-// text out of the document; it never decides anything. Code then checks that every copied value comes from the right
-// place in the document and derives the typed fields (numbers, UCUM units, dates, interpretation) itself.
-// A reading by the model is always held for Dr. Hofer.
+// Runs only when parseDocument() cannot read a file for its format, never after a safety refusal.
+// Code decides everything that carries safety or meaning: it reads the patient, the type, each field from its own key,
+// each lab value from its own column, and the free text. The model reads the same document independently, and its
+// reading must agree with code's in every field that carries meaning. The model can only stop a record, never choose a
+// value. A record from the fallback is always held for Dr. Hofer.
 
 const text = z.string();
-const verbatim = <K extends string>(keys: readonly K[]) => z.object(Object.fromEntries(keys.map((k) => [k, text])) as Record<K, typeof text>);
 
 /** The text columns of a `LabRow`, copied as written. Code computes `value`, `ucum`, `low`, `high`, and `interpretation`. */
 const LAB_ROW_KEYS = ["test", "valueText", "unitText", "rangeText", "loinc"] as const satisfies readonly (keyof LabRow)[];
+type LabRowKey = (typeof LAB_ROW_KEYS)[number];
+/** Fields that come from one `key: value` line each. */
+const KEY_FIELDS = ["sampleTaken", "reported", "validatedBy", "stay", "reason", "writtenBy", "sentBy"] as const satisfies readonly (
+  | keyof LabResult
+  | keyof RehabReport
+)[];
+type KeyField = (typeof KEY_FIELDS)[number];
 
-/**
- * What the model returns: the parser types with every field as the text written in the document, `""` when absent.
- * Person lines are their `raw` text, dates and the stay their text as written.
- */
+/** What the model returns: the fields of the parser types that carry meaning, each as written, `""` when absent. */
 export const modelReadingSchema = z.object({
   type: z.enum(["lab-result", "rehab-report", "other"]),
-  title: text,
   organisation: text,
   kind: text,
   patientName: text,
   patientBirthDate: text,
-  fields: z.array(z.object({ key: text, value: text })),
-  // LabResult
   sampleTaken: text,
   reported: text,
-  rows: z.array(verbatim(LAB_ROW_KEYS)),
-  conclusion: text,
   validatedBy: text,
-  // RehabReport
   stay: text,
   reason: text,
-  sections: z.array(z.object({ heading: text, text })),
   writtenBy: text,
   sentBy: text,
+  rows: z.array(z.object({ test: text, valueText: text, unitText: text, rangeText: text, loinc: text })),
 } satisfies Partial<Record<keyof LabResult | keyof RehabReport | `patient${string}`, z.ZodType>>);
 
 export type ModelReading = z.infer<typeof modelReadingSchema>;
@@ -50,199 +49,105 @@ export type DocumentReader = (markdown: string) => Promise<{ model: string; outp
 
 // Reasons for the held notice (src/server/matrix/notices.ts). They go into Matrix, so they name no document content.
 export const HELD_REASON = "The parser could not read the document, so a language model read it. Check every value before you accept it.";
-export const UNVERIFIED_REASON = "A language model read the document, but some values it returned are not in the document. Check the file itself.";
-export const UNBUILT_REASON = "A language model read the document, but its reading does not make a complete record. Check the file itself.";
+export const UNVERIFIED_REASON = "A language model read the document, but its reading does not match the document. Check the file itself.";
 
 type Held = { by: "model"; model: string; reason: string };
 
 export type FallbackResult =
-  /** The parser read the document, refused it for safety, or no model is configured, or the model gave no usable answer. */
+  /** The parser read the document or refused it, the wide reader cannot read it, or there is no usable model answer. */
   | ParseResult
-  /** The model read the document and every value comes from it. Held for Dr. Hofer. */
+  /** Code read the document and the model's reading agrees in every field. Held for Dr. Hofer. */
   | { ok: true; document: ParsedDocument; held: Held }
   /**
-   * The model read the document, but a value does not come from it or the typed fields cannot be derived. Held for
-   * Dr. Hofer with the file only. `unverified` quotes document text: show it in the widget, never in Matrix or the audit log.
+   * The model's reading disagrees with the document. Held for Dr. Hofer with the file only. `unverified` quotes the
+   * model's values: show it in the widget, never in Matrix or the audit log.
    */
   | { ok: false; errors: string[]; held: Held & { unverified: string[] } };
 
 const collapse = (s: string) => s.replace(/\s+/g, " ").trim();
-const WORD = /[\p{L}\p{N}]/u;
-/** Characters that join two words or numbers into one: `3.1`, `1,0`, `6301-6`, `10^9/L`. */
-const JOIN = /[.,\-^/]/;
-/** True when the text at `i` continues a word, number, code, or unit, read outward from the match by `step`. */
-const continues = (hay: string, i: number, step: 1 | -1) => WORD.test(hay[i] ?? "") || (JOIN.test(hay[i] ?? "") && WORD.test(hay[i + step] ?? ""));
+const plain = (s: string) => collapse(s.replace(/[*_]/g, "")).toLowerCase();
 
-/**
- * True when `value` appears word for word in `source`: same characters and case, any run of white space counts as one
- * space, and it is not part of a longer word, number, code, or unit. `301-6` is not in `6301-6`, `3` is not in `3.1`,
- * `03` is not in `12.03.1961`, and `L` is not in `10^9/L`. An empty value is never in the source.
- */
-export function appearsVerbatim(value: string, source: string): boolean {
-  const needle = collapse(value);
-  if (!needle) return false;
-  const hay = collapse(source);
-  for (let at = hay.indexOf(needle); at >= 0; at = hay.indexOf(needle, at + 1)) {
-    const end = at + needle.length;
-    const openStart = !WORD.test(needle[0]) || !continues(hay, at - 1, -1);
-    const openEnd = !WORD.test(needle[needle.length - 1]) || !continues(hay, end, 1);
-    if (openStart && openEnd) return true;
-  }
-  return false;
-}
-
-/** The places a value may come from: headings, `key: value` lines, and the body rows of each table, white space collapsed. */
-type Source = { headings: string[]; keyLines: { key: string; value: string }[]; tables: string[][][] };
+// Keys and column headers code accepts for each field, in lower case. A field found under two of them with different
+// values is ambiguous, and an ambiguous field gives no record.
+const FIELD_KEYS: Record<KeyField, Set<string>> = {
+  sampleTaken: new Set(["sample taken", "sampled", "sample collected", "collected", "collection date", "date of collection", "specimen collected", "sample date"]),
+  reported: new Set(["reported", "report date", "date of report", "reported on", "issued", "date issued", "result date"]),
+  validatedBy: new Set(["validated by", "approved by", "released by", "authorised by", "authorized by", "signed by"]),
+  stay: new Set(["stay", "period of stay", "dates of stay", "admission period"]),
+  reason: new Set(["reason", "reason for stay", "reason for admission", "indication"]),
+  writtenBy: new Set(["written by", "author", "authored by", "report by"]),
+  sentBy: new Set(["sent by", "sender"]),
+};
+const CONSUMED = new Set([...PATIENT_KEYS, ...BIRTH_KEYS, "requested by", ...Object.values(FIELD_KEYS).flatMap((s) => [...s])]);
+const COLUMNS: Record<LabRowKey, Set<string>> = {
+  test: new Set(["test", "analyte", "parameter", "investigation", "examination", "analysis", "test name"]),
+  valueText: new Set(["result", "results", "value", "result value", "measured value", "finding"]),
+  unitText: new Set(["unit", "units"]),
+  rangeText: new Set(["reference range", "range", "normal range", "reference", "reference interval", "ref. range", "ref range", "reference values"]),
+  loinc: new Set(["loinc", "loinc code"]),
+};
+const COLUMN_LABEL: Record<LabRowKey, string> = { test: "test", valueText: "result", unitText: "unit", rangeText: "reference range", loinc: "LOINC" };
+const LAB_KINDS = new Set(["lab report", "laboratory report", "lab result", "lab results", "laboratory result", "laboratory results", "lab findings"]);
+const REHAB_KINDS = new Set(["discharge report", "discharge letter", "discharge summary", "rehab discharge report", "rehabilitation discharge report"]);
+/** `0.8 to 1.2`, `0.8 - 1.2`, `25 – 37`, `25 — 37`, or `25 − 37`. Anything else, such as `< 37` or `25 bis 37`, is unreadable. */
+const RANGE = /^(-?\d+(?:[.,]\d+)?)\s*(?:to|-|–|—|−)\s*(-?\d+(?:[.,]\d+)?)$/;
 
 const md = new MarkdownIt();
-const KEY_LINE = /^([A-Za-z][A-Za-z' ]{0,40}):\s+(.+)$/;
-/** Keys that name the patient, in the scenario format and in others, for example `Patient name:`. */
-const PATIENT_KEY = /^(patient|patient name|patient's name|name of (the )?patient)$/i;
-const BIRTH_KEY = /birth|born|\bdob\b/i;
 
-function readSource(markdown: string): Source {
-  const source: Source = { headings: [], keyLines: [], tables: [] };
-  const tokens = md.parse(markdown.replace(/^﻿/, "").replace(/\r\n?/g, "\n"), {});
-  let table: string[][] | null = null;
+type Table = { header: string[]; rows: string[][] };
+type Wide = { reading: ModelReading; document: ParsedDocument | null; errors: string[]; refusals: { safety: SafetyRefusal; error: string }[] };
+
+/** The document as markdown-it tokens: the heading, key lines, free text, `##` sections, and tables. */
+function collect(markdown: string) {
+  const out = { title: null as string | null, lines: [] as KeyLine[], free: [] as string[], sections: [] as { heading: string; lines: string[] }[], tables: [] as Table[] };
+  let section: (typeof out.sections)[number] | null = null;
+  let table: Table | null = null;
   let row: string[] | null = null;
-  let inBody = false;
+  let inHead = false;
+  let listDepth = 0;
+  const tokens = md.parse(markdown, {});
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
-    if (t.type === "table_open") source.tables.push((table = []));
+    if (t.type === "bullet_list_open" || t.type === "ordered_list_open") listDepth++;
+    else if (t.type === "bullet_list_close" || t.type === "ordered_list_close") listDepth--;
+    else if (t.type === "table_open") out.tables.push((table = { header: [], rows: [] }));
     else if (t.type === "table_close") table = null;
-    else if (t.type === "tbody_open") inBody = true;
-    else if (t.type === "tbody_close") inBody = false;
+    else if (t.type === "thead_open") inHead = true;
+    else if (t.type === "thead_close") inHead = false;
     else if (t.type === "tr_open") row = [];
     else if (t.type === "tr_close") {
-      if (table && row && inBody) table.push(row);
+      if (table && row && inHead) table.header.push(...row);
+      else if (table && row) table.rows.push(row);
       row = null;
     } else if (t.type === "inline" && row) row.push(collapse(t.content));
-    else if (t.type === "inline" && tokens[i - 1]?.type === "heading_open") source.headings.push(collapse(t.content));
-    else if (t.type === "inline") {
-      for (const line of t.content.split("\n")) {
-        const m = collapse(line).match(KEY_LINE);
-        if (m) source.keyLines.push({ key: m[1].trim(), value: m[2].trim() });
+    else if (t.type === "heading_open") {
+      const heading = collapse(tokens[i + 1]?.content ?? "");
+      if (t.tag === "h1" && out.title === null) out.title = heading;
+      else if (t.tag === "h2") out.sections.push((section = { heading, lines: [] }));
+      i += 2;
+    } else if (t.type === "inline" && tokens[i - 1]?.type === "paragraph_open") {
+      for (const line of t.content.split("\n").map(collapse).filter(Boolean)) {
+        const kl = listDepth ? null : toKeyLine(line);
+        // As in the parser: inside a `##` section only the keys code knows count as fields.
+        if (kl && (!section || CONSUMED.has(kl.norm))) out.lines.push(kl);
+        if (!kl || !CONSUMED.has(kl.norm)) (section ? section.lines : out.free).push(listDepth ? `- ${line}` : line);
       }
     }
   }
-  return source;
+  return out;
 }
-
-/**
- * Safety refusals the parser cannot see in a format it does not know. Like the parser's, these never go to the model:
- * more than one table, a key on more than one line with different values, or more than one line naming a patient.
- */
-function sourceRefusals(source: Source): { safety: SafetyRefusal; error: string }[] {
-  const refusals: { safety: SafetyRefusal; error: string }[] = [];
-  if (source.tables.length > 1) refusals.push({ safety: "several-tables", error: "The file has more than one table. Put all results in one table." });
-  const seen = new Map<string, string>();
-  const repeated = new Set<string>();
-  for (const { key, value } of source.keyLines) {
-    const k = key.toLowerCase();
-    if (seen.has(k) && seen.get(k) !== value) repeated.add(key);
-    else seen.set(k, value);
-  }
-  for (const key of repeated) refusals.push({ safety: "repeated-key", error: `The file has more than one "${key}:" line.` });
-  const patients = new Set(source.keyLines.filter((l) => PATIENT_KEY.test(l.key)).map((l) => l.value));
-  if (patients.size > 1) refusals.push({ safety: "several-patients", error: "The file names more than one patient." });
-  return refusals;
-}
-
-/** A distinct table column for each lab row field, or null. `candidates[f]` are the columns that match field `f` in every row. */
-function assignColumns(candidates: number[][]): number[] | null {
-  const pick = (f: number, used: Set<number>): number[] | null => {
-    if (f === candidates.length) return [];
-    for (const c of candidates[f]) {
-      if (used.has(c)) continue;
-      const rest = pick(f + 1, new Set([...used, c]));
-      if (rest) return [c, ...rest];
-    }
-    return null;
-  };
-  return pick(0, new Set());
-}
-
-/** Each reading row must match one source row, in order, and each field one column of the table, the same in every row. */
-function unverifiedRows(rows: ModelReading["rows"], table: string[][]): string[] {
-  if (rows.length !== table.length) return [`rows: ${rows.length} rows, but the table has ${table.length}`];
-  const width = Math.max(0, ...table.map((r) => r.length));
-  const columns = Array.from({ length: width }, (_, c) => c);
-  const matches = (f: (typeof LAB_ROW_KEYS)[number], c: number) => rows.map((row, i) => collapse(row[f]) === (table[i][c] ?? ""));
-  const candidates = LAB_ROW_KEYS.map((f) => columns.filter((c) => matches(f, c).every(Boolean)));
-  const failures: string[] = [];
-  LAB_ROW_KEYS.forEach((f, n) => {
-    if (candidates[n].length) return;
-    // Report the rows that differ from the column that fits best.
-    const best = columns.map((c) => matches(f, c)).sort((a, b) => b.filter(Boolean).length - a.filter(Boolean).length)[0] ?? [];
-    rows.forEach((row, i) => {
-      if (!best[i]) failures.push(`rows[${i}].${f}: ${JSON.stringify(row[f])}`);
-    });
-  });
-  if (!failures.length && !assignColumns(candidates)) failures.push("rows: two fields come from the same table column");
-  rows.forEach((row, i) => {
-    if (!isLoinc(row.loinc)) failures.push(`rows[${i}].loinc: ${JSON.stringify(row.loinc)} is not a LOINC code`);
-  });
-  return failures;
-}
-
-/**
- * The hard check. Each value must come from its own place in the document: lab rows from one table row each, with no
- * row left out, the patient from the line that names the patient, key fields from one `key: value` line, the title
- * from a heading, free text word for word. Returns one entry per failing value, for example `rows[1].valueText: "35"`.
- * Empty means verified.
- */
-export function unverifiedValues(reading: ModelReading, markdown: string): string[] {
-  const source = readSource(markdown);
-  const failures: string[] = [];
-  const fail = (path: string, value: string) => failures.push(`${path}: ${JSON.stringify(value)}`);
-  const lineValues = (test: (key: string) => boolean) => source.keyLines.filter((l) => test(l.key)).map((l) => l.value);
-  /** A value the document may lack: `""` is fine, anything else must pass. */
-  const optional = (value: string, ok: boolean, path: string) => {
-    if (value && !ok) fail(path, value);
-  };
-
-  if (!source.headings.includes(collapse(reading.title))) fail("title", reading.title);
-  optional(reading.organisation, appearsVerbatim(reading.organisation, reading.title), "organisation");
-  optional(reading.kind, appearsVerbatim(reading.kind, reading.title), "kind");
-
-  const patientLines = lineValues((k) => PATIENT_KEY.test(k));
-  if (!patientLines.some((v) => appearsVerbatim(reading.patientName, v))) fail("patientName", reading.patientName);
-  const birthLines = lineValues((k) => PATIENT_KEY.test(k) || BIRTH_KEY.test(k));
-  if (!birthLines.some((v) => appearsVerbatim(reading.patientBirthDate, v))) fail("patientBirthDate", reading.patientBirthDate);
-
-  reading.fields.forEach((f, i) => {
-    if (!source.keyLines.some((l) => l.key === collapse(f.key) && l.value === collapse(f.value))) fail(`fields[${i}]`, `${f.key}: ${f.value}`);
-  });
-  const values = new Set(source.keyLines.map((l) => l.value));
-  for (const key of ["sampleTaken", "reported", "validatedBy", "stay", "reason", "writtenBy", "sentBy"] as const) {
-    optional(reading[key], values.has(collapse(reading[key])), key);
-  }
-  optional(reading.conclusion, appearsVerbatim(reading.conclusion, markdown), "conclusion");
-  reading.sections.forEach((s, i) => {
-    if (!source.headings.includes(collapse(s.heading))) fail(`sections[${i}].heading`, s.heading);
-    optional(s.text, appearsVerbatim(s.text, markdown), `sections[${i}].text`);
-  });
-
-  if (reading.type === "lab-result") {
-    // sourceRefusals() has already refused a file with more than one table.
-    if (source.tables.length === 1) failures.push(...unverifiedRows(reading.rows, source.tables[0]));
-    else failures.push("rows: the document has no table");
-  } else if (reading.rows.length) failures.push("rows: only a lab result has rows");
-  return failures;
-}
-
-const person = (raw: string): PersonLine | null => (raw ? parsePersonLine(raw) : null);
 
 function labRow(row: ModelReading["rows"][number], n: number, errors: string[]): LabRow | null {
+  const where = `Row ${n + 1} (${row.test || "no test name"})`;
   const value = toNumber(row.valueText);
-  if (value === null) {
-    errors.push(`Row ${n + 1} (${row.test}): the result is not a number.`);
-    return null;
-  }
-  // The fallback also reads "0.8 - 1.2" and "0.8–1.2", which the parser does not.
-  const range = row.rangeText.match(/^\s*(-?[\d.,]+)\s*(?:to|-|–)\s*(-?[\d.,]+)\s*$/);
+  if (value === null) errors.push(`${where}: the result "${row.valueText}" is not a number.`);
+  if (!isLoinc(row.loinc)) errors.push(`${where}: "${row.loinc}" is not a LOINC code such as 6301-6, or its check digit is wrong.`);
+  // A range that is written but cannot be read gives no record, so a value outside it can never pass as normal.
+  const range = row.rangeText ? RANGE.exec(collapse(row.rangeText)) : null;
   const low = range ? toNumber(range[1]) : null;
   const high = range ? toNumber(range[2]) : null;
+  if (row.rangeText && (low === null || high === null)) errors.push(`${where}: the reference range "${row.rangeText}" cannot be read.`);
+  if (value === null || !isLoinc(row.loinc) || (row.rangeText && (low === null || high === null))) return null;
   const hasRange = low !== null && high !== null;
   return {
     test: row.test,
@@ -259,71 +164,152 @@ function labRow(row: ModelReading["rows"][number], n: number, errors: string[]):
 }
 
 /**
- * Builds the parser's typed record from a verified reading. The derived fields come from code, never from the model.
- * Not exported: the only way out is `parseWithFallback()`, which always marks the record as held.
+ * Code's own reading of a format the parser does not know, with synonyms for keys and headers. It returns the record
+ * and its reading in the model's schema. Not exported: the only way out is `parseWithFallback()`, which holds it.
  */
-function toDocument(reading: ModelReading, markdown: string): { document: ParsedDocument | null; errors: string[] } {
+function readWide(markdown: string): Wide {
+  const source = markdown.replace(/^﻿/, "").replace(/\r\n?/g, "\n");
+  const raw = collect(source);
   const errors: string[] = [];
-  const birthDate = parseDateWide(reading.patientBirthDate);
-  if (!reading.patientName || !birthDate) errors.push("The model found no patient name and birth date.");
+
+  // Safety refusals first: they never reach the model.
+  const refusals: Wide["refusals"] = [];
+  if (raw.tables.length > 1) refusals.push({ safety: "several-tables", error: "The file has more than one table. Put all results in one table." });
+  const seen = new Map<string, string>();
+  const repeated = new Set<string>();
+  for (const { key, norm, value } of raw.lines) {
+    if (seen.has(norm) && seen.get(norm) !== value) repeated.add(key);
+    else seen.set(norm, value);
+  }
+  for (const key of repeated) refusals.push({ safety: "repeated-key", error: `The file has more than one "${key}:" line.` });
+  const identity = patientIdentity(keyLines(source));
+  refusals.push(...identity.refusals);
+
+  // The patient, from the line that names them. Code reads the whole name part and the one birth date.
+  if (!identity.name) errors.push("The file has no line that names the patient.");
+  const birthDate = identity.birth?.date ?? null;
+  if (!birthDate) errors.push("The file has no readable birth date for the patient.");
+
+  // The type, from the kind in the heading, as the parser does.
+  if (!raw.title) errors.push("The file has no heading.");
+  const parts = (raw.title ?? "").split(/\s+[—–-]\s+|\s*[:|]\s*/).map((p) => p.trim()).filter(Boolean);
+  const kindAt = parts.findIndex((p) => LAB_KINDS.has(p.toLowerCase()) || REHAB_KINDS.has(p.toLowerCase()));
+  const kind = kindAt >= 0 ? parts[kindAt] : (parts[1] ?? "");
+  const type = kindAt < 0 ? "other" : LAB_KINDS.has(kind.toLowerCase()) ? "lab-result" : "rehab-report";
+  const organisation = parts.length === 2 ? parts[kindAt >= 0 ? 1 - kindAt : 0] : "";
+  if (type === "other" && raw.tables.length) errors.push("The file has a table, but its heading names no lab report, so its results cannot be read.");
+
+  // Each key field from its own keys only.
+  const field = (f: KeyField) => {
+    const values = new Set(raw.lines.filter((l) => FIELD_KEYS[f].has(l.norm)).map((l) => l.value));
+    if (values.size > 1) errors.push(`The file has more than one line for ${f}.`);
+    return values.size === 1 ? [...values][0] : "";
+  };
+  const reading: ModelReading = {
+    type,
+    organisation,
+    kind,
+    patientName: identity.name ?? "",
+    patientBirthDate: identity.birth?.text ?? "",
+    ...(Object.fromEntries(KEY_FIELDS.map((f) => [f, field(f)])) as Record<KeyField, string>),
+    rows: [],
+  };
+
+  // Each lab value from the one column whose header names it.
+  if (type === "lab-result") {
+    const table = raw.tables.length === 1 ? raw.tables[0] : null;
+    if (!table) errors.push("The lab report has no result table.");
+    else {
+      const header = table.header.map(plain);
+      const col = {} as Record<LabRowKey, number>;
+      for (const f of LAB_ROW_KEYS) {
+        const at = header.flatMap((h, i) => (COLUMNS[f].has(h) ? [i] : []));
+        if (at.length === 1) col[f] = at[0];
+        else errors.push(`The result table needs exactly one ${COLUMN_LABEL[f]} column.`);
+      }
+      if (Object.keys(col).length === LAB_ROW_KEYS.length) {
+        reading.rows = table.rows.map((cells) => Object.fromEntries(LAB_ROW_KEYS.map((f) => [f, cells[col[f]] ?? ""])) as Record<LabRowKey, string>);
+      }
+      if (!table.rows.length) errors.push("The result table has no rows.");
+    }
+  }
 
   const base = {
-    title: reading.title,
-    organisation: reading.organisation,
-    kind: reading.kind.toLowerCase(),
-    patient: { name: reading.patientName, birthDate: birthDate ?? "" },
-    fields: Object.fromEntries(reading.fields.map((f) => [f.key, f.value])),
+    title: raw.title ?? "",
+    organisation,
+    kind: kind.toLowerCase(),
+    patient: { name: identity.name ?? "", birthDate: birthDate ?? "" },
+    fields: Object.fromEntries([...raw.lines].reverse().map((l) => [l.key, l.value])),
     markdown,
   };
+  const person = (value: string): PersonLine | null => (value ? parsePersonLine(value) : null);
   const dateTime = (label: string, value: string) => {
-    const parsed = parseViennaDateTimeWide(value);
-    if (!parsed) errors.push(`The model found no readable "${label}" date.`);
+    const parsed = value ? parseViennaDateTimeWide(value) : null;
+    if (!parsed) errors.push(value ? `"${label}: ${value}" is not a date such as "22.10.2026 08:10".` : `The file has no "${label}:" line.`);
     return parsed ?? "";
   };
 
   let document: ParsedDocument;
-  if (reading.type === "lab-result") {
-    const rows = reading.rows.flatMap((r, n) => labRow(r, n, errors) ?? []);
-    if (!reading.rows.length) errors.push("The model found no result rows.");
+  if (type === "lab-result") {
     document = {
       ...base,
-      type: "lab-result",
+      type,
       sampleTaken: dateTime("Sample taken", reading.sampleTaken),
       reported: dateTime("Reported", reading.reported),
-      rows,
-      conclusion: reading.conclusion || null,
+      rows: reading.rows.flatMap((r, n) => labRow(r, n, errors) ?? []),
+      // All free text, as the parser does, so no line such as "results invalid" can be left out.
+      conclusion: raw.free.join(" ") || null,
       validatedBy: person(reading.validatedBy),
     };
-  } else if (reading.type === "rehab-report") {
+  } else if (type === "rehab-report") {
     const stay = parseStayWide(reading.stay);
-    if (!stay) errors.push("The model found no readable stay.");
+    if (!stay) errors.push(reading.stay ? `"Stay: ${reading.stay}" is not a stay such as "02.09.2026 - 23.09.2026".` : 'The file has no "Stay:" line.');
     document = {
       ...base,
-      type: "rehab-report",
+      type,
       stay: stay ?? { start: "", end: "" },
       reason: reading.reason || null,
-      sections: reading.sections,
+      sections: raw.sections.map((s) => ({ heading: s.heading, text: s.lines.join("\n") })),
       writtenBy: person(reading.writtenBy),
       sentBy: person(reading.sentBy),
     };
   } else {
     document = { ...base, type: "other" };
   }
-  return errors.length ? { document: null, errors } : { document, errors };
+  return { reading, document: errors.length ? null : document, errors, refusals };
+}
+
+/** Every field where the model's reading differs from code's, for example `rows[1].valueText: "31"`. Empty means they agree. */
+function disagreements(model: ModelReading, code: ModelReading): string[] {
+  const out: string[] = [];
+  const check = (path: string, m: string, c: string, same = collapse(m) === collapse(c)) => {
+    if (!same) out.push(`${path}: ${JSON.stringify(m)}`);
+  };
+  check("type", model.type, code.type);
+  check("organisation", model.organisation, code.organisation);
+  check("kind", model.kind, code.kind, collapse(model.kind).toLowerCase() === collapse(code.kind).toLowerCase());
+  check("patientName", model.patientName, code.patientName);
+  const birth = parseDateWide(collapse(model.patientBirthDate));
+  check("patientBirthDate", model.patientBirthDate, code.patientBirthDate, birth !== null && birth === parseDateWide(code.patientBirthDate));
+  for (const f of KEY_FIELDS) check(f, model[f], code[f]);
+  if (model.rows.length !== code.rows.length) out.push(`rows: ${model.rows.length} rows, but the table has ${code.rows.length}`);
+  else model.rows.forEach((row, i) => LAB_ROW_KEYS.forEach((f) => check(`rows[${i}].${f}`, row[f], code.rows[i][f])));
+  return out;
 }
 
 /**
  * `parseDocument()`, and when it fails for its format and a reader is configured, the AI fallback. A safety refusal
- * never reaches the model. A model failure or an answer that does not fit the schema leaves the parser's result as it
- * was. Anything the model read comes back with `held`.
+ * never reaches the model, and neither does a file code cannot read. A model failure or an answer that does not fit the
+ * schema leaves the parser's result as it was. Anything the fallback reads comes back with `held`.
  */
 export async function parseWithFallback(markdown: string, reader: DocumentReader | null): Promise<FallbackResult> {
   const parsed = parseDocument(markdown);
   if (parsed.ok || !reader || parsed.safety.length) return parsed;
-  const refusals = sourceRefusals(readSource(markdown));
-  if (refusals.length) {
-    return { ok: false, errors: [...parsed.errors, ...refusals.map((r) => r.error)], safety: [...new Set(refusals.map((r) => r.safety))] };
+  const wide = readWide(markdown);
+  if (wide.refusals.length) {
+    return { ok: false, errors: [...parsed.errors, ...wide.refusals.map((r) => r.error)], safety: [...new Set(wide.refusals.map((r) => r.safety))] };
   }
+  if (!wide.document) return { ok: false, errors: [...parsed.errors, ...wide.errors], safety: [] };
 
   let answer: { model: string; output: unknown };
   try {
@@ -334,10 +320,9 @@ export async function parseWithFallback(markdown: string, reader: DocumentReader
   const reading = modelReadingSchema.safeParse(answer.output);
   if (!reading.success) return parsed;
 
-  const unverified = unverifiedValues(reading.data, markdown);
-  const built = unverified.length ? { document: null, errors: [] } : toDocument(reading.data, markdown);
+  const unverified = disagreements(reading.data, wide.reading);
   const held = { by: "model" as const, model: answer.model };
-  return built.document
-    ? { ok: true, document: built.document, held: { ...held, reason: HELD_REASON } }
-    : { ok: false, errors: [...parsed.errors, ...built.errors], held: { ...held, reason: unverified.length ? UNVERIFIED_REASON : UNBUILT_REASON, unverified } };
+  return unverified.length
+    ? { ok: false, errors: parsed.errors, held: { ...held, reason: UNVERIFIED_REASON, unverified } }
+    : { ok: true, document: wide.document, held: { ...held, reason: HELD_REASON } };
 }

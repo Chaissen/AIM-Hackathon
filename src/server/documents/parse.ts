@@ -2,6 +2,7 @@ import MarkdownIt from "markdown-it";
 
 import { TITLE } from "@/server/identity/names";
 import { parseDate, parseStay, parseViennaDateTime } from "./dates";
+import { keyLines, patientIdentity } from "./patient-lines";
 import type { LabRow, ParseResult, ParsedDocument, PersonLine, SafetyRefusal } from "./types";
 
 // Reads the scenario Markdown format into typed records (docs/ARCHITECTURE.md, "Document parsing").
@@ -184,6 +185,11 @@ export function parseDocument(markdown: string): ParseResult {
   for (const key of raw.duplicates) {
     errors.push(`The file has more than one "${key}:" line.`);
     safety.add("repeated-key");
+  }
+  // Lines this parser does not read as fields, such as `**Patient:** Max` or `Name: Max`, must not name another patient.
+  for (const refusal of patientIdentity(keyLines(markdown)).refusals) {
+    errors.push(refusal.error);
+    safety.add(refusal.safety);
   }
 
   const base = {

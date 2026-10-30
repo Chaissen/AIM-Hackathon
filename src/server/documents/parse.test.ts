@@ -114,8 +114,13 @@ test("a document with a key twice is refused, so a second patient cannot slip pa
   const maria = scenario("lab-result-maria-beispiel.md").replace(/\r\n/g, "\n");
   const result = parseDocument(maria.replace("\nSample taken:", "\nPatient: Max Beispiel, born 1 January 1960\nSample taken:"));
   assert.equal(result.ok, false);
-  if (!result.ok) assert.deepEqual(result.errors, ['The file has more than one "Patient:" line.']);
-  if (!result.ok) assert.deepEqual(result.safety, ["repeated-key"]);
+  if (!result.ok)
+    assert.deepEqual(result.errors, [
+      'The file has more than one "Patient:" line.',
+      "The file names more than one patient.",
+      "The file gives more than one birth date for the patient.",
+    ]);
+  if (!result.ok) assert.deepEqual(result.safety, ["repeated-key", "several-patients", "several-birth-dates"]);
 
   // A known key inside a section counts too.
   const rehab = scenario("rehab-report-maria-beispiel.md").replace(/\r\n/g, "\n");

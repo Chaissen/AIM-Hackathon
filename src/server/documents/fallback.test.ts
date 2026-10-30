@@ -4,47 +4,52 @@ import { test } from "node:test";
 
 import { parseDateWide, parseStayWide, parseViennaDateTimeWide } from "./dates";
 import * as fallback from "./fallback";
-import { HELD_REASON, UNBUILT_REASON, UNVERIFIED_REASON, appearsVerbatim, parseWithFallback, type DocumentReader, type ModelReading } from "./fallback";
+import { HELD_REASON, UNVERIFIED_REASON, modelReadingSchema, parseWithFallback, type DocumentReader, type ModelReading } from "./fallback";
 import { parseDocument } from "./parse";
 import { checkAnswerPatient } from "./patient-check";
-import type { LabResult } from "./types";
+import type { LabResult, RehabReport } from "./types";
 
 // The model is always a stub here: tests never call the network.
 
-const fixture = (file: string) => readFileSync(new URL(`./fixtures/${file}`, import.meta.url), "utf8").replace(/\r\n/g, "\n");
-const scenario = (file: string) => readFileSync(new URL(`../../../track/scenario/documents/${file}`, import.meta.url), "utf8").replace(/\r\n/g, "\n");
-const otherFormat = fixture("lab-result-maria-beispiel-other-format.md");
+const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8").replace(/\r\n/g, "\n");
+const scenario = (file: string) => read(`../../../track/scenario/documents/${file}`);
+const lab = read("./fixtures/lab-result-maria-beispiel-other-format.md");
+const rehab = read("./fixtures/rehab-report-maria-beispiel-other-format.md");
 
-/** What a model should return for the fixture: every value copied as written. */
-const goodReading = (): ModelReading => ({
+const empty = { stay: "", reason: "", writtenBy: "", sentBy: "" };
+/** A model reading that agrees with the lab fixture. */
+const goodLab = (): ModelReading => ({
   type: "lab-result",
-  title: "Lab report — Labor Kanalstraße",
   organisation: "Labor Kanalstraße",
   kind: "Lab report",
   patientName: "Maria Beispiel",
   patientBirthDate: "12.03.1961",
-  fields: [
-    { key: "Patient name", value: "Maria Beispiel" },
-    { key: "Date of birth", value: "12.03.1961" },
-    { key: "Requested by", value: "Dr. Lena Hofer, Klinikum Beispielstadt" },
-    { key: "Sample taken", value: "22.10.2026 08:10" },
-    { key: "Reported", value: "22.10.2026 11:40" },
-  ],
   sampleTaken: "22.10.2026 08:10",
   reported: "22.10.2026 11:40",
+  validatedBy: "Dr. Eva Brandl, lab physician",
+  ...empty,
   rows: [
     { test: "INR (prothrombin time)", valueText: "1.0", unitText: "", rangeText: "0.8 - 1.2", loinc: "6301-6" },
     { test: "aPTT", valueText: "31", unitText: "s", rangeText: "25 - 37", loinc: "14979-9" },
     { test: "Platelets", valueText: "245", unitText: "10^9/L", rangeText: "150 - 400", loinc: "777-3" },
     { test: "Fibrinogen", valueText: "3.1", unitText: "g/L", rangeText: "2.0 - 4.0", loinc: "3255-7" },
   ],
-  conclusion: "All values are within the reference range.",
-  validatedBy: "Dr. Eva Brandl, lab physician",
-  stay: "",
-  reason: "",
-  sections: [],
-  writtenBy: "",
-  sentBy: "",
+});
+/** A model reading that agrees with the rehab fixture. */
+const goodRehab = (): ModelReading => ({
+  type: "rehab-report",
+  organisation: "Reha Waldblick",
+  kind: "Discharge report",
+  patientName: "Maria Beispiel",
+  patientBirthDate: "12.03.1961",
+  sampleTaken: "",
+  reported: "",
+  validatedBy: "",
+  stay: "02.09.2026 - 23.09.2026",
+  reason: "rehabilitation after a total hip replacement on the left, on 18 August 2026 at Klinikum Beispielstadt",
+  writtenBy: "Dr. Johanna Leitner, medical director, Reha Waldblick",
+  sentBy: "Stefan Kern, discharge management",
+  rows: [],
 });
 
 const stub =
@@ -52,29 +57,52 @@ const stub =
   async () => ({ model: "stub-model", output });
 const neverCalled: DocumentReader = async () => assert.fail("the model must not be called");
 const maria = { family: "Beispiel", given: ["Maria"], birthDate: "1961-03-12" };
-
-/** The fallback's verdict on one changed reading of the fixture: held, with these unverified values. */
-async function unverified(change: (r: ModelReading) => void, markdown = otherFormat): Promise<string[]> {
-  const reading = goodReading();
+const changed = (base: () => ModelReading, change: (r: ModelReading) => void) => {
+  const reading = base();
   change(reading);
+  return reading;
+};
+
+/** The model disagrees with the document: held with the file only. Returns the disagreeing values. */
+async function disagrees(markdown: string, reading: ModelReading): Promise<string[]> {
   const result = await parseWithFallback(markdown, stub(reading));
   assert.ok(!result.ok && "held" in result, JSON.stringify(result));
   assert.equal(result.held.reason, UNVERIFIED_REASON);
   return result.held.unverified;
 }
-
-test("the parser cannot read the fixture in the other format, and it is no safety refusal", () => {
-  const result = parseDocument(otherFormat);
-  assert.ok(!result.ok);
-  assert.deepEqual(result.safety, []);
-});
-
-test("the fallback reads the other format into the same LabResult and holds it for Dr. Hofer", async () => {
-  const result = await parseWithFallback(otherFormat, stub(goodReading()));
+/** The model agrees: a held record. */
+async function record(markdown: string, reading: ModelReading) {
+  const result = await parseWithFallback(markdown, stub(reading));
   assert.ok(result.ok && "held" in result, JSON.stringify(result));
   assert.deepEqual(result.held, { by: "model", model: "stub-model", reason: HELD_REASON });
+  return result.document;
+}
+/** A safety refusal: the model is never called. Returns the refusals. */
+async function refused(markdown: string) {
+  const result = await parseWithFallback(markdown, neverCalled);
+  assert.ok(!result.ok && !("held" in result), JSON.stringify(result));
+  assert.ok(result.safety.length, result.errors.join("; "));
+  return result.safety;
+}
+/** Code cannot read the file: no record, no hold, and the model is never called. Returns the errors. */
+async function unreadable(markdown: string) {
+  const result = await parseWithFallback(markdown, neverCalled);
+  assert.ok(!result.ok && !("held" in result), JSON.stringify(result));
+  assert.deepEqual(result.safety, []);
+  return result.errors;
+}
+const insertAfter = (markdown: string, anchor: string, line: string) => markdown.replace(anchor, `${anchor}\n${line}`);
 
-  const doc = result.document as LabResult;
+test("the parser cannot read either fixture, and neither is a safety refusal", () => {
+  for (const markdown of [lab, rehab]) {
+    const result = parseDocument(markdown);
+    assert.ok(!result.ok);
+    assert.deepEqual(result.safety, []);
+  }
+});
+
+test("the fallback reads the lab report in the other format into the same LabResult and holds it", async () => {
+  const doc = (await record(lab, goodLab())) as LabResult;
   assert.equal(doc.type, "lab-result");
   assert.equal(doc.organisation, "Labor Kanalstraße");
   assert.equal(doc.kind, "lab report");
@@ -84,7 +112,7 @@ test("the fallback reads the other format into the same LabResult and holds it f
   assert.equal(doc.conclusion, "All values are within the reference range.");
   assert.deepEqual(doc.validatedBy, { raw: "Dr. Eva Brandl, lab physician", titles: ["Dr."], given: "Eva", family: "Brandl", details: ["lab physician"] });
   assert.equal(doc.fields["Requested by"], "Dr. Lena Hofer, Klinikum Beispielstadt");
-  assert.equal(doc.markdown, otherFormat);
+  assert.equal(doc.markdown, lab);
   // The same rows the parser reads from the scenario file.
   assert.deepEqual(
     doc.rows.map((r) => [r.test, r.value, r.ucum, r.low, r.high, r.loinc, r.interpretation]),
@@ -95,115 +123,189 @@ test("the fallback reads the other format into the same LabResult and holds it f
       ["Fibrinogen", 3.1, "g/L", 2, 4, "3255-7", "N"],
     ],
   );
-  // The patient check stays deterministic and runs on the model's reading as on the parser's.
   assert.equal(checkAnswerPatient(doc.patient, { name: "Maria Beispiel", birthDate: "1961-03-12" }, maria).pass, true);
 });
 
-test("a parser safety refusal never reaches the model: a second Patient line or a second table", async () => {
-  const lab = scenario("lab-result-maria-beispiel.md");
-  const twoPatients = await parseWithFallback(lab.replace("\nSample taken:", "\nPatient: Max Beispiel, born 3 July 1958\nSample taken:"), neverCalled);
-  assert.ok(!twoPatients.ok && !("held" in twoPatients));
-  assert.deepEqual(twoPatients.safety, ["repeated-key"]);
+test("the fallback reads the rehab report in the other format and holds it", async () => {
+  const doc = (await record(rehab, goodRehab())) as RehabReport;
+  assert.equal(doc.type, "rehab-report");
+  assert.equal(doc.organisation, "Reha Waldblick");
+  assert.deepEqual(doc.stay, { start: "2026-09-02", end: "2026-09-23" });
+  assert.equal(doc.writtenBy?.family, "Leitner");
+  assert.equal(doc.sentBy?.family, "Kern");
+  assert.deepEqual(
+    doc.sections.map((s) => s.heading),
+    ["Course", "Recommendations"],
+  );
+  assert.equal(doc.sections[1].text, "- Continue the home exercises.\n- Outpatient physiotherapy twice a week for six weeks.");
+});
 
-  const twoTables = await parseWithFallback(`${lab}\n| Test | Result |\n|---|---|\n| aPTT | 44 |\n`, neverCalled);
-  assert.ok(!twoTables.ok && !("held" in twoTables));
-  assert.deepEqual(twoTables.safety, ["several-tables"]);
+// Finding 1: code, not the model, reads the patient.
+
+test("the patient name is the whole name part of the patient line, read by code", async () => {
+  const son = lab.replace("Patient name: Maria Beispiel", "Patient name: Max Beispiel, son of Maria Beispiel");
+  assert.deepEqual(await disagrees(son, goodLab()), ['patientName: "Maria Beispiel"']);
+  // A model that reads the line right gives Max, and the patient check stops him.
+  const doc = await record(son, changed(goodLab, (r) => (r.patientName = "Max Beispiel")));
+  assert.equal(doc.patient.name, "Max Beispiel");
+  assert.equal(checkAnswerPatient(doc.patient, { name: "Maria Beispiel", birthDate: "1961-03-12" }, maria).pass, false);
+
+  for (const name of ["Anna Maria Beispiel", "Maria Beispiel Gruber"]) {
+    assert.deepEqual(await disagrees(lab.replace("Patient name: Maria Beispiel", `Patient name: ${name}`), goodLab()), ['patientName: "Maria Beispiel"']);
+  }
+});
+
+test("the birth date is the patient's own, and two different birth dates are refused", async () => {
+  const mother = lab.replace("Date of birth: 12.03.1961", "Date of birth: 03.12.1961\nMother's date of birth: 12.03.1961");
+  assert.deepEqual(await disagrees(mother, goodLab()), ['patientBirthDate: "12.03.1961"']);
+  const doc = await record(mother, changed(goodLab, (r) => (r.patientBirthDate = "03.12.1961")));
+  assert.equal(doc.patient.birthDate, "1961-12-03");
+
+  assert.deepEqual(await refused(lab.replace("Date of birth: 12.03.1961", "Date of birth: 03.12.1961\nBirth date: 12.03.1961")), ["several-birth-dates"]);
+  assert.deepEqual(await refused(lab.replace("Patient name: Maria Beispiel", "Patient: Maria Beispiel, born 3 December 1961")), ["several-birth-dates"]);
+});
+
+// Finding 2: each key field comes from its own keys.
+
+test("a key field from another line is not the field", async () => {
+  assert.deepEqual(await disagrees(lab, changed(goodLab, (r) => (r.validatedBy = "Dr. Lena Hofer, Klinikum Beispielstadt"))), [
+    'validatedBy: "Dr. Lena Hofer, Klinikum Beispielstadt"',
+  ]);
+  assert.deepEqual(await disagrees(lab, changed(goodLab, (r) => (r.validatedBy = "Maria Beispiel"))), ['validatedBy: "Maria Beispiel"']);
+  assert.deepEqual(await disagrees(lab, changed(goodLab, (r) => ([r.sampleTaken, r.reported] = [r.reported, r.sampleTaken]))), [
+    'sampleTaken: "22.10.2026 11:40"',
+    'reported: "22.10.2026 08:10"',
+  ]);
+  assert.deepEqual(await disagrees(rehab, changed(goodRehab, (r) => ([r.writtenBy, r.sentBy] = [r.sentBy, r.writtenBy]))), [
+    'writtenBy: "Stefan Kern, discharge management"',
+    'sentBy: "Dr. Johanna Leitner, medical director, Reha Waldblick"',
+  ]);
+});
+
+test("a field under two keys with different values gives no record", async () => {
+  const errors = await unreadable(insertAfter(lab, "Sample taken: 22.10.2026 08:10", "Collected: 21.10.2026 07:00"));
+  assert.ok(errors.includes("The file has more than one line for sampleTaken."), errors.join("; "));
+});
+
+// Finding 3: each lab value comes from the column whose header names it.
+
+test("a value from another column is not the value, and an ambiguous column gives no record", async () => {
+  const previous = lab
+    .replace("| Analyte | Value | Unit |", "| Analyte | Value | Previous | Unit |")
+    .replace("|---|---|---|---|---|", "|---|---|---|---|---|---|")
+    .replace("| INR (prothrombin time) | 1.0 |", "| INR (prothrombin time) | 1.0 | 1.1 |")
+    .replace("| aPTT | 31 |", "| aPTT | 48 | 31 |")
+    .replace("| Platelets | 245 |", "| Platelets | 245 | 250 |")
+    .replace("| Fibrinogen | 3.1 |", "| Fibrinogen | 3.1 | 3.0 |");
+  const fromPrevious = changed(goodLab, (r) => (r.rows[1].valueText = "31"));
+  assert.deepEqual(await disagrees(previous, fromPrevious), ['rows[1].valueText: "31"']);
+  const doc = (await record(previous, changed(goodLab, (r) => (r.rows[1].valueText = "48")))) as LabResult;
+  assert.deepEqual([doc.rows[1].value, doc.rows[1].interpretation], [48, "H"]);
+
+  const twoResults = lab.replace("| Analyte | Value | Unit |", "| Analyte | Result | Unit |").replace("| Normal range |", "| Value |");
+  assert.ok((await unreadable(twoResults)).includes("The result table needs exactly one result column."));
+});
+
+// Finding 4: code decides the type.
+
+test("the type comes from the heading, and a table under an unknown kind gives no record", async () => {
+  assert.deepEqual(
+    await disagrees(
+      lab,
+      changed(goodLab, (r) => Object.assign(r, { type: "other", rows: [] })),
+    ),
+    ['type: "other"', "rows: 0 rows, but the table has 4"],
+  );
+  const errors = await unreadable(lab.replace("# Lab report — Labor Kanalstraße", "# Findings — Labor Kanalstraße"));
+  assert.ok(errors.includes("The file has a table, but its heading names no lab report, so its results cannot be read."));
+});
+
+// Finding 5: a range that cannot be read gives no record.
+
+test("dash ranges are read, and a range that cannot be read gives no record instead of no flag", async () => {
+  const aptt48 = (range: string) => lab.replace("| aPTT | 31 | s | 25 - 37 |", `| aPTT | 48 | s | ${range} |`);
+  for (const range of ["25 — 37", "25 − 37", "25 – 37", "25 to 37"]) {
+    const doc = (await record(aptt48(range), changed(goodLab, (r) => Object.assign(r.rows[1], { valueText: "48", rangeText: range })))) as LabResult;
+    assert.deepEqual([doc.rows[1].low, doc.rows[1].high, doc.rows[1].interpretation], [25, 37, "H"], range);
+  }
+  for (const range of ["25 bis 37", "< 37"]) {
+    const errors = await unreadable(aptt48(range));
+    assert.ok(errors.includes(`Row 2 (aPTT): the reference range "${range}" cannot be read.`), errors.join("; "));
+  }
+});
+
+// Finding 6: a second patient in any form is refused before the model.
+
+test("a second patient in any written form is refused without the model", async () => {
+  const lines = [
+    "**Patient name:** Max Beispiel",
+    "Patient’s name: Max Beispiel",
+    "## Patient: Max Beispiel",
+    "Patient:Max Beispiel",
+    "Name: Max Beispiel",
+    "Patient (2): Max Beispiel",
+    "\n    Patient: Max Beispiel\n",
+    "\n<div>Patient: Max Beispiel</div>\n",
+  ];
+  for (const line of lines) {
+    assert.ok((await refused(insertAfter(lab, "Reported: 22.10.2026 11:40\n", line))).includes("several-patients"), line);
+  }
+});
+
+test("the parser refuses a bold second patient line too", () => {
+  const result = parseDocument(insertAfter(scenario("lab-result-maria-beispiel.md"), "Reported: 22 October 2026, 11:40\n", "**Patient:** Max Beispiel, born 3 July 1958"));
+  assert.ok(!result.ok);
+  assert.deepEqual(result.safety, ["several-patients", "several-birth-dates"]);
+});
+
+// Finding 7: code builds the free text.
+
+test("the conclusion is all the free text, built by code, so no line can be left out", async () => {
+  const note = lab
+    .replace("All values are within the reference range.", "Not all values are within the reference range.")
+    .replace("Validated by:", "Note: sample haemolysed, results invalid.\n\nValidated by:");
+  const doc = (await record(note, goodLab())) as LabResult;
+  assert.equal(doc.conclusion, "Not all values are within the reference range. Note: sample haemolysed, results invalid.");
+  assert.equal("conclusion" in modelReadingSchema.shape, false);
+});
+
+// Earlier rounds, still held or refused.
+
+test("a hallucinated value, a dropped row, or a foreign LOINC code is held without a record", async () => {
+  assert.deepEqual(await disagrees(lab, changed(goodLab, (r) => (r.rows[1].valueText = "35"))), ['rows[1].valueText: "35"']);
+  assert.deepEqual(await disagrees(lab, changed(goodLab, (r) => r.rows.splice(1, 1))), ["rows: 3 rows, but the table has 4"]);
+  assert.deepEqual(await disagrees(lab, changed(goodLab, (r) => (r.rows[0].loinc = "301-6"))), ['rows[0].loinc: "301-6"']);
+  assert.deepEqual(await disagrees(lab, changed(goodLab, (r) => (r.rows[1].unitText = ""))), ['rows[1].unitText: ""']);
+});
+
+test("a LOINC code with a wrong check digit in the document gives no record", async () => {
+  const errors = await unreadable(lab.replace("| 6301-6 |", "| 6301-5 |"));
+  assert.ok(errors.some((e) => e.includes('"6301-5" is not a LOINC code')));
+});
+
+test("a parser safety refusal never reaches the model: a second Patient line or a second table", async () => {
+  const scenarioLab = scenario("lab-result-maria-beispiel.md");
+  assert.ok((await refused(scenarioLab.replace("\nSample taken:", "\nPatient: Max Beispiel, born 3 July 1958\nSample taken:"))).includes("repeated-key"));
+  assert.deepEqual(await refused(`${scenarioLab}\n| Test | Result |\n|---|---|\n| aPTT | 44 |\n`), ["several-tables"]);
 });
 
 test("the same refusals in a format the parser does not know never reach the model either", async () => {
-  const twoTables = await parseWithFallback(`${otherFormat}\n| Analyte | Value |\n|---|---|\n| aPTT | 44 |\n`, neverCalled);
-  assert.ok(!twoTables.ok && !("held" in twoTables));
-  assert.deepEqual(twoTables.safety, ["several-tables"]);
-  assert.ok(twoTables.errors.includes("The file has more than one table. Put all results in one table."));
-
-  const repeated = await parseWithFallback(otherFormat.replace("Date of birth:", "Patient name: Max Beispiel\nDate of birth:"), neverCalled);
-  assert.ok(!repeated.ok && !("held" in repeated));
-  assert.deepEqual(repeated.safety, ["repeated-key", "several-patients"]);
-
-  const otherKey = await parseWithFallback(otherFormat.replace("Date of birth:", "Patient: Max Beispiel, born 3 July 1958\nDate of birth:"), neverCalled);
-  assert.ok(!otherKey.ok && !("held" in otherKey));
-  assert.deepEqual(otherKey.safety, ["several-patients"]);
-  assert.ok(otherKey.errors.includes("The file names more than one patient."));
-});
-
-test("a hallucinated result value is held without a document", async () => {
-  assert.deepEqual(await unverified((r) => (r.rows[1].valueText = "35")), ['rows[1].valueText: "35"']);
-});
-
-test("a piece of a number or a unit is not the value", async () => {
-  // "3" from "3.1" would make INR 3 and H; "4" from "4.0" and "L" from "10^9/L" would change the record too.
-  assert.deepEqual(await unverified((r) => (r.rows[0].valueText = "3")), ['rows[0].valueText: "3"']);
-  assert.deepEqual(await unverified((r) => (r.rows[3].valueText = "4")), ['rows[3].valueText: "4"']);
-  assert.deepEqual(await unverified((r) => (r.rows[2].unitText = "L")), ['rows[2].unitText: "L"']);
-  assert.deepEqual(await unverified((r) => (r.patientBirthDate = "1961")), ['patientBirthDate: "1961"']);
-});
-
-test("a value from another row or another line is not the value", async () => {
-  // INR with the Fibrinogen result and code: both are in the table, but not in the INR row.
-  assert.deepEqual(
-    await unverified((r) => Object.assign(r.rows[0], { valueText: "3.1", loinc: "3255-7" })),
-    ['rows[0].valueText: "3.1"', 'rows[0].loinc: "3255-7"'],
-  );
-  assert.deepEqual(await unverified((r) => (r.patientBirthDate = "22.10.2026")), ['patientBirthDate: "22.10.2026"']);
-  assert.deepEqual(await unverified((r) => (r.patientName = "Lena Hofer")), ['patientName: "Lena Hofer"']);
-  assert.deepEqual(await unverified((r) => (r.fields[4] = { key: "Reported", value: "22.10.2026 08:10" })), ['fields[4]: "Reported: 22.10.2026 08:10"']);
-  assert.deepEqual(await unverified((r) => (r.patientName = "Max Beispiel")), ['patientName: "Max Beispiel"']);
-});
-
-test("a row left out or an emptied cell is held, so an abnormal result cannot disappear", async () => {
-  assert.deepEqual(await unverified((r) => r.rows.splice(1, 1)), ["rows: 3 rows, but the table has 4"]);
-  assert.deepEqual(await unverified((r) => (r.rows[1].rangeText = "")), ['rows[1].rangeText: ""']);
-  assert.deepEqual(await unverified((r) => (r.rows[1].unitText = "")), ['rows[1].unitText: ""']);
-});
-
-test("a LOINC code that is not in its row, only part of one, or missing is held", async () => {
-  assert.deepEqual(
-    await unverified((r) => {
-      r.rows[0].loinc = "301-6"; // inside "6301-6", and its check digit is wrong
-      r.rows[2].loinc = "26515-7"; // a real platelet code, but not in this document
-    }),
-    ['rows[0].loinc: "301-6"', 'rows[2].loinc: "26515-7"', 'rows[0].loinc: "301-6" is not a LOINC code'],
-  );
-  assert.deepEqual(await unverified((r) => (r.rows[3].loinc = "")), ['rows[3].loinc: ""', 'rows[3].loinc: "" is not a LOINC code']);
-});
-
-test("verified values that do not make a record are held with a reason that asks for the file, not for an accept", async () => {
-  const reading = goodReading();
-  reading.sampleTaken = "Maria Beispiel"; // the whole value of a line, but not a date
-  const result = await parseWithFallback(otherFormat, stub(reading));
-  assert.ok(!result.ok && "held" in result);
-  assert.equal(result.held.reason, UNBUILT_REASON);
-  assert.doesNotMatch(result.held.reason, /accept/i);
-  assert.deepEqual(result.held.unverified, []);
-  assert.ok(result.errors.includes('The model found no readable "Sample taken" date.'));
-});
-
-test("only parseWithFallback() turns a reading into a record, so every record from the model is held", () => {
-  assert.equal("toDocument" in fallback, false);
+  assert.deepEqual(await refused(`${lab}\n| Analyte | Value |\n|---|---|\n| aPTT | 44 |\n`), ["several-tables"]);
+  assert.deepEqual(await refused(insertAfter(lab, "Sample taken: 22.10.2026 08:10", "Sample taken: 21.10.2026 07:00")), ["repeated-key"]);
 });
 
 test("the parser's result stands when it reads the file, when no model is set, or when the model fails", async () => {
   const parsed = await parseWithFallback(scenario("lab-result-maria-beispiel.md"), neverCalled);
   assert.ok(parsed.ok && !("held" in parsed));
 
-  const parserOnly = parseDocument(otherFormat);
-  assert.deepEqual(await parseWithFallback(otherFormat, null), parserOnly);
-  assert.deepEqual(await parseWithFallback(otherFormat, () => Promise.reject(new Error("offline"))), parserOnly);
-  assert.deepEqual(await parseWithFallback(otherFormat, stub({ type: "lab-result" })), parserOnly);
+  const parserOnly = parseDocument(lab);
+  assert.deepEqual(await parseWithFallback(lab, null), parserOnly);
+  assert.deepEqual(await parseWithFallback(lab, () => Promise.reject(new Error("offline"))), parserOnly);
+  assert.deepEqual(await parseWithFallback(lab, stub({ type: "lab-result" })), parserOnly);
 });
 
-test("appearsVerbatim matches whole words, numbers, codes, and units with the same case, any white space", () => {
-  assert.equal(appearsVerbatim("Dr. Eva Brandl, lab physician", otherFormat), true);
-  assert.equal(appearsVerbatim("All values are   within\nthe reference range.", otherFormat), true);
-  assert.equal(appearsVerbatim("reference range", otherFormat), true);
-  assert.equal(appearsVerbatim("dr. eva brandl", otherFormat), false);
-  assert.equal(appearsVerbatim("1.0", "| 11.05 |"), false);
-  assert.equal(appearsVerbatim("1.0", "| 1.0 |"), true);
-  assert.equal(appearsVerbatim("3255-7", "LOINC 3255-7."), true);
-  for (const piece of ["1", "3", "4", "0", "12", "03", "1961", "2026", "L", "g", "9/L", "301-6"]) {
-    assert.equal(appearsVerbatim(piece, otherFormat), false, piece);
-  }
-  assert.equal(appearsVerbatim("", "anything"), false);
+test("only parseWithFallback() turns a reading into a record, so every record from the fallback is held", () => {
+  assert.deepEqual(Object.keys(fallback).sort(), ["HELD_REASON", "UNVERIFIED_REASON", "modelReadingSchema", "parseWithFallback"]);
 });
 
 test("the wide date readers take the dotted and ISO formats", () => {

@@ -184,42 +184,49 @@ The parser reads headings and tables from markdown-it tokens and splits `Key: va
 
 The document kind picks the mapper. `lab report` goes to the lab mapper and `discharge report` goes to the rehab mapper. Any other kind becomes a DocumentReference with the text attached, held for Dr. Hofer.
 
-The parser lives in `src/server/documents/`. `parseDocument()` returns a typed `LabResult`, `RehabReport`, or generic document (`types.ts`), or a list of reasons the uploader can act on; it never throws on content and never returns a half-read document. It refuses a document without a heading or a readable `Patient` line, a known key on more than one line with different values (a second `Patient` line could slip past the patient check), a lab report without exactly one result table, a result that is not a number (also `1,245`, which could mean 1245 or 1.245), a LOINC code with a wrong format or check digit, and a missing or unreadable date or stay line that the kind needs. A refused result lists the refusals that stop a misdelivery in `safety` (see the AI fallback below). Inside a `##` section only known keys such as `Written by` count, so a sentence with a colon stays text. Outside the sections a line with an unknown key such as `Note:` is a field and free text, so it still reaches the conclusion. A byte order mark at the start is ignored. Person lines split off titles such as `Dr.`, `Dr.in`, or `Prim.` with the same rule as `nameWords`. It converts the unit `10^9/L` to UCUM `10*9/L`, computes `N`, `H`, or `L` from the reference range, and reads a stay that names the month once, twice, or crosses a year. `checkAnswerPatient()` in `patient-check.ts` runs `samePatient()` on the document and on the form. A patient record without a family name or birth date never matches. `uploadHash()` gives the SHA-256 that stays in the audit log when an upload is discarded.
+The parser lives in `src/server/documents/`. `parseDocument()` returns a typed `LabResult`, `RehabReport`, or generic document (`types.ts`), or a list of reasons the uploader can act on; it never throws on content and never returns a half-read document. It refuses a document without a heading or a readable `Patient` line, a known key on more than one line with different values (a second `Patient` line could slip past the patient check), a lab report without exactly one result table, a result that is not a number (also `1,245`, which could mean 1245 or 1.245), a LOINC code with a wrong format or check digit, and a missing or unreadable date or stay line that the kind needs. It also refuses a file whose lines name more than one patient or birth date in any written form, such as a bold `**Patient:**` line (`patient-lines.ts`). A refused result lists the refusals that stop a misdelivery in `safety` (see the AI fallback below). Inside a `##` section only known keys such as `Written by` count, so a sentence with a colon stays text. Outside the sections a line with an unknown key such as `Note:` is a field and free text, so it still reaches the conclusion. A byte order mark at the start is ignored. Person lines split off titles such as `Dr.`, `Dr.in`, or `Prim.` with the same rule as `nameWords`. It converts the unit `10^9/L` to UCUM `10*9/L`, computes `N`, `H`, or `L` from the reference range, and reads a stay that names the month once, twice, or crosses a year. `checkAnswerPatient()` in `patient-check.ts` runs `samePatient()` on the document and on the form. A patient record without a family name or birth date never matches. `uploadHash()` gives the SHA-256 that stays in the audit log when an upload is discarded.
 
 `extra.test.ts` runs our extra test documents from `track/scenario/extra/` through the parser and the patient check ([Development](DEVELOPMENT.md#extra-test-documents)). Their index lists the gaps the parser still has: one-sided ranges such as `< 5`, and units that need more than `^` to `*` to become UCUM (`µmol/L`, `µg/dL`, `mIU/L`).
 
 ### AI fallback (optional, cut first)
 
-If the parser cannot read a document, a language model may extract the same fields as JSON against a fixed schema. Every value and every LOINC code it returns must appear word for word in the document. The patient check stays deterministic. An answer read by the model always waits until Dr. Hofer accepts it in the widget.
+If the parser cannot read a document, the AI fallback may read it. It follows one rule: code decides everything that carries safety or meaning, and the model never chooses a value. The patient check stays deterministic. An answer the fallback reads always waits until Dr. Hofer accepts it in the widget.
 
-`parseWithFallback()` in `src/server/documents/fallback.ts` runs `parseDocument()` first and calls the model only when that fails for its format and a reader is configured. The reader in `anthropic-reader.ts` calls the Anthropic Messages API with structured outputs (`AI_FALLBACK_MODEL`, default `claude-opus-5-5`). It uses no server-side fallback model, so the model named in the README is the only one that reads a document. Without `ANTHROPIC_API_KEY` the fallback is off. Tests inject a stub reader and never call the network.
+`parseWithFallback()` in `src/server/documents/fallback.ts` runs `parseDocument()` first. It goes on only when that fails for its format and a reader is configured. The reader in `anthropic-reader.ts` calls the Anthropic Messages API with structured outputs (`AI_FALLBACK_MODEL`, default `claude-opus-5-5`). It uses no server-side fallback model, so the model named in the README is the only one that reads a document. Without `ANTHROPIC_API_KEY` the fallback is off. Tests inject a stub reader and never call the network.
 
-Safety refusals never go to the model. They exist to stop a misdelivery, not because the format is unknown, and a model would pick one patient or one table and hide the rest. `parseDocument()` marks them in `safety` on its failure result:
+**Safety refusals never go to the model.** They exist to stop a misdelivery, not because the format is unknown. `parseDocument()` marks them in `safety` on its failure result, and the fallback runs the same checks on formats the parser does not know:
 
-- `repeated-key`: a known key such as `Patient` on more than one line with different values
-- `several-tables`: a lab report with more than one table
+- `repeated-key`: a key on more than one line with different values, such as a second `Patient:` line
+- `several-tables`: more than one table
+- `several-patients`: lines that name different patients
+- `several-birth-dates`: lines that give the patient different birth dates
 
-Before calling the model, the fallback runs the same checks on a format the parser does not know: more than one table of any kind, any key on more than one line with different values (case aside), and `several-patients`, two lines that name different patients under different keys such as `Patient:` and `Patient name:`. Such a file comes back as the parser's failure with these reasons added.
+`patient-lines.ts` finds the patient lines and birth date lines wherever they are written: plain text, a heading, bold or italic keys, list items, a code block, or HTML, with or without a space after the colon, with curly apostrophes, and with a suffix such as `(2)`. It treats `Patient`, `Patient name`, `Name`, and similar keys as patient keys. Birth date keys are `Date of birth`, `Birth date`, `DOB`, and similar; `Mother's date of birth` is not one. The parser runs this scan too, so `**Patient:** Max Beispiel` next to Maria's line is refused there as well.
 
-1. The model fills `modelReadingSchema`: the fields of the parser types, each as the text written in the document, `""` when absent. It never computes anything.
-2. `unverifiedValues()` checks that every value comes from its own place in the document:
-   - Each lab row matches one row of the single result table, in order, with no row left out. Each field is a whole cell, and each field comes from the same column in every row. A `""` matches only an empty cell. Every LOINC code passes the check digit test.
-   - The patient name appears in the line that names the patient (`Patient:`, `Patient name:`). The birth date appears in that line or in a birth date line.
-   - Each entry in `fields` is one `key: value` line. `sampleTaken`, `reported`, `stay`, `reason`, and the person lines are the whole value of one such line.
-   - The title is a heading. The organisation and kind appear in the title, and free text appears in the document.
-   - "Appears" means the same characters and case, white space aside, and not part of a longer word, number, code, or unit. `.`, `,`, `-`, `^`, and `/` between letters or digits join them, so `3` is not in `3.1`, `03` is not in `12.03.1961`, `301-6` is not in `6301-6`, and `L` is not in `10^9/L`.
-3. Code, not the model, derives the typed fields: numbers, UCUM units, ranges (`0.8 to 1.2` or `0.8 - 1.2`), `N`, `H`, or `L`, and dates. For this it also reads `12.03.1961`, `1961-03-12`, and `22.10.2026 08:10`, which the parser does not. Only `parseWithFallback()` builds a record from a reading, so every such record carries `held`.
+**Code reads the document** with synonyms for keys and column headers (`readWide()`, not exported):
+
+- The patient name is the whole name part of the one patient line, up to the first comma or `born`. The birth date is the one date that the patient line and the birth date lines give.
+- The type comes from the kind in the heading: `lab report` and similar kinds give a lab result, `discharge report` and similar kinds give a rehab report. A table under any other kind gives no record.
+- Each key field comes only from its own keys, for example `Sample taken`, `Collected`, or `Collection date` for `sampleTaken`. A field found on two lines with different values gives no record.
+- Each lab field comes from the one column whose header names it, for example `Result` or `Value`, never `Previous`. A field with no such column, or with two, gives no record. Every body row becomes a lab row.
+- Ranges such as `0.8 to 1.2`, `0.8 - 1.2`, `25 – 37`, `25 — 37`, or `25 − 37` are read. A written range that cannot be read, such as `< 37` or `25 bis 37`, gives no record, so a value outside it never passes as normal. A result that is not a number, or a LOINC code with a wrong check digit, gives no record either.
+- The conclusion is all the free text, as in the parser, and the sections are the `##` sections.
+- Dates may also be written `12.03.1961`, `1961-03-12`, or `22.10.2026 08:10`.
+
+If code cannot read the file, the model is not called and the uploader gets the reasons.
+
+**The model is a second reader.** It reads the same document on its own and returns the fields that carry meaning (`modelReadingSchema`): type, organisation, kind, patient name and birth date, the key fields, and every lab row as written. Its reading must agree with code's in each of them: the same text, white space aside, and the same birth date. If it agrees, the record is code's record, held. If it does not, nothing is filed from it, and `held.unverified` lists the model's values that differ. The model can stop a record but never change one.
 
 | Outcome | Result | What happens |
 |---|---|---|
 | The parser reads the file | `{ ok: true, document }` | Normal flow, the model is not called |
-| A safety refusal, from the parser or from the fallback's own checks | `{ ok: false, errors, safety }` | As without the fallback, the model is not called |
-| No key, the model call fails, or its answer does not fit the schema | The parser's `{ ok: false, errors, safety: [] }` | As without the fallback |
-| Every value verified and the typed fields derived | `{ ok: true, document, held }` | Held for Dr. Hofer with the typed record |
-| A value does not come from its place in the document | `{ ok: false, errors, held }` | Held for Dr. Hofer with the file only. `held.unverified` lists the failing values |
-| Every value verified, but they do not make a record, for example a date that cannot be read | `{ ok: false, errors, held }` | Held with the file only. The reason asks Dr. Hofer to check the file, since there is no record to accept |
+| A safety refusal, from the parser or from the fallback | `{ ok: false, errors, safety }` | As without the fallback, the model is not called |
+| No key, or code cannot read the file | `{ ok: false, errors, safety: [] }` | As without the fallback, the model is not called |
+| The model call fails, or its answer does not fit the schema | The parser's `{ ok: false, errors, safety: [] }` | As without the fallback |
+| The model's reading agrees with code's | `{ ok: true, document, held }` | Held for Dr. Hofer with the record |
+| The model's reading differs from code's | `{ ok: false, errors, held }` | Held for Dr. Hofer with the file only. `held.unverified` lists the differing values |
 
-`held.reason` goes into the held notice and names no document content. `held.unverified` quotes document text, so it may appear in the widget but never in Matrix or the audit log. Accepting or rejecting a held answer is the widget's job (T05). Wiring the fallback into the upload is part of the answer flow, which calls `parseWithFallback(markdown, anthropicReader())` in place of `parseDocument(markdown)`. The test fixture `src/server/documents/fixtures/lab-result-maria-beispiel-other-format.md` is Maria's lab result with another heading, other key and column names, dotted dates, and ranges written with `-`.
+`held.reason` goes into the held notice and names no document content. `held.unverified` quotes the model's values, so it may appear in the widget but never in Matrix or the audit log. Accepting or rejecting a held answer is the widget's job (T05). Wiring the fallback into the upload is part of the answer flow, which calls `parseWithFallback(markdown, anthropicReader())` in place of `parseDocument(markdown)`. The test fixtures in `src/server/documents/fixtures/` are Maria's lab result and rehab report with another heading, other key and column names, dotted dates, and ranges written with `-`.
 
 ## Storage
 
