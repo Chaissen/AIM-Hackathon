@@ -31,8 +31,16 @@ export function ClinicAccess({ children }: { children: React.ReactNode }) {
       }
       const { WidgetApi } = await import("matrix-widget-api");
       if (disposed) return;
-      const origin = document.referrer ? new URL(document.referrer).origin : null;
-      api = new WidgetApi(new URLSearchParams(window.location.search).get("widgetId"), origin);
+      const params = new URLSearchParams(window.location.search);
+      // Element sets `no-referrer`, so its origin comes from the `parentUrl` it appends to the widget URL. A null origin
+      // would make postMessage target the widget's own origin, and Element would never see the widget.
+      const parent = URL.parse(params.get("parentUrl") || document.referrer);
+      if (!parent) {
+        clearTimeout(timeout);
+        fail("Open the ordy widget in Element to view patient information and the audit log.");
+        return;
+      }
+      api = new WidgetApi(params.get("widgetId"), parent.origin);
       api.once("ready", () => {
         void api!.requestOpenIDConnectToken().then((credentials) => {
           if (disposed) return;

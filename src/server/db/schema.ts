@@ -3,7 +3,6 @@ import { integer, jsonb, pgEnum, pgTable, primaryKey, serial, text, timestamp } 
 import type { DocumentType } from "@/lib/document-types";
 import { REQUEST_STATES } from "../requests/lifecycle";
 
-// The six event types the jury counts (track README, "Audit coverage"). See docs/ARCHITECTURE.md, "Audit log".
 export const auditEvent = pgEnum("audit_event", [
   "request_sent",
   "link_opened",
@@ -11,6 +10,7 @@ export const auditEvent = pgEnum("audit_event", [
   "answer_sent",
   "answer_filed",
   "misdelivery_caught",
+  "request_decided",
 ]);
 
 export const actorKind = pgEnum("actor_kind", ["network_member", "outside_person", "anonymous", "service"]);
