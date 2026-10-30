@@ -5,7 +5,15 @@ import { SignJWT } from "jose";
 
 import { env } from "@/env";
 
-import { type EidSession, gdaOidFromClaim, readEidSession, signEidSession } from "./eid-session";
+import {
+  type EidSession,
+  gdaOidFromClaim,
+  type LoginTransaction,
+  readEidSession,
+  readLoginTransaction,
+  signEidSession,
+  signLoginTransaction,
+} from "./eid-session";
 
 beforeEach(() => { env.ORDY_SECRET = randomBytes(32).toString("hex"); });
 
@@ -46,7 +54,6 @@ const session: EidSession = {
   familyName: "Brandl",
   level: "urn:eidgvat:eid.status.full",
   gdaOid: "1.2.40.0.34.3.2.99.1.2",
-  idToken: "eyJhbGciOiJSUzI1NiJ9.eyJnaXZlbl9uYW1lIjoiRXZhIn0.c2lnbmF0dXJl",
 };
 
 test("a signed session reads back unchanged", async () => {
@@ -58,17 +65,19 @@ test("a signed session reads back unchanged", async () => {
     familyName: "Brandl",
     level: "urn:eidgvat:eid.status.full",
     gdaOid: "1.2.40.0.34.3.2.99.1.2",
-    idToken: "eyJhbGciOiJSUzI1NiJ9.eyJnaXZlbl9uYW1lIjoiRXZhIn0.c2lnbmF0dXJl",
   });
 });
 
+// The first signature character carries six full bits, so changing it always changes the signature.
+const tamper = (cookie: string) => {
+  const at = cookie.lastIndexOf(".") + 1;
+  return cookie.slice(0, at) + (cookie[at] === "A" ? "B" : "A") + cookie.slice(at + 1);
+};
+
 test("a tampered or missing cookie reads as null", async () => {
   const cookie = await signEidSession(session);
-  // The first signature character carries six full bits, so changing it always changes the signature.
-  const at = cookie.lastIndexOf(".") + 1;
-  const tampered = cookie.slice(0, at) + (cookie[at] === "A" ? "B" : "A") + cookie.slice(at + 1);
   assert.equal((await readEidSession(cookie))?.requestId, 1);
-  assert.equal(await readEidSession(tampered), null);
+  assert.equal(await readEidSession(tamper(cookie)), null);
   assert.equal(await readEidSession(undefined), null);
 });
 
@@ -96,4 +105,36 @@ test("expired sessions and tokens without expiry are rejected", async () => {
   const noExpiry = await new SignJWT(session).setProtectedHeader({ alg: "HS256" }).setIssuedAt().sign(key);
   assert.equal(await readEidSession(expired), null);
   assert.equal(await readEidSession(noExpiry), null);
+});
+
+const transaction: LoginTransaction = {
+  token: "demo-token",
+  state: "Nj8Uq3Wv4tHVPcmXUbLzS0kZsNQ6ZhCl5Fq1Yd2WbEo",
+  nonce: "q2Lw0SHUJ6pVb5tW7e9mXo3dAc1RfGyKzNi8sTuEvJ4",
+  codeVerifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+};
+
+test("a signed login transaction reads back unchanged", async () => {
+  assert.deepEqual(await readLoginTransaction(await signLoginTransaction(transaction)), {
+    token: "demo-token",
+    state: "Nj8Uq3Wv4tHVPcmXUbLzS0kZsNQ6ZhCl5Fq1Yd2WbEo",
+    nonce: "q2Lw0SHUJ6pVb5tW7e9mXo3dAc1RfGyKzNi8sTuEvJ4",
+    codeVerifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+  });
+});
+
+test("a tampered or missing login transaction reads as null", async () => {
+  const cookie = await signLoginTransaction(transaction);
+  assert.equal((await readLoginTransaction(cookie))?.token, "demo-token");
+  assert.equal(await readLoginTransaction(tamper(cookie)), null);
+  assert.equal(await readLoginTransaction(undefined), null);
+});
+
+test("a login transaction never reads as a session, nor a session as a login transaction", async () => {
+  const signedTransaction = await signLoginTransaction(transaction);
+  const signedSession = await signEidSession(session);
+  assert.equal((await readLoginTransaction(signedTransaction))?.token, "demo-token");
+  assert.equal((await readEidSession(signedSession))?.requestId, 1);
+  assert.equal(await readEidSession(signedTransaction), null);
+  assert.equal(await readLoginTransaction(signedSession), null);
 });
