@@ -73,7 +73,7 @@ Every outside person sees the patient's name once the identity check passes. So 
 
 | Answer | Resources |
 |---|---|
-| Lab result | One Observation per test, with the LOINC code from the document, UCUM units, reference range, and interpretation. One DiagnosticReport groups the Observations and carries the original document. |
+| Lab result | One Observation per test, with the LOINC code from the document, UCUM units where the parser knows them, reference range, and interpretation. One DiagnosticReport groups the Observations and carries the original document. |
 | Rehab report | One DocumentReference with the report text attached and the stay period. |
 | Every answer | One Provenance that targets everything filed. It records who sent the answer, when, and how their identity was checked, including the signed ID Austria token. |
 | Every request | One Task that tracks the request from sent to completed and points at the filed results. |

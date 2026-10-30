@@ -46,7 +46,7 @@ export type LabRow = {
   value: number;
   /** Column `Result` as written, for example `1.0`. */
   valueText: string;
-  /** Column `Unit` in UCUM, `10^9/L` becomes `10*9/L`. Null when the column is empty, as for INR. */
+  /** Column `Unit` in UCUM, for example `10^9/L` becomes `10*9/L` (`ucum.ts`). Null when the column is empty, as for INR, or the unit is not on the UCUM list. */
   ucum: string | null;
   /** Column `Unit` as written. */
   unitText: string;
