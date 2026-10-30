@@ -1,5 +1,3 @@
-import { isSubset, nameWords } from "@/server/identity/names";
-
 import type { EhvdClient, EhvdFailure } from "./client";
 import type { GdaDescriptor } from "./soap";
 
@@ -20,10 +18,26 @@ export const isActive = (gda: GdaDescriptor) => gda.status.ehvdstatus === "Aktiv
 /** One of `codes` from `system` in `values`, which the eHVD writes as `<code system OID>:<code>`. */
 export const hasCode = (values: string[], system: string, codes: string[]) => codes.some((code) => values.includes(`${system}:${code}`));
 
-/** The same name words, both ways. Used for organisations, whose names have no given and family part. */
+const SPELL_OUT: Record<string, string> = { ä: "ae", ö: "oe", ü: "ue", ß: "ss" };
+
+/**
+ * An organisation name's words in order, lowercase, with umlauts spelled out and accents dropped. Unlike a person's
+ * name words it keeps titles, since "Labor Dr. Huber" and "Labor Prof. Huber" are two organisations.
+ */
+const organisationWords = (name: string) =>
+  name
+    .normalize("NFC")
+    .toLowerCase()
+    .replace(/[äöüß]/g, (c) => SPELL_OUT[c])
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+
+/** The same words in the same order, so the names differ at most in case, punctuation, and spelling, such as ß and ss. */
 export const sameOrganisationName = (a: string, b: string) => {
-  const [x, y] = [nameWords(a), nameWords(b)];
-  return x.size > 0 && x.size === y.size && isSubset(x, y);
+  const [x, y] = [organisationWords(a), organisationWords(b)];
+  return x.length > 0 && x.length === y.length && x.every((word, i) => word === y[i]);
 };
 
 /**

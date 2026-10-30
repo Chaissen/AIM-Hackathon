@@ -61,10 +61,14 @@ test("Dr. Brandl's lab result passes through the OID in her login", async () => 
 });
 
 test("without the claim, or from another sender, the name search confirms her", async () => {
-  for (const [sender, senderIsResponsible] of [[{ ...eva, gdaOid: null }, true], [{ givenName: "Thomas", familyName: "Wagner", gdaOid: null }, false]] as const) {
+  // Only the claim proves that the sender is the responsible person, not the name alone.
+  for (const sender of [{ ...eva, gdaOid: null }, { givenName: "Thomas", familyName: "Wagner", gdaOid: null }]) {
     const check = await run({ document: lab(), sender });
-    assert.deepEqual(check.verdict === "pass" && [check.via, check.senderIsResponsible], ["search", senderIsResponsible], sender.givenName);
+    assert.deepEqual(check.verdict === "pass" && [check.via, check.senderIsResponsible], ["search", false], sender.givenName);
   }
+  // Punctuation after the name does not end up in the search.
+  const dotted = lab((m) => m.replace("Validated by: Dr. Eva Brandl, lab physician", "Validated by: Dr. Eva Brandl., lab physician"));
+  assert.equal((await run({ document: dotted, sender: stefan })).verdict, "pass");
 });
 
 test("Dr. Leitner's rehab report sent by Stefan Kern passes", async () => {
@@ -101,11 +105,10 @@ test("a name without a given name never passes, not even from the sender with th
   }
 });
 
-test("the search hits must carry the document's name, however the eHVD matches names", async () => {
-  // An eHVD that ignores the first name would return every Brandl, and Eva is the only one at Labor Kanalstraße.
-  const lax: EhvdClient = { getGda: (query) => client.getGda(query), gdaSearch: (query) => client.gdaSearch({ ...query, firstname: undefined }) };
+test("the search hits must carry the document's name", async () => {
+  // The search for *Brandl* returns Dr. Eva Brandl, the only Brandl at Labor Kanalstraße, but she is not Erika.
   const document = lab((m) => m.replace("Validated by: Dr. Eva Brandl, lab physician", "Validated by: Dr. Erika Brandl, lab physician"));
-  const check = await checkRelease({ document, org: "Labor Kanalstraße", sender: stefan }, lax);
+  const check = await run({ document, sender: stefan });
   assert.deepEqual(held(check), { reason: "not_listed", sentence: "The eHVD does not list Dr. Erika Brandl." });
 });
 
@@ -120,10 +123,25 @@ test("the search asks for every family name that contains the document's, and co
   const namesake = editPeople((gdas) =>
     gdas.map((gda) => (gda.id.id === BRANDL_HUBER ? { ...gda, status: { ehvdstatus: "Aktiv", elgastatus: "Aktiv" }, relations: { ...gda.relations, memberof: [LAB_OID] } } : gda)),
   );
-  assert.deepEqual(held(await checkRelease({ document: lab(), org: "Labor Kanalstraße", sender: stefan }, namesake)), {
-    reason: "several_matches",
-    sentence: "The eHVD lists more than one Dr. Eva Brandl at Labor Kanalstraße.",
-  });
+  // Also when Dr. Brandl sends it with her claim: the name in the document could be either.
+  for (const sender of [stefan, eva]) {
+    assert.deepEqual(held(await checkRelease({ document: lab(), org: "Labor Kanalstraße", sender }, namesake)), {
+      reason: "several_matches",
+      sentence: "The eHVD lists more than one Dr. Eva Brandl at Labor Kanalstraße.",
+    });
+  }
+
+  // A double family name is searched by its longest part, so "Huber-Brandl" counts for "Brandl-Huber" too.
+  const swappedName = editPeople((gdas) =>
+    gdas.flatMap((gda) => {
+      if (gda.id.id !== BRANDL_HUBER) return [gda];
+      const member = { ...gda, status: { ehvdstatus: "Aktiv", elgastatus: "Aktiv" }, relations: { ...gda.relations, memberof: [LAB_OID] } };
+      return [member, { ...member, id: { ...gda.id, id: "1.2.40.0.34.3.2.99.7.2" }, surname: "Huber-Brandl" }];
+    }),
+  );
+  const doubleName = lab((m) => m.replace("Dr. Eva Brandl, lab physician", "Dr. Eva Brandl-Huber, lab physician"));
+  const several = await checkRelease({ document: doubleName, org: "Labor Kanalstraße", sender: stefan }, swappedName);
+  assert.equal(several.verdict === "hold" && several.reason, "several_matches");
 });
 
 test("a family name too common for one answer adds the first given name, and holds when that is still too many", async () => {
@@ -139,8 +157,8 @@ test("a family name too common for one answer adds the first given name, and hol
   const narrowed = await checkRelease({ document: lab(), org: "Labor Kanalstraße", sender: stefan }, common(false));
   assert.equal(narrowed.verdict === "pass" && narrowed.practitioner.id.id, EVA_OID);
   assert.deepEqual(queries, [
-    { surname: "*Brandl*", maxResults: 200 },
-    { surname: "*Brandl*", maxResults: 200, firstname: "*Eva*" },
+    { surname: "*Brandl*", maxResults: 200, ehvdstatus: "Inaktiv" },
+    { surname: "*Brandl*", maxResults: 200, ehvdstatus: "Inaktiv", firstname: "*Eva*" },
   ]);
   assert.deepEqual(held(await checkRelease({ document: lab(), org: "Labor Kanalstraße", sender: stefan }, common(true))), {
     reason: "too_many_matches",
@@ -154,7 +172,19 @@ test("an inactive physician, or two with the same name, are held as such", async
     reason: "not_active",
     sentence: "The eHVD lists Dr. Eva Brandl as not active.",
   });
+  const inactiveCheck = await checkRelease({ document: lab(), org: "Labor Kanalstraße", sender: stefan }, inactive);
+  assert.equal(inactiveCheck.verdict === "hold" && inactiveCheck.practitioner?.id.id, EVA_OID);
   const twins = editPeople((gdas) => gdas.flatMap((gda) => (gda.id.id === EVA_OID ? [gda, { ...gda, id: { ...gda.id, id: "1.2.40.0.34.3.2.99.7.1" } }] : [gda])));
+  // Two inactive ones: the hold names no practitioner, since either could be meant.
+  const inactiveTwins = editPeople((gdas) =>
+    gdas.flatMap((gda) => {
+      if (gda.id.id !== EVA_OID) return [gda];
+      const off = { ...gda, status: { ehvdstatus: "Inaktiv", elgastatus: "Inaktiv" } };
+      return [off, { ...off, id: { ...gda.id, id: "1.2.40.0.34.3.2.99.7.1" } }];
+    }),
+  );
+  const ambiguous = await checkRelease({ document: lab(), org: "Labor Kanalstraße", sender: stefan }, inactiveTwins);
+  assert.deepEqual(ambiguous.verdict === "hold" && [ambiguous.reason, ambiguous.practitioner], ["not_active", null]);
   assert.deepEqual(held(await checkRelease({ document: lab(), org: "Labor Kanalstraße", sender: stefan }, twins)), {
     reason: "several_matches",
     sentence: "The eHVD lists more than one Dr. Eva Brandl at Labor Kanalstraße.",
@@ -187,6 +217,9 @@ test("the organisation must be listed once, under the name the request went to",
     reason: "not_searchable",
     sentence: "The eHVD cannot be searched for Labor Kanalstraße (Wien).",
   });
+  // A title is part of an organisation's name: "Med Labor Kanalstraße" is another organisation.
+  const titled = await run({ document: lab(), org: "Med Labor Kanalstraße" });
+  assert.equal(titled.verdict === "hold" && titled.reason, "organisation_differs");
   // Typed without ß: the eHVD matches exactly, so the heading's spelling finds the lab.
   const typed = await run({ document: lab(), org: "Labor Kanalstrasse" });
   assert.equal(typed.verdict === "pass" && typed.organisation.id.id, LAB_OID);
@@ -213,7 +246,10 @@ test("the OID in the login must belong to the person the document names", async 
   const martin = await run({ document: lab(), sender: { ...eva, gdaOid: "1.2.40.0.34.3.2.99.1.4" } });
   assert.equal(martin.verdict === "hold" && martin.reason, "claim_differs");
   const unknown = await run({ document: lab(), sender: { ...eva, gdaOid: "1.2.40.0.34.3.2.99.9.1" } });
-  assert.equal(unknown.verdict === "hold" && unknown.reason, "not_listed");
+  assert.deepEqual(held(unknown), {
+    reason: "claim_not_listed",
+    sentence: "The eHVD has no person entry for the sender's ID Austria login, so it cannot confirm Dr. Eva Brandl.",
+  });
   // An answer for another OID than the one asked for.
   const swapped: EhvdClient = { getGda: () => client.getGda({ id: EVA_OID }), gdaSearch: (query) => client.gdaSearch(query) };
   const other = await checkRelease({ document: lab(), org: "Labor Kanalstraße", sender: { ...eva, gdaOid: "1.2.40.0.34.3.2.99.1.4" } }, swapped);

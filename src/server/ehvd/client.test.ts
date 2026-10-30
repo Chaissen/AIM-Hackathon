@@ -164,6 +164,7 @@ test("values that break the field rules are never sent", async () => {
     [{ surname: "Br*andl", maxResults: 10 }, "surname"],
     [{ surname: "**", maxResults: 10 }, "surname"],
     [{ firstname: "*Ö*", surname: "Brandl", maxResults: 10 }, "firstname"],
+    [{ surname: "Brandl\u2163", maxResults: 10 }, "surname"], // Latin script, but a numeral, not a letter
     [{ surname: "Brandl & Co", maxResults: 10 }, "surname"],
     [{ surname: " Brandl", maxResults: 10 }, "surname"],
     [{ surname: "Brandl", maxResults: 201 }, "maxResults"],

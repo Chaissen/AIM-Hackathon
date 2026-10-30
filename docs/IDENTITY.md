@@ -304,7 +304,7 @@ The release check runs when the answer arrives, after the patient check.
 
 How the request service finds the responsible person in the eHVD:
 
-- If the responsible person is the sender and the login carried the GDA claim, it uses the OID from the claim. The entry must carry the name from the document. That is the usual case for lab results.
+- If the responsible person is the sender and the login carried the GDA claim, it uses the OID from the claim. The entry must carry the name from the document, and no other active member of the organisation may carry it too. That is the usual case for lab results.
 - Otherwise it searches the eHVD for the name from the document and keeps active entries that carry that name and are members of the organisation. Exactly one hit counts. [eHVD](EHVD.md#how-ordy-uses-the-ehvd-t15) has the calls.
 
 The Provenance names the responsible person as `author` and the sender as `informant` when they differ. [FHIR model](FHIR.md#provenance) has the details.
